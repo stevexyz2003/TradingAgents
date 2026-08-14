@@ -8,9 +8,11 @@ canonical pattern:
    not support structured output (rare; mostly older Ollama models), the
    wrap is skipped and the agent uses free-text generation instead.
 2. At invocation, run the structured call and render the result back to
-   markdown. If the structured call itself fails for any reason
-   (malformed JSON from a weak model, transient provider issue), fall
-   back to a plain ``llm.invoke`` so the pipeline never blocks.
+   markdown. If the structured call fails (malformed JSON from a weak
+   model, transient provider issue), retry once with the validation error
+   appended to the prompt, then fall back to a plain ``llm.invoke`` so
+   the pipeline never blocks. Budget aborts (``BudgetExceededError``)
+   are re-raised untouched — they must end the run, not degrade to prose.
 
 Centralising the pattern here keeps the agent factories small and ensures
 all three agents log the same warnings when fallback fires.
@@ -23,9 +25,29 @@ from typing import Any, Callable, Optional, TypeVar
 
 from pydantic import BaseModel
 
+from tradingagents.budget import BudgetExceededError
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _with_error_context(prompt: Any, exc: Exception) -> Any:
+    """Return a retry prompt carrying the schema-validation error.
+
+    Prompt-form agnostic: strings get the context appended, message-dict
+    lists (Trader form) get a new user message appended to a NEW list —
+    the original list is never mutated. Unknown shapes are returned as-is.
+    """
+    context = (
+        f"Your previous response failed schema validation with this error: {exc}. "
+        "Respond again and strictly match the required schema."
+    )
+    if isinstance(prompt, str):
+        return prompt + "\n\n" + context
+    if isinstance(prompt, list):
+        return list(prompt) + [{"role": "user", "content": context}]
+    return prompt
 
 
 def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Optional[Any]:
@@ -52,22 +74,37 @@ def invoke_structured_or_freetext(
     render: Callable[[T], str],
     agent_name: str,
 ) -> str:
-    """Run the structured call and render to markdown; fall back to free-text on any failure.
+    """Run the structured call; retry once with error context, then fall back to prose.
 
     ``prompt`` is whatever the underlying LLM accepts (a string for chat
     invocations, a list of message dicts for chat models that take that
-    shape). The same value is forwarded to the free-text path so the
-    fallback sees the same input the structured call did.
+    shape). The free-text fallback always receives the ORIGINAL prompt —
+    the prose LLM is not schema-bound, so error context would be noise.
+
+    ``BudgetExceededError`` is re-raised untouched at both stages: a budget
+    abort must end the run, never be repackaged as a schema failure.
     """
     if structured_llm is not None:
         try:
             result = structured_llm.invoke(prompt)
             return render(result)
+        except BudgetExceededError:
+            raise
         except Exception as exc:
             logger.warning(
-                "%s: structured-output invocation failed (%s); retrying once as free text",
+                "%s: structured-output invocation failed (%s); retrying once with error context",
                 agent_name, exc,
             )
+            try:
+                result = structured_llm.invoke(_with_error_context(prompt, exc))
+                return render(result)
+            except BudgetExceededError:
+                raise
+            except Exception as retry_exc:
+                logger.warning(
+                    "%s: structured retry failed (%s); falling back to free text",
+                    agent_name, retry_exc,
+                )
 
     response = plain_llm.invoke(prompt)
     return response.content
