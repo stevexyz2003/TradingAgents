@@ -25,6 +25,7 @@ from rich.align import Align
 from rich.rule import Rule
 
 from tradingagents.budget import BudgetConfigError, BudgetExceededError
+from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.llm_clients.factory import MissingAPIKeyError
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -959,6 +960,15 @@ def run_analysis(checkpoint: bool = False, max_cost: Optional[float] = None):
     # Initialize the graph with callbacks bound to LLMs. Budget misconfiguration
     # (max_cost without model_cost_rates) and missing provider credentials
     # fail fast here with a clear message instead of crashing mid-run.
+    # The ticker flows into results/report paths below — reject path-escaping
+    # values before anything is created on disk (same class as #618, which
+    # covers only the graph-side log/checkpoint paths).
+    try:
+        safe_ticker_component(selections["ticker"])
+    except ValueError as exc:
+        console.print(f"[red]Invalid ticker: {exc}[/red]")
+        raise typer.Exit(1)
+
     try:
         graph = TradingAgentsGraph(
             selected_analyst_keys,
