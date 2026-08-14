@@ -25,6 +25,7 @@ from rich.align import Align
 from rich.rule import Rule
 
 from tradingagents.budget import BudgetConfigError, BudgetExceededError
+from tradingagents.llm_clients.factory import MissingAPIKeyError
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
@@ -956,8 +957,8 @@ def run_analysis(checkpoint: bool = False, max_cost: Optional[float] = None):
     selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
 
     # Initialize the graph with callbacks bound to LLMs. Budget misconfiguration
-    # (max_cost without model_cost_rates) fails fast here with a clear message
-    # instead of silently counting the run at zero cost.
+    # (max_cost without model_cost_rates) and missing provider credentials
+    # fail fast here with a clear message instead of crashing mid-run.
     try:
         graph = TradingAgentsGraph(
             selected_analyst_keys,
@@ -965,7 +966,7 @@ def run_analysis(checkpoint: bool = False, max_cost: Optional[float] = None):
             debug=True,
             callbacks=[stats_handler],
         )
-    except BudgetConfigError as exc:
+    except (BudgetConfigError, MissingAPIKeyError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
