@@ -306,6 +306,11 @@ class TradingAgentsGraph:
         """
         self.ticker = company_name
 
+        # Budgets are per run: a reused graph instance must not inherit the
+        # spend of an earlier propagate()/stream_run() call.
+        if self.spend_tracker is not None:
+            self.spend_tracker.reset()
+
         # Recompile with a checkpointer if the user opted in.
         checkpointer_ctx = None
         if self.config.get("checkpoint_enabled"):
@@ -360,6 +365,14 @@ class TradingAgentsGraph:
                     exc,
                 )
                 raise
+
+            # Normal exhaustion means the run completed: clear the checkpoint
+            # here (not in _run_graph) so the CLI stream path gets the same
+            # stale-state protection as the Python API.
+            if self.config.get("checkpoint_enabled"):
+                clear_checkpoint(
+                    self.config["data_cache_dir"], company_name, str(trade_date)
+                )
         finally:
             if checkpointer_ctx is not None:
                 checkpointer_ctx.__exit__(None, None, None)
@@ -385,12 +398,6 @@ class TradingAgentsGraph:
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
         )
-
-        # Clear checkpoint on successful completion to avoid stale state.
-        if self.config.get("checkpoint_enabled"):
-            clear_checkpoint(
-                self.config["data_cache_dir"], company_name, str(trade_date)
-            )
 
         return final_state, self.process_signal(final_state["final_trade_decision"])
 

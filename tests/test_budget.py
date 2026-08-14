@@ -75,12 +75,13 @@ class TestSpendTracker:
         with pytest.raises(BudgetExceededError, match="[Cc]ost"):
             tracker.on_chat_model_start({}, [])
 
-    def test_unknown_model_contributes_zero_cost(self):
-        """Missing rate entry warns once and adds zero cost (never crashes)."""
+    def test_unknown_model_billed_at_fallback_rate(self):
+        """Missing rate entry warns once and bills at the most expensive
+        configured rate — zero-cost counting would silently disable the budget."""
         tracker = SpendTracker(max_cost=5.0, model_cost_rates={"other": {"input": 1, "output": 1}})
         tracker.on_llm_end(_llm_result(1_000, 1_000, model_name="unknown-model"))
         tracker.on_llm_end(_llm_result(1_000, 1_000, model_name="unknown-model"))
-        assert tracker.cost == 0.0
+        assert tracker.cost == pytest.approx(0.004)  # 2x (1k+1k tokens @ $1/1M each)
         tracker.on_chat_model_start({}, [])  # still under budget
 
     def test_defensive_extraction_never_crashes(self):
@@ -165,6 +166,7 @@ class TestStreamRunBudgetAbort:
             raise BudgetExceededError("cost budget exceeded")
 
         mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.spend_tracker = None
         mock_graph.config = {"checkpoint_enabled": False, "results_dir": str(tmp_path)}
         mock_graph.graph = MagicMock()
         mock_graph.graph.stream = fake_stream
@@ -193,6 +195,7 @@ class TestStreamRunBudgetAbort:
             yield from states
 
         mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.spend_tracker = None
         mock_graph.config = {"checkpoint_enabled": False, "results_dir": str(tmp_path)}
         mock_graph.graph = MagicMock()
         mock_graph.graph.stream = fake_stream
@@ -208,3 +211,163 @@ class TestStreamRunBudgetAbort:
 
         assert chunks == states
         mock_graph._log_state.assert_not_called()
+
+
+class TestRateResolution:
+    """Alias/revision model names must not silently disable cost enforcement."""
+
+    def test_exact_match_wins(self):
+        rates = {"gpt-5.4": {"input": 10.0, "output": 30.0}}
+        tracker = SpendTracker(max_cost=5.0, model_cost_rates=rates)
+        assert tracker._resolve_rate("gpt-5.4") == rates["gpt-5.4"]
+
+    def test_revision_name_prefix_matches_configured_rate(self):
+        """Providers report revision names like gpt-5.4-2026-01-01."""
+        rates = {"gpt-5.4": {"input": 10.0, "output": 30.0}}
+        tracker = SpendTracker(max_cost=5.0, model_cost_rates=rates)
+        assert tracker._resolve_rate("gpt-5.4-2026-01-01") == rates["gpt-5.4"]
+
+    def test_unknown_model_billed_at_most_expensive_rate(self):
+        rates = {
+            "cheap": {"input": 1.0, "output": 3.0},
+            "expensive": {"input": 10.0, "output": 30.0},
+        }
+        tracker = SpendTracker(max_cost=5.0, model_cost_rates=rates)
+        assert tracker._resolve_rate("totally-unknown") == rates["expensive"]
+
+    def test_unknown_model_cost_accumulates_nonzero(self):
+        rates = {"gpt-5.4": {"input": 10.0, "output": 30.0}}
+        tracker = SpendTracker(max_cost=5.0, model_cost_rates=rates)
+        tracker.on_llm_end(_llm_result(1_000_000, 0, model_name="alias-model"))
+        assert tracker.cost == pytest.approx(10.0)
+
+    def test_no_rates_configured_returns_none(self):
+        tracker = SpendTracker(max_tokens=100)
+        assert tracker._resolve_rate("anything") is None
+
+
+class TestSpendTrackerReset:
+
+    def test_reset_zeroes_counters(self):
+        rates = {"gpt-5.4": {"input": 10.0, "output": 30.0}}
+        tracker = SpendTracker(max_cost=5.0, model_cost_rates=rates)
+        tracker.on_llm_end(_llm_result(1_000_000, 500_000))
+        assert tracker.tokens_in > 0 and tracker.cost > 0
+        tracker.reset()
+        assert tracker.tokens_in == 0
+        assert tracker.tokens_out == 0
+        assert tracker.cost == 0.0
+
+    def test_stream_run_resets_tracker_per_run(self, tmp_path):
+        """A reused graph instance must not inherit spend from a prior run."""
+        tracker = SpendTracker(max_tokens=1_000)
+        tracker.on_llm_end(_llm_result(600, 300))  # leftover from "run 1"
+
+        def fake_stream(state, **kwargs):
+            yield {"messages": [], "step": 1}
+
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.spend_tracker = tracker
+        mock_graph.config = {"checkpoint_enabled": False, "results_dir": str(tmp_path)}
+        mock_graph.graph = MagicMock()
+        mock_graph.graph.stream = fake_stream
+        mock_graph.propagator = MagicMock()
+        mock_graph.propagator.create_initial_state.return_value = {"messages": []}
+        mock_graph.propagator.get_graph_args.return_value = {}
+        mock_graph.memory_log = MagicMock()
+        mock_graph.memory_log.get_past_context.return_value = ""
+
+        list(TradingAgentsGraph.stream_run(mock_graph, "AAPL", "2026-01-02"))
+
+        assert tracker.tokens_in == 0
+        assert tracker.tokens_out == 0
+        assert tracker.cost == 0.0
+
+    def test_on_llm_end_with_none_response_is_ignored(self):
+        tracker = SpendTracker(max_tokens=100)
+        tracker.on_llm_end(None)  # must not raise despite raise_error=True
+
+
+class TestStreamRunCheckpointClear:
+
+    def test_stream_run_clears_checkpoint_on_success(self, tmp_path, monkeypatch):
+        """Success-clear lives in stream_run so the CLI path gets it too."""
+        import tradingagents.graph.trading_graph as tg
+
+        cleared = []
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=MagicMock())
+        ctx.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setattr(tg, "get_checkpointer", lambda *a, **k: ctx)
+        monkeypatch.setattr(tg, "checkpoint_step", lambda *a, **k: None)
+        monkeypatch.setattr(tg, "thread_id", lambda *a, **k: "tid")
+        monkeypatch.setattr(
+            tg, "clear_checkpoint", lambda *a, **k: cleared.append(a)
+        )
+
+        def fake_stream(state, **kwargs):
+            yield {"messages": [], "step": 1}
+
+        compiled = MagicMock()
+        compiled.stream = fake_stream
+
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.spend_tracker = None
+        mock_graph.config = {
+            "checkpoint_enabled": True,
+            "data_cache_dir": str(tmp_path),
+            "results_dir": str(tmp_path),
+        }
+        mock_graph.workflow = MagicMock()
+        mock_graph.workflow.compile.return_value = compiled
+        mock_graph.propagator = MagicMock()
+        mock_graph.propagator.create_initial_state.return_value = {"messages": []}
+        mock_graph.propagator.get_graph_args.return_value = {}
+        mock_graph.memory_log = MagicMock()
+        mock_graph.memory_log.get_past_context.return_value = ""
+
+        list(TradingAgentsGraph.stream_run(mock_graph, "AAPL", "2026-01-01"))
+
+        assert cleared == [(str(tmp_path), "AAPL", "2026-01-01")]
+
+    def test_stream_run_keeps_checkpoint_on_budget_abort(self, tmp_path, monkeypatch):
+        """Abort must stay resumable: no clear on BudgetExceededError."""
+        import tradingagents.graph.trading_graph as tg
+
+        cleared = []
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=MagicMock())
+        ctx.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setattr(tg, "get_checkpointer", lambda *a, **k: ctx)
+        monkeypatch.setattr(tg, "checkpoint_step", lambda *a, **k: None)
+        monkeypatch.setattr(tg, "thread_id", lambda *a, **k: "tid")
+        monkeypatch.setattr(
+            tg, "clear_checkpoint", lambda *a, **k: cleared.append(a)
+        )
+
+        def fake_stream(state, **kwargs):
+            yield {"messages": [], "step": 1}
+            raise BudgetExceededError("over budget")
+
+        compiled = MagicMock()
+        compiled.stream = fake_stream
+
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.spend_tracker = None
+        mock_graph.config = {
+            "checkpoint_enabled": True,
+            "data_cache_dir": str(tmp_path),
+            "results_dir": str(tmp_path),
+        }
+        mock_graph.workflow = MagicMock()
+        mock_graph.workflow.compile.return_value = compiled
+        mock_graph.propagator = MagicMock()
+        mock_graph.propagator.create_initial_state.return_value = {"messages": []}
+        mock_graph.propagator.get_graph_args.return_value = {}
+        mock_graph.memory_log = MagicMock()
+        mock_graph.memory_log.get_past_context.return_value = ""
+
+        with pytest.raises(BudgetExceededError):
+            list(TradingAgentsGraph.stream_run(mock_graph, "AAPL", "2026-01-01"))
+
+        assert cleared == []

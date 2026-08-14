@@ -99,6 +99,18 @@ class SpendTracker(BaseCallbackHandler):
         self.cost = 0.0
         self._warned_models = set()
 
+    def reset(self) -> None:
+        """Zero the per-run counters.
+
+        Budgets are per *run*: a reused graph instance must not inherit the
+        spend of earlier ``propagate()``/``stream_run()`` calls, or the limit
+        trips runs early (or immediately) after the first one.
+        """
+        with self._lock:
+            self.tokens_in = 0
+            self.tokens_out = 0
+            self.cost = 0.0
+
     # -- budget check (before the next call goes out) ----------------------
 
     def _check_budget(self) -> None:
@@ -141,25 +153,55 @@ class SpendTracker(BaseCallbackHandler):
     # -- accumulation -------------------------------------------------------
 
     def _resolve_rate(self, model_name: Optional[str]) -> Optional[Dict[str, Any]]:
-        """Look up the rate entry for model_name; warn once when unusable."""
-        entry = self.model_cost_rates.get(model_name) if model_name else None
-        if not isinstance(entry, dict):
-            key = model_name or "<unknown model>"
-            if key not in self._warned_models:
-                self._warned_models.add(key)
-                logger.warning(
-                    "No cost rate configured for model %s — this call "
-                    "contributes zero cost to the budget.",
-                    key,
-                )
+        """Resolve the rate entry for ``model_name``.
+
+        Providers routinely report revision/deployment names (e.g.
+        ``gpt-5.4-2026-01-01``) that extend the configured name, so an exact
+        miss falls back to a prefix match in either direction. A model that
+        matches nothing is billed at the most expensive configured rate —
+        overestimating is the only safe direction once ``max_cost_per_run``
+        is active; counting zero would silently disable the budget.
+        """
+        if model_name:
+            entry = self.model_cost_rates.get(model_name)
+            if isinstance(entry, dict):
+                return entry
+            for configured, rates in self.model_cost_rates.items():
+                if not isinstance(rates, dict) or not isinstance(configured, str):
+                    continue
+                if model_name.startswith(configured) or configured.startswith(
+                    model_name
+                ):
+                    return rates
+
+        usable = [r for r in self.model_cost_rates.values() if isinstance(r, dict)]
+        if not usable:
             return None
-        return entry
+
+        key = model_name or "<unknown model>"
+        if key not in self._warned_models:
+            self._warned_models.add(key)
+            logger.warning(
+                "No cost rate configured for model %s — billing it at the most "
+                "expensive configured rate so max_cost_per_run stays enforced.",
+                key,
+            )
+
+        def _rate_value(rate: Dict[str, Any]) -> float:
+            try:
+                return float(rate.get("input", 0) or 0) + float(
+                    rate.get("output", 0) or 0
+                )
+            except (TypeError, ValueError):
+                return 0.0
+
+        return max(usable, key=_rate_value)
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         """Accumulate token usage/cost; must never raise on malformed input."""
         try:
             generation = response.generations[0][0]
-        except (IndexError, TypeError):
+        except (IndexError, TypeError, AttributeError):
             return
 
         message = None
