@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [0.2.5] — 2026-08-14
+
+### Security
+
+- **Ticker validation before path use.** Tickers are validated before being
+  used as a path component; values that would escape the results directory
+  are rejected (path-traversal protection). (#618)
+
+### Added
+
+- **DeepSeek V4 thinking-mode round-trip** via a `DeepSeekChatOpenAI`
+  subclass, so reasoning content survives the request/response cycle.
+
 ## [0.2.4] — 2026-04-25
 
 ### Added
@@ -257,6 +270,7 @@ PRs from late 2025 also landed here.
   portfolio manager. LangGraph orchestration, yfinance data, per-agent
   BM25 memory, single-provider OpenAI integration, interactive CLI.
 
+[0.2.5]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.1...v0.2.2
