@@ -24,6 +24,7 @@ from rich import box
 from rich.align import Align
 from rich.rule import Rule
 
+from tradingagents.budget import BudgetConfigError, BudgetExceededError
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
@@ -926,7 +927,7 @@ def format_tool_args(args, max_length=80) -> str:
         return result[:max_length - 3] + "..."
     return result
 
-def run_analysis(checkpoint: bool = False):
+def run_analysis(checkpoint: bool = False, max_cost: Optional[float] = None):
     # First get all user selections
     selections = get_user_selections()
 
@@ -944,6 +945,8 @@ def run_analysis(checkpoint: bool = False):
     config["anthropic_effort"] = selections.get("anthropic_effort")
     config["output_language"] = selections.get("output_language", "English")
     config["checkpoint_enabled"] = checkpoint
+    if max_cost is not None:
+        config["max_cost_per_run"] = max_cost
 
     # Create stats callback handler for tracking LLM/tool calls
     stats_handler = StatsCallbackHandler()
@@ -952,13 +955,19 @@ def run_analysis(checkpoint: bool = False):
     selected_set = {analyst.value for analyst in selections["analysts"]}
     selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
 
-    # Initialize the graph with callbacks bound to LLMs
-    graph = TradingAgentsGraph(
-        selected_analyst_keys,
-        config=config,
-        debug=True,
-        callbacks=[stats_handler],
-    )
+    # Initialize the graph with callbacks bound to LLMs. Budget misconfiguration
+    # (max_cost without model_cost_rates) fails fast here with a clear message
+    # instead of silently counting the run at zero cost.
+    try:
+        graph = TradingAgentsGraph(
+            selected_analyst_keys,
+            config=config,
+            debug=True,
+            callbacks=[stats_handler],
+        )
+    except BudgetConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
 
     # Initialize message buffer with selected analysts
     message_buffer.init_for_analysis(selected_analyst_keys)
@@ -1051,9 +1060,26 @@ def run_analysis(checkpoint: bool = False):
         # (LLM tracking is handled separately via LLM constructor)
         args = graph.propagator.get_graph_args(callbacks=[stats_handler])
 
-        # Stream the analysis
+        # Stream the analysis through the shared stream_run path so the
+        # checkpointer, thread-id injection, and budget partial-save apply to
+        # the CLI exactly as they do to the Python API (the old direct
+        # graph.graph.stream bypassed all of them, leaving --checkpoint dead).
         trace = []
-        for chunk in graph.graph.stream(init_agent_state, **args):
+        budget_abort: Optional[BudgetExceededError] = None
+        stream = graph.stream_run(
+            selections["ticker"],
+            selections["analysis_date"],
+            init_agent_state=init_agent_state,
+            graph_args=args,
+        )
+        while True:
+            try:
+                chunk = next(stream)
+            except StopIteration:
+                break
+            except BudgetExceededError as exc:
+                budget_abort = exc
+                break
             # Process all messages in chunk, deduplicating by message ID
             for message in chunk.get("messages", []):
                 msg_id = getattr(message, "id", None)
@@ -1152,6 +1178,20 @@ def run_analysis(checkpoint: bool = False):
 
             trace.append(chunk)
 
+        if budget_abort is not None:
+            # Clean abort: the last graph state was already saved via
+            # _log_state inside stream_run; report sections written so far
+            # are on disk under reports/ (incremental save decorator).
+            live.stop()
+            console.print(f"\n[red]Budget limit reached:[/red] {budget_abort}")
+            console.print(
+                "[yellow]The last graph state was saved and the report "
+                "sections completed so far are under the results 'reports/' "
+                "directory. Re-run with --checkpoint to resume from the last "
+                "completed step.[/yellow]"
+            )
+            return
+
         # Get final state and decision
         final_state = trace[-1]
         decision = graph.process_signal(final_state["final_trade_decision"])
@@ -1209,12 +1249,17 @@ def analyze(
         "--clear-checkpoints",
         help="Delete all saved checkpoints before running (force fresh start).",
     ),
+    max_cost: Optional[float] = typer.Option(
+        None,
+        "--max-cost",
+        help="Abort the run once accumulated LLM cost (USD) exceeds this limit; requires model_cost_rates in config.",
+    ),
 ):
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
-    run_analysis(checkpoint=checkpoint)
+    run_analysis(checkpoint=checkpoint, max_cost=max_cost)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,16 @@ DEFAULT_CONFIG = {
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,
+    # Per-run budget enforcement (#582). None disables a limit.
+    # max_cost_per_run: USD cap on accumulated LLM cost; requires
+    # model_cost_rates entries for the configured deep/quick think models
+    # (fails fast at graph construction otherwise).
+    "max_cost_per_run": None,
+    # max_tokens_per_run: cap on total input+output tokens; rate-free.
+    "max_tokens_per_run": None,
+    # model_cost_rates: user-supplied, USD per 1M tokens per model, e.g.
+    # {"gpt-5.4": {"input": 10.0, "output": 30.0}}. No hardcoded price table.
+    "model_cost_rates": {},
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
     "output_language": "English",

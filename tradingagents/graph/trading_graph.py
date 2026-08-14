@@ -16,6 +16,7 @@ from langgraph.prebuilt import ToolNode
 from tradingagents.llm_clients import create_llm_client
 
 from tradingagents.agents import *
+from tradingagents.budget import BudgetExceededError, build_spend_tracker
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.dataflows.utils import safe_ticker_component
@@ -68,6 +69,14 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+
+        # Per-run budget enforcement (#582). build_spend_tracker raises
+        # BudgetConfigError here when max_cost_per_run is set without
+        # model_cost_rates — fail fast at graph construction, never count
+        # silently at zero cost.
+        self.spend_tracker = build_spend_tracker(self.config)
+        if self.spend_tracker is not None:
+            self.callbacks.append(self.spend_tracker)
 
         # Update the interface's config
         set_config(self.config)
@@ -128,7 +137,6 @@ class TradingAgentsGraph:
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
         self.graph = self.workflow.compile()
-        self._checkpointer_ctx = None
 
     def _get_provider_kwargs(self) -> Dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
@@ -265,21 +273,46 @@ class TradingAgentsGraph:
     def propagate(self, company_name, trade_date):
         """Run the trading agents graph for a company on a specific date.
 
-        When ``checkpoint_enabled`` is set in config, the graph is recompiled
-        with a per-ticker SqliteSaver so a crashed run can resume from the last
-        successful node on a subsequent invocation with the same ticker+date.
+        Checkpointer setup/cleanup lives in :meth:`stream_run`, which is the
+        shared streaming path for the Python API and the CLI.
         """
         self.ticker = company_name
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
         self._resolve_pending_entries(company_name)
 
+        return self._run_graph(company_name, trade_date)
+
+    def stream_run(
+        self, company_name, trade_date, *, init_agent_state=None, graph_args=None
+    ):
+        """Stream the trading graph, yielding the full state after each node.
+
+        Shared streaming path for the Python API (via ``propagate``) and the
+        CLI. Handles checkpointer setup/cleanup and thread-id injection when
+        ``checkpoint_enabled`` is set, and saves the last streamed state via
+        ``_log_state`` when a budget limit aborts the run mid-stream
+        (:class:`BudgetExceededError` is re-raised for the caller). The
+        checkpoint is NOT cleared on abort, so the run stays resumable with
+        ``--checkpoint``.
+
+        Args:
+            company_name: Ticker to analyze.
+            trade_date: Trade date for the run.
+            init_agent_state: Optional pre-built initial state. Defaults to
+                the propagator state with memory-log past context injected.
+            graph_args: Optional pre-built graph args (e.g. with extra
+                callbacks). Defaults to ``self.propagator.get_graph_args()``.
+        """
+        self.ticker = company_name
+
         # Recompile with a checkpointer if the user opted in.
+        checkpointer_ctx = None
         if self.config.get("checkpoint_enabled"):
-            self._checkpointer_ctx = get_checkpointer(
+            checkpointer_ctx = get_checkpointer(
                 self.config["data_cache_dir"], company_name
             )
-            saver = self._checkpointer_ctx.__enter__()
+            saver = checkpointer_ctx.__enter__()
             self.graph = self.workflow.compile(checkpointer=saver)
 
             step = checkpoint_step(
@@ -293,38 +326,52 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", company_name, trade_date)
 
         try:
-            return self._run_graph(company_name, trade_date)
+            if init_agent_state is None:
+                # Initialize state — inject memory log context for PM.
+                past_context = self.memory_log.get_past_context(company_name)
+                init_agent_state = self.propagator.create_initial_state(
+                    company_name, trade_date, past_context=past_context
+                )
+            if graph_args is None:
+                graph_args = self.propagator.get_graph_args()
+
+            # Inject thread_id so same ticker+date resumes, different date starts fresh.
+            if self.config.get("checkpoint_enabled"):
+                tid = thread_id(company_name, str(trade_date))
+                graph_args.setdefault("config", {}).setdefault("configurable", {})[
+                    "thread_id"
+                ] = tid
+
+            last_state = None
+            try:
+                for chunk in self.graph.stream(init_agent_state, **graph_args):
+                    last_state = chunk
+                    yield chunk
+            except BudgetExceededError as exc:
+                # Partial save: keep the last streamed state so nothing spent
+                # so far is lost. The checkpoint is intentionally NOT cleared
+                # (clear happens only on success), so the run is resumable.
+                if last_state is not None:
+                    self.curr_state = last_state
+                    self._log_state(trade_date, last_state)
+                logger.warning(
+                    "Run aborted by budget limit: %s — partial state saved; "
+                    "resume with --checkpoint",
+                    exc,
+                )
+                raise
         finally:
-            if self._checkpointer_ctx is not None:
-                self._checkpointer_ctx.__exit__(None, None, None)
-                self._checkpointer_ctx = None
+            if checkpointer_ctx is not None:
+                checkpointer_ctx.__exit__(None, None, None)
                 self.graph = self.workflow.compile()
 
     def _run_graph(self, company_name, trade_date):
         """Execute the graph and write the resulting state to disk and memory log."""
-        # Initialize state — inject memory log context for PM.
-        past_context = self.memory_log.get_past_context(company_name)
-        init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date, past_context=past_context
-        )
-        args = self.propagator.get_graph_args()
-
-        # Inject thread_id so same ticker+date resumes, different date starts fresh.
-        if self.config.get("checkpoint_enabled"):
-            tid = thread_id(company_name, str(trade_date))
-            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
-
-        if self.debug:
-            trace = []
-            for chunk in self.graph.stream(init_agent_state, **args):
-                if len(chunk["messages"]) == 0:
-                    pass
-                else:
-                    chunk["messages"][-1].pretty_print()
-                    trace.append(chunk)
-            final_state = trace[-1]
-        else:
-            final_state = self.graph.invoke(init_agent_state, **args)
+        final_state = None
+        for chunk in self.stream_run(company_name, trade_date):
+            if self.debug and chunk.get("messages"):
+                chunk["messages"][-1].pretty_print()
+            final_state = chunk
 
         # Store current state for reflection.
         self.curr_state = final_state
@@ -348,35 +395,37 @@ class TradingAgentsGraph:
         return final_state, self.process_signal(final_state["final_trade_decision"])
 
     def _log_state(self, trade_date, final_state):
-        """Log the final state to a JSON file."""
+        """Log the final (or partial, on budget abort) state to a JSON file.
+
+        Uses tolerant ``.get`` access throughout: partial states saved
+        mid-run are missing most keys.
+        """
+        investment_debate = final_state.get("investment_debate_state") or {}
+        risk_debate = final_state.get("risk_debate_state") or {}
         self.log_states_dict[str(trade_date)] = {
-            "company_of_interest": final_state["company_of_interest"],
-            "trade_date": final_state["trade_date"],
-            "market_report": final_state["market_report"],
-            "sentiment_report": final_state["sentiment_report"],
-            "news_report": final_state["news_report"],
-            "fundamentals_report": final_state["fundamentals_report"],
+            "company_of_interest": final_state.get("company_of_interest", ""),
+            "trade_date": final_state.get("trade_date", ""),
+            "market_report": final_state.get("market_report", ""),
+            "sentiment_report": final_state.get("sentiment_report", ""),
+            "news_report": final_state.get("news_report", ""),
+            "fundamentals_report": final_state.get("fundamentals_report", ""),
             "investment_debate_state": {
-                "bull_history": final_state["investment_debate_state"]["bull_history"],
-                "bear_history": final_state["investment_debate_state"]["bear_history"],
-                "history": final_state["investment_debate_state"]["history"],
-                "current_response": final_state["investment_debate_state"][
-                    "current_response"
-                ],
-                "judge_decision": final_state["investment_debate_state"][
-                    "judge_decision"
-                ],
+                "bull_history": investment_debate.get("bull_history", ""),
+                "bear_history": investment_debate.get("bear_history", ""),
+                "history": investment_debate.get("history", ""),
+                "current_response": investment_debate.get("current_response", ""),
+                "judge_decision": investment_debate.get("judge_decision", ""),
             },
-            "trader_investment_decision": final_state["trader_investment_plan"],
+            "trader_investment_decision": final_state.get("trader_investment_plan", ""),
             "risk_debate_state": {
-                "aggressive_history": final_state["risk_debate_state"]["aggressive_history"],
-                "conservative_history": final_state["risk_debate_state"]["conservative_history"],
-                "neutral_history": final_state["risk_debate_state"]["neutral_history"],
-                "history": final_state["risk_debate_state"]["history"],
-                "judge_decision": final_state["risk_debate_state"]["judge_decision"],
+                "aggressive_history": risk_debate.get("aggressive_history", ""),
+                "conservative_history": risk_debate.get("conservative_history", ""),
+                "neutral_history": risk_debate.get("neutral_history", ""),
+                "history": risk_debate.get("history", ""),
+                "judge_decision": risk_debate.get("judge_decision", ""),
             },
-            "investment_plan": final_state["investment_plan"],
-            "final_trade_decision": final_state["final_trade_decision"],
+            "investment_plan": final_state.get("investment_plan", ""),
+            "final_trade_decision": final_state.get("final_trade_decision", ""),
         }
 
         # Save to file. Reject ticker values that would escape the
