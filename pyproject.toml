@@ -52,3 +52,6 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+
+[dependency-groups]
+dev = ["pytest", "ruff"]

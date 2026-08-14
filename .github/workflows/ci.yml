@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python-version: "3.13"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Plain `uv sync` on purpose: the committed uv.lock predates the
+      # [dependency-groups] section and must not be regenerated here, so we
+      # re-resolve on the runner instead of using --locked/--frozen.
+      # uv installs the "dev" dependency group by default; if that ever
+      # changes, switch this step to `uv sync --group dev`.
+      - run: uv sync
+      - run: uv run pytest tests/ -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.13"
+      - run: uv sync
+      # Critical rules only (syntax errors, undefined names) — keep day-one
+      # green; widen the rule set later.
+      - run: uv run ruff check --select E9,F63,F7,F82 .
+
+  audit:
+    runs-on: ubuntu-latest
+    # Advisory only for now; escalation to blocking is a follow-up decision.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.13"
+      # Export re-resolves on the runner; the committed uv.lock stays untouched.
+      - run: uv export --format requirements-txt --no-emit-project -o audit-requirements.txt
+      - run: uvx pip-audit -r audit-requirements.txt
