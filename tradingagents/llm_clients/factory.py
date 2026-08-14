@@ -38,11 +38,14 @@ def _required_env_vars(provider_lower: str) -> Tuple[str, ...]:
     if provider_lower == "google":
         return ("GOOGLE_API_KEY",)
     if provider_lower == "azure":
-        # Source: azure_client.py docstring; OPENAI_API_VERSION stays optional.
+        # Source: azure_client.py docstring. OPENAI_API_VERSION is required by
+        # AzureChatOpenAI and env is the only supported path (api_version is
+        # not a passthrough kwarg) — validate it here for a clear message.
         return (
             "AZURE_OPENAI_API_KEY",
             "AZURE_OPENAI_ENDPOINT",
             "AZURE_OPENAI_DEPLOYMENT_NAME",
+            "OPENAI_API_VERSION",
         )
     return ()
 

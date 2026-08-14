@@ -60,12 +60,14 @@ class TestAzureValidation:
         monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
         monkeypatch.delenv("AZURE_OPENAI_DEPLOYMENT_NAME", raising=False)
+        monkeypatch.delenv("OPENAI_API_VERSION", raising=False)
         with pytest.raises(MissingAPIKeyError) as excinfo:
             create_llm_client("azure", "gpt-5.4")
         message = str(excinfo.value)
         assert "AZURE_OPENAI_API_KEY" in message
         assert "AZURE_OPENAI_ENDPOINT" in message
         assert "AZURE_OPENAI_DEPLOYMENT_NAME" in message
+        assert "OPENAI_API_VERSION" in message
 
     def test_api_key_kwarg_does_not_skip_endpoint_check(self, monkeypatch):
         """Explicit api_key replaces ONLY *_API_KEY checks — endpoint and
@@ -75,9 +77,17 @@ class TestAzureValidation:
         with pytest.raises(MissingAPIKeyError, match="AZURE_OPENAI_ENDPOINT"):
             create_llm_client("azure", "gpt-5.4", api_key="sk-explicit")
 
+    def test_missing_azure_api_version_fails_at_startup(self, monkeypatch):
+        monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://res.openai.azure.com/")
+        monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT_NAME", "my-deployment")
+        monkeypatch.delenv("OPENAI_API_VERSION", raising=False)
+        with pytest.raises(MissingAPIKeyError, match="OPENAI_API_VERSION"):
+            create_llm_client("azure", "gpt-5.4")
+
     def test_azure_with_all_vars_passes_validation(self, monkeypatch):
         monkeypatch.setenv("AZURE_OPENAI_API_KEY", "key")
         monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://res.openai.azure.com/")
         monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT_NAME", "my-deployment")
+        monkeypatch.setenv("OPENAI_API_VERSION", "2026-03-01-preview")
         client = create_llm_client("azure", "gpt-5.4")
         assert client is not None
