@@ -5,12 +5,13 @@
 
 ## Current Position
 
-Last activity: 2026-08-14 - Quick-Task 260814-k1j abgeschlossen: alle 5 P1-Punkte umgesetzt, v0.2.5 getaggt (lokal, kein Push), Codex-Review-Fixes eingearbeitet (148 Tests grün)
+Last activity: 2026-08-17 - main + Release-Tag zu Fork stevexyz2003/TradingAgents gepusht (Remote `fork`); lokales Release umbenannt in v0.2.5-tex (Upstream hat eigenes v0.2.5 released)
 
 ### Blockers/Concerns
 
-- `uv.lock`-Drift lokal (+322/−1596) — Operator-Änderung, nicht anfassen (P2 im Milestone)
-- Kein Push-Zugriff geklärt für origin (TauricResearch/TradingAgents) — Tag v0.2.5 + Commits bleiben lokal, Push entscheidet der User
+- `uv.lock`-Drift lokal (+322/−1596) — Operator-Änderung, nicht anfassen (P2 im Milestone). Hinweis: Upstream hat uv.lock in 0b61eff komplett ENTFERNT — löst sich beim Rebase
+- **Upstream weitergezogen:** origin/main ist 106 Commits voraus, Releases v0.2.5 (eigenes!), v0.3.0, v0.3.1. Unser Strang basiert auf v0.2.4. Folgen: (a) `v0.2.5` = Upstreams offizielles Release (a5cb7cb), unser Release heißt `v0.2.5-tex` (cf351de); (b) pyproject sagt bei uns 0.2.5 — kollidiert mit Upstream-Versionierung, beim Rebase renummerieren; (c) Upstream hat Teile unserer P1-Themen selbst adressiert (structured-output-Härtung 517eeaf, API-Key-Fixtures 8ab24f3, LLM-Retry-Budget daf1da9) — Rebase/Integration auf v0.3.1 ist ein eigener Task
+- Kein Push-Zugriff auf origin (nur pull) — veröffentlicht wird über den Fork (`fork` = stevexyz2003/TradingAgents; fork/main per Force-Push auf unseren Strang gesetzt)
 - Known Issues (v0.2.6-Kandidaten): `python-dotenv` undeklariert (nur transitiv, Fix ändert uv.lock); CLI-Memory-Parität (kein past_context/_resolve_pending_entries im CLI-Pfad — vorbestehend, Codex-Finding #4); CI-Lockfile-Policy (`uv sync` ohne `--locked`, bis uv.lock-Drift geklärt)
 - Erster GitHub-Actions-Lauf nach Push beobachten (dev-group-Install-Annahme, Fallback-Kommentar in ci.yml)
 
