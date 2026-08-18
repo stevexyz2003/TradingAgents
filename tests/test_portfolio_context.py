@@ -175,7 +175,11 @@ def test_completed_run_clears_the_checkpoint_it_wrote(tmp_path, monkeypatch):
     graph._resuming = False
     graph.propagator.get_graph_args = lambda callbacks=None: {}
     graph._log_state = lambda *a, **k: None
-    graph.graph = type("G", (), {"invoke": lambda self, i, **k: {"final_trade_decision": "Rating: Hold\n\nx", "final_rating": "Hold"}})()
+    # _run_graph streams via stream_run (budget partial save, #582), and
+    # stream_run reads the raw (namespace, mode, chunk) steps with subgraphs=True.
+    def _stream(self, i, **k):
+        yield (), "values", {"final_trade_decision": "Rating: Hold\n\nx", "final_rating": "Hold"}
+    graph.graph = type("G", (), {"stream": _stream})()
     book = PortfolioContext.model_validate(HOLDING)
 
     written = graph._run_signature("stock", book)  # what begin_checkpoint keys on

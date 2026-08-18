@@ -935,7 +935,9 @@ class TestLegacyRemoval:
         mock_graph.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "mem.md")})
         mock_graph.debug = False
         mock_graph.config = {"results_dir": str(tmp_path)}
-        mock_graph.graph.invoke.return_value = fake_state
+        # _run_graph streams via stream_run (budget partial save, #582); stub a
+        # single (messages, state) pair so the real write path still executes.
+        mock_graph.stream_run.return_value = iter([([], fake_state)])
         mock_graph.propagator.create_initial_state.return_value = fake_state
         mock_graph.propagator.get_graph_args.return_value = {}
         # Bind the real _run_graph so propagate's call to self._run_graph executes

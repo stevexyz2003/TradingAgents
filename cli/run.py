@@ -25,6 +25,7 @@ from cli.display import (
 from cli.selections import depth_from_env, get_user_selections, unattended_gaps
 from cli.stats_handler import StatsCallbackHandler
 from tradingagents.agents.rating import is_review, run_rating
+from tradingagents.budget import BudgetConfigError, BudgetExceededError
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.analyst_execution import (
@@ -120,12 +121,16 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
     analyst_execution_plan = build_analyst_execution_plan(selected_analyst_keys)
     analyst_wall_time_tracker = AnalystWallTimeTracker(analyst_execution_plan)
 
-    graph = TradingAgentsGraph(
-        selected_analyst_keys,
-        config=config,
-        debug=True,
-        callbacks=[stats_handler],
-    )
+    try:
+        graph = TradingAgentsGraph(
+            selected_analyst_keys,
+            config=config,
+            debug=True,
+            callbacks=[stats_handler],
+        )
+    except BudgetConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
 
     message_buffer.init_for_analysis(selected_analyst_keys)
 
@@ -183,6 +188,10 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
     message_buffer.update_report_section = save_report_section_decorator(message_buffer, "update_report_section")
 
     layout = create_layout()
+
+    # Set by the budget handler inside the Live block (#582); the completion
+    # path below runs only while it stays None.
+    budget_abort = None
 
     # The alternate screen keeps a layout taller than the window from redrawing
     # by scrolling; the final report prints after this block, on the normal screen.
@@ -354,23 +363,50 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
             graph.clear_checkpoint_on_success(
                 selections["ticker"], selections["analysis_date"], selections["asset_type"], portfolio
             )
+        except BudgetExceededError as exc:
+            # A budget limit (#582) stopped the run before the next LLM call.
+            # Save what the stream completed; the decision record and the
+            # checkpoint clear above are skipped, so --checkpoint resumes it.
+            budget_abort = exc
+            partial_state = {}
+            for chunk in trace:
+                partial_state.update(chunk)
+            graph._save_partial_state(
+                selections["ticker"], selections["analysis_date"], partial_state or None
+            )
         finally:
             # Always restore the plain uncheckpointed graph, even on failure.
             graph.end_checkpoint()
 
-        for agent in message_buffer.agent_status:
-            message_buffer.update_agent_status(agent, "completed")
+        if budget_abort is not None:
+            message_buffer.add_message("System", f"Budget limit reached: {budget_abort}")
+        else:
+            # final_state is unbound after an abort, so the completion path -
+            # statuses, the summary, the report sections - runs only without one.
+            for agent in message_buffer.agent_status:
+                message_buffer.update_agent_status(agent, "completed")
 
-        message_buffer.add_message(
-            "System", f"Completed analysis for {selections['analysis_date']}"
-        )
-        message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
+            message_buffer.add_message(
+                "System", f"Completed analysis for {selections['analysis_date']}"
+            )
+            message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
 
-        for section in message_buffer.report_sections:
-            if section in final_state:
-                message_buffer.update_report_section(section, final_state[section])
+            for section in message_buffer.report_sections:
+                if section in final_state:
+                    message_buffer.update_report_section(section, final_state[section])
 
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
+
+    if budget_abort is not None:
+        # Clean abort: _save_partial_state attempted a best-effort state save;
+        # report sections written so far are on disk either way.
+        console.print(f"[red]Budget limit reached:[/red] {budget_abort}")
+        console.print(
+            "[yellow]Report sections completed so far are under the results "
+            "directory. If --checkpoint was enabled, re-run to resume from "
+            "the last completed step.[/yellow]"
+        )
+        raise typer.Exit(1)
 
     # Post-analysis prompts (outside Live context for clean interaction)
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")

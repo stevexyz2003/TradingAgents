@@ -10,6 +10,7 @@ from typing import Any
 import tradingagents
 from tradingagents.agents.context import build_instrument_context, resolve_instrument_identity
 from tradingagents.agents.rating import run_rating
+from tradingagents.budget import BudgetExceededError, build_spend_tracker
 from tradingagents.dataflows.config import run_config, run_config_context, set_config
 from tradingagents.dataflows.date_window import get_current_date, is_historical
 from tradingagents.dataflows.symbols import safe_ticker_component
@@ -51,6 +52,11 @@ _NOT_IN_SIGNATURE = frozenset({
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
+    # Per-run budget tracker (#582); __init__ sets it when a limit is
+    # configured. The class default keeps graphs built without __init__
+    # (tests, tooling) on the no-budget path.
+    spend_tracker = None
+
     def __init__(
         self,
         selected_analysts=("market", "social", "news", "fundamentals"),
@@ -69,6 +75,16 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+
+        # Per-run budget enforcement (#582). build_spend_tracker raises
+        # BudgetConfigError here — at graph construction — when
+        # max_cost_per_run is set without usable model_cost_rates, so both
+        # the CLI and Python-API users fail fast instead of silently
+        # counting zero cost. Appended before `extra` below, so both tier
+        # clients (#1440) report their spend to the same tracker.
+        self.spend_tracker = build_spend_tracker(self.config)
+        if self.spend_tracker is not None:
+            self.callbacks.append(self.spend_tracker)
 
         set_config(self.config)
 
@@ -296,7 +312,13 @@ class TradingAgentsGraph:
         Injects the resolved instrument identity for every agent (#814). The
         memory log's lessons are not here: the graph's Memory Log step settles
         and loads them alongside the analysts (see ``_memory_step``).
+
+        Budgets (#582) are per run and this is the shared entry, so the spend
+        counter resets here. Settlement and its reflection calls run inside the
+        graph (``_memory_step``), so their spend counts toward this run's cap.
         """
+        if self.spend_tracker is not None:
+            self.spend_tracker.reset()
         return self.propagator.create_initial_state(
             company_name,
             trade_date,
@@ -322,6 +344,11 @@ class TradingAgentsGraph:
             if done.failed:
                 note = (f"{len(done.failed)} past decision(s) could not be settled this run "
                         "and stay pending.")
+        except BudgetExceededError:
+            # A budget abort (#582) ends the run; it is not a settlement
+            # failure to log and walk past. Re-raise ahead of the broad
+            # handler so the cap cannot be overrun by a settlement pass.
+            raise
         except Exception as exc:
             logger.warning("Settling past decisions failed: %s", exc)
             note = f"Past decisions could not be settled this run ({type(exc).__name__}); they stay pending."
@@ -382,19 +409,28 @@ class TradingAgentsGraph:
 
         # None resumes an existing checkpoint; init_agent_state starts fresh (#1249).
         graph_input = self.checkpoint_input(init_agent_state)
-        if self.debug:
-            # A state repeats the messages before it, so each prints once (#1027).
-            final_state, printed = {}, set()
+
+        # Always stream, never invoke: a budget abort (#582) needs the states
+        # completed so far to save. stream_run interleaves the run's own states
+        # with single analysts' reports, so the merged accumulator is the run's
+        # state and equals invoke()'s result.
+        final_state, printed = {}, set()
+        try:
             for messages, state in self.stream_run(graph_input, **args):
-                for msg in messages:
-                    key = getattr(msg, "id", None) or (type(msg).__name__, getattr(msg, "content", None))
-                    if key not in printed:
-                        printed.add(key)
-                        msg.pretty_print()
+                if self.debug:
+                    # A state repeats the messages before it, so each prints once (#1027).
+                    for msg in messages:
+                        key = getattr(msg, "id", None) or (type(msg).__name__, getattr(msg, "content", None))
+                        if key not in printed:
+                            printed.add(key)
+                            msg.pretty_print()
                 if state is not None:
                     final_state.update(state)
-        else:
-            final_state = self.graph.invoke(graph_input, **args)
+        except BudgetExceededError:
+            # Keep what was completed, then abort. The decision record and the
+            # checkpoint clear below are skipped, so --checkpoint resumes it.
+            self._save_partial_state(company_name, trade_date, final_state or None)
+            raise
 
         self.record_decision(company_name, trade_date, final_state)
 
@@ -402,6 +438,28 @@ class TradingAgentsGraph:
         self.clear_checkpoint_on_success(company_name, trade_date, asset_type, portfolio)
 
         return final_state, run_rating(final_state)
+
+    def _save_partial_state(self, company_name, trade_date, last_state):
+        """Best-effort write of a budget-aborted run's state so far (#582).
+
+        Called by ``_run_graph`` and the CLI when ``BudgetExceededError`` stops
+        the stream. An early abort lacks the fields ``_log_state`` reads; that
+        failure is logged and swallowed so it never masks the budget error. The
+        run's checkpoint is not cleared on this path, so a checkpointed run
+        resumes from its last completed step either way.
+        """
+        if last_state is not None:
+            try:
+                self._log_state(trade_date, last_state)
+            except Exception:
+                logger.exception(
+                    "Partial-state save failed after budget abort; "
+                    "the checkpoint (if enabled) still allows resume."
+                )
+        logger.warning(
+            "Run aborted by budget limit for %s on %s; resume with --checkpoint",
+            company_name, trade_date,
+        )
 
     def stream_run(self, graph_input, **args):
         """Stream a run as ``(messages, state)`` pairs.
