@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Changes that need action when upgrading are listed under "Upgrading from" in their release.
 
+## [Unreleased] — TradingEngineX strand (rebased onto v0.6.0)
+
+Features from the former `v0.2.5-tex` strand, ported onto upstream v0.6.0.
+
+### Added
+
+- **Per-run budget enforcement** (#582): `--max-cost` / `max_cost_per_run`
+  with user-supplied `model_cost_rates` (no hardcoded price table), plus
+  rate-free `max_tokens_per_run`. Exceeding a limit aborts before the next
+  LLM call, saves the last graph state, and stays resumable with
+  `--checkpoint`. Misconfiguration (cost limit without rates) fails fast at
+  graph construction for both CLI and Python API.
+- **Structured-output retry with error context** (#583): a failed
+  structured call is retried once with the validation error in the prompt
+  before falling back to prose; budget aborts are never swallowed.
+- **Fail-fast credential validation** for the native provider families
+  (Anthropic, Google, Azure incl. `OPENAI_API_VERSION`); README section
+  "Secrets & configuration for production".
+
+### Fixed
+
+- CLI reports a ticker rejected as a results-path component (e.g. `..`)
+  as a clean error with exit code 1 instead of a traceback (same class as
+  #618, which covered the graph-side paths).
+
 ## [0.7.0] — 2026-10-16
 
 Runs on your ChatGPT plan, backtests scored from the first close after each decision, a note at start-up when a newer release is out, and a wheel attached to each GitHub release.
