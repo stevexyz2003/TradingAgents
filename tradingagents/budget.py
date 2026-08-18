@@ -15,7 +15,8 @@ counting is never acceptable.
 
 import logging
 import threading
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
@@ -45,7 +46,7 @@ class BudgetConfigError(ValueError):
 
 
 def ensure_rates_configured(
-    model_cost_rates: Optional[Dict[str, Any]], model_names: Iterable[str]
+    model_cost_rates: dict[str, Any] | None, model_names: Iterable[str]
 ) -> None:
     """Fail fast unless every model has input+output rates configured.
 
@@ -85,9 +86,9 @@ class SpendTracker(BaseCallbackHandler):
 
     def __init__(
         self,
-        max_cost: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        model_cost_rates: Optional[Dict[str, Any]] = None,
+        max_cost: float | None = None,
+        max_tokens: int | None = None,
+        model_cost_rates: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self._lock = threading.Lock()
@@ -141,18 +142,18 @@ class SpendTracker(BaseCallbackHandler):
             )
 
     def on_llm_start(
-        self, serialized: Dict[str, Any], prompts: List[str], **kwargs: Any
+        self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any
     ) -> None:
         self._check_budget()
 
     def on_chat_model_start(
-        self, serialized: Dict[str, Any], messages: List[List[Any]], **kwargs: Any
+        self, serialized: dict[str, Any], messages: list[list[Any]], **kwargs: Any
     ) -> None:
         self._check_budget()
 
     # -- accumulation -------------------------------------------------------
 
-    def _resolve_rate(self, model_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _resolve_rate(self, model_name: str | None) -> dict[str, Any] | None:
         """Resolve the rate entry for ``model_name``.
 
         Providers routinely report revision/deployment names (e.g.
@@ -187,7 +188,7 @@ class SpendTracker(BaseCallbackHandler):
                 key,
             )
 
-        def _rate_value(rate: Dict[str, Any]) -> float:
+        def _rate_value(rate: dict[str, Any]) -> float:
             try:
                 return float(rate.get("input", 0) or 0) + float(
                     rate.get("output", 0) or 0
@@ -242,7 +243,7 @@ class SpendTracker(BaseCallbackHandler):
             self.cost += call_cost
 
 
-def build_spend_tracker(config: Dict[str, Any]) -> Optional[SpendTracker]:
+def build_spend_tracker(config: dict[str, Any]) -> SpendTracker | None:
     """Build a SpendTracker from config, or None when no limit is set.
 
     Validation authority for the cost path lives HERE so both the CLI and

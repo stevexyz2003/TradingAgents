@@ -44,7 +44,6 @@ from cli.utils import (
 from tradingagents.budget import BudgetConfigError, BudgetExceededError
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.llm_clients.factory import MissingAPIKeyError
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
     build_analyst_execution_plan,
@@ -52,6 +51,7 @@ from tradingagents.graph.analyst_execution import (
     sync_analyst_tracker_from_chunk,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.llm_clients.factory import MissingAPIKeyError
 from tradingagents.reporting import write_report_tree
 
 console = Console()
@@ -1029,7 +1029,7 @@ def run_analysis(checkpoint: bool | None = None):
         )
     except (BudgetConfigError, MissingAPIKeyError) as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     # Initialize message buffer with selected analysts
     message_buffer.init_for_analysis(selected_analyst_keys)
@@ -1045,7 +1045,7 @@ def run_analysis(checkpoint: bool | None = None):
         safe_ticker_component(selections["ticker"])
     except ValueError as exc:
         console.print(f"[red]Invalid ticker: {exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     results_dir = Path(config["results_dir"]) / selections["ticker"] / selections["analysis_date"]
     results_dir.mkdir(parents=True, exist_ok=True)
