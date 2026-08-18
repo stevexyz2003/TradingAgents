@@ -475,27 +475,26 @@ class TradingAgentsGraph:
                     last_state = chunk
                     yield chunk
             except BudgetExceededError as exc:
-                # Partial save: keep the last streamed state so nothing spent
-                # so far is lost. The checkpoint is intentionally NOT cleared
-                # (clear happens only on success), so the run is resumable.
+                # Best-effort partial save of the last streamed state. An
+                # early abort may lack final fields _log_state expects — that
+                # must never mask the BudgetExceededError, so failures here
+                # are logged and swallowed. The checkpoint is intentionally
+                # NOT cleared (clear happens only after success), so the run
+                # stays resumable either way.
                 if last_state is not None:
                     self.curr_state = last_state
-                    self._log_state(trade_date, last_state)
+                    try:
+                        self._log_state(trade_date, last_state)
+                    except Exception:
+                        logger.exception(
+                            "Partial-state save failed after budget abort; "
+                            "the checkpoint (if enabled) still allows resume."
+                        )
                 logger.warning(
-                    "Run aborted by budget limit: %s — partial state saved; "
-                    "resume with --checkpoint",
+                    "Run aborted by budget limit: %s — resume with --checkpoint",
                     exc,
                 )
                 raise
-
-            # Normal exhaustion means the run completed: clear the checkpoint
-            # here (not in _run_graph) so the CLI stream path gets the same
-            # stale-state protection as the Python API.
-            if self.config.get("checkpoint_enabled"):
-                clear_checkpoint(
-                    self.config["data_cache_dir"], company_name, str(trade_date),
-                    self._run_signature(asset_type),
-                )
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
@@ -516,6 +515,19 @@ class TradingAgentsGraph:
                 / f"{safe_ticker_component(ticker)}_{stamp}"
             )
         return write_report_tree(final_state, ticker, save_path)
+
+    def clear_run_checkpoint(self, company_name, trade_date, asset_type: str = "stock"):
+        """Clear the run's checkpoint after all post-run persistence succeeded.
+
+        Kept separate from stream_run so the clear happens only once results
+        are actually persisted (upstream semantics): _run_graph calls it after
+        _log_state/store_decision, the CLI after its own successful wrap-up.
+        """
+        if self.config.get("checkpoint_enabled"):
+            clear_checkpoint(
+                self.config["data_cache_dir"], company_name, str(trade_date),
+                self._run_signature(asset_type),
+            )
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
         """Execute the graph and write the resulting state to disk and memory log."""
@@ -550,6 +562,10 @@ class TradingAgentsGraph:
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
         )
+
+        # Clear only after persistence succeeded, so a failure above keeps
+        # the run resumable.
+        self.clear_run_checkpoint(company_name, trade_date, asset_type=asset_type)
 
         return final_state, self.process_signal(final_state["final_trade_decision"])
 

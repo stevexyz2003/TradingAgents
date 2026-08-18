@@ -1273,6 +1273,14 @@ def run_analysis(checkpoint: bool | None = None):
             final_state.update(chunk)
 
         if budget_abort is None:
+            # The run completed and the report sections are on disk — safe to
+            # drop the resume checkpoint now (mirrors _run_graph's ordering).
+            graph.clear_run_checkpoint(
+                selections["ticker"],
+                selections["analysis_date"],
+                asset_type=selections["asset_type"],
+            )
+
             # Update all agent statuses to completed
             for agent in message_buffer.agent_status:
                 message_buffer.update_agent_status(agent, "completed")
@@ -1290,13 +1298,13 @@ def run_analysis(checkpoint: bool | None = None):
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
     if budget_abort is not None:
-        # Clean abort: the last graph state was already saved via _log_state
-        # inside stream_run; report sections written so far are on disk.
+        # Clean abort: stream_run attempted a best-effort partial-state save;
+        # report sections written so far are on disk either way.
         console.print(f"\n[red]Budget limit reached:[/red] {budget_abort}")
         console.print(
-            "[yellow]The last graph state was saved and the report sections "
-            "completed so far are under the results directory. Re-run with "
-            "--checkpoint to resume from the last completed step.[/yellow]"
+            "[yellow]Report sections completed so far are under the results "
+            "directory. If --checkpoint was enabled, re-run to resume from "
+            "the last completed step.[/yellow]"
         )
         raise typer.Exit(1)
 

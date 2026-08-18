@@ -293,8 +293,10 @@ class TestSpendTrackerReset:
 
 class TestStreamRunCheckpointClear:
 
-    def test_stream_run_clears_checkpoint_on_success(self, tmp_path, monkeypatch):
-        """Success-clear lives in stream_run so the CLI path gets it too."""
+    def test_stream_run_does_not_clear_checkpoint_itself(self, tmp_path, monkeypatch):
+        """stream_run must NOT clear on stream success: the clear belongs
+        after post-run persistence (clear_run_checkpoint), so a failure in
+        _log_state/store_decision keeps the run resumable."""
         import tradingagents.graph.trading_graph as tg
 
         cleared = []
@@ -331,8 +333,49 @@ class TestStreamRunCheckpointClear:
 
         list(TradingAgentsGraph.stream_run(mock_graph, "AAPL", "2026-01-01"))
 
-        # clear_checkpoint now takes a 4th arg (the run signature, a Mock here).
-        assert [c[:3] for c in cleared] == [(str(tmp_path), "AAPL", "2026-01-01")]
+        assert cleared == []
+
+    def test_clear_run_checkpoint_clears_with_signature(self, tmp_path, monkeypatch):
+        """The dedicated post-persistence clear passes the run signature."""
+        import tradingagents.graph.trading_graph as tg
+
+        cleared = []
+        monkeypatch.setattr(
+            tg, "clear_checkpoint", lambda *a, **k: cleared.append(a)
+        )
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.config = {
+            "checkpoint_enabled": True,
+            "data_cache_dir": str(tmp_path),
+        }
+        mock_graph._run_signature.return_value = "sig"
+
+        TradingAgentsGraph.clear_run_checkpoint(mock_graph, "AAPL", "2026-01-01")
+
+        assert cleared == [(str(tmp_path), "AAPL", "2026-01-01", "sig")]
+
+    def test_budget_abort_survives_partial_save_failure(self, tmp_path):
+        """A crashing _log_state (early abort lacks final fields) must never
+        mask the BudgetExceededError."""
+        def fake_stream(state, **kwargs):
+            yield {"messages": []}
+            raise BudgetExceededError("over budget")
+
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.spend_tracker = None
+        mock_graph._checkpointer_ctx = None
+        mock_graph.config = {"checkpoint_enabled": False, "results_dir": str(tmp_path)}
+        mock_graph.graph = MagicMock()
+        mock_graph.graph.stream = fake_stream
+        mock_graph.propagator = MagicMock()
+        mock_graph.propagator.create_initial_state.return_value = {"messages": []}
+        mock_graph.propagator.get_graph_args.return_value = {}
+        mock_graph.memory_log = MagicMock()
+        mock_graph.memory_log.get_past_context.return_value = ""
+        mock_graph._log_state.side_effect = KeyError("final_trade_decision")
+
+        with pytest.raises(BudgetExceededError):
+            list(TradingAgentsGraph.stream_run(mock_graph, "AAPL", "2026-01-01"))
 
     def test_stream_run_keeps_checkpoint_on_budget_abort(self, tmp_path, monkeypatch):
         """Abort must stay resumable: no clear on BudgetExceededError."""
