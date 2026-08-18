@@ -41,6 +41,7 @@ from cli.utils import (
     select_research_depth,
     select_shallow_thinking_agent,
 )
+from tradingagents.budget import BudgetConfigError, BudgetExceededError
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
@@ -1017,12 +1018,16 @@ def run_analysis(checkpoint: bool | None = None):
     analyst_wall_time_tracker = AnalystWallTimeTracker(analyst_execution_plan)
 
     # Initialize the graph with callbacks bound to LLMs
-    graph = TradingAgentsGraph(
-        selected_analyst_keys,
-        config=config,
-        debug=True,
-        callbacks=[stats_handler],
-    )
+    try:
+        graph = TradingAgentsGraph(
+            selected_analyst_keys,
+            config=config,
+            debug=True,
+            callbacks=[stats_handler],
+        )
+    except BudgetConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
 
     # Initialize message buffer with selected analysts
     message_buffer.init_for_analysis(selected_analyst_keys)
@@ -1127,9 +1132,28 @@ def run_analysis(checkpoint: bool | None = None):
         # (LLM tracking is handled separately via LLM constructor)
         args = graph.propagator.get_graph_args(callbacks=[stats_handler])
 
-        # Stream the analysis
+        # Stream the analysis through the shared stream_run path so the
+        # checkpointer, thread-id injection, budget reset, and partial-save
+        # apply to the CLI exactly as they do to the Python API (a direct
+        # graph.graph.stream would bypass all of them, leaving --checkpoint
+        # dead on this path).
         trace = []
-        for chunk in graph.graph.stream(init_agent_state, **args):
+        budget_abort: BudgetExceededError | None = None
+        stream = graph.stream_run(
+            selections["ticker"],
+            selections["analysis_date"],
+            asset_type=selections["asset_type"],
+            init_agent_state=init_agent_state,
+            graph_args=args,
+        )
+        while True:
+            try:
+                chunk = next(stream)
+            except StopIteration:
+                break
+            except BudgetExceededError as exc:
+                budget_abort = exc
+                break
             # Process all messages in chunk, deduplicating by message ID
             for message in chunk.get("messages", []):
                 msg_id = getattr(message, "id", None)
@@ -1237,14 +1261,15 @@ def run_analysis(checkpoint: bool | None = None):
         for chunk in trace:
             final_state.update(chunk)
 
-        # Update all agent statuses to completed
-        for agent in message_buffer.agent_status:
-            message_buffer.update_agent_status(agent, "completed")
+        if budget_abort is None:
+            # Update all agent statuses to completed
+            for agent in message_buffer.agent_status:
+                message_buffer.update_agent_status(agent, "completed")
 
-        message_buffer.add_message(
-            "System", f"Completed analysis for {selections['analysis_date']}"
-        )
-        message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
+            message_buffer.add_message(
+                "System", f"Completed analysis for {selections['analysis_date']}"
+            )
+            message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
 
         # Update final report sections
         for section in message_buffer.report_sections:
@@ -1252,6 +1277,17 @@ def run_analysis(checkpoint: bool | None = None):
                 message_buffer.update_report_section(section, final_state[section])
 
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
+
+    if budget_abort is not None:
+        # Clean abort: the last graph state was already saved via _log_state
+        # inside stream_run; report sections written so far are on disk.
+        console.print(f"\n[red]Budget limit reached:[/red] {budget_abort}")
+        console.print(
+            "[yellow]The last graph state was saved and the report sections "
+            "completed so far are under the results directory. Re-run with "
+            "--checkpoint to resume from the last completed step.[/yellow]"
+        )
+        raise typer.Exit(1)
 
     # Post-analysis prompts (outside Live context for clean interaction)
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")

@@ -28,6 +28,7 @@ from tradingagents.agents.utils.agent_utils import (
     resolve_instrument_identity,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.budget import BudgetExceededError, build_spend_tracker
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -83,6 +84,15 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+
+        # Per-run budget enforcement (#582). build_spend_tracker raises
+        # BudgetConfigError here — at graph construction — when
+        # max_cost_per_run is set without usable model_cost_rates, so both
+        # the CLI and Python-API users fail fast instead of silently
+        # counting zero cost.
+        self.spend_tracker = build_spend_tracker(self.config)
+        if self.spend_tracker is not None:
+            self.callbacks.append(self.spend_tracker)
 
         # Update the interface's config
         set_config(self.config)
@@ -369,10 +379,50 @@ class TradingAgentsGraph:
         a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
         """
-        self.ticker = company_name
-
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
         self._resolve_pending_entries(company_name)
+
+        # Checkpointer setup/cleanup lives in stream_run so the CLI stream
+        # path gets identical resume/partial-save semantics.
+        return self._run_graph(company_name, trade_date, asset_type=asset_type)
+
+    def stream_run(
+        self,
+        company_name,
+        trade_date,
+        *,
+        asset_type: str = "stock",
+        init_agent_state=None,
+        graph_args=None,
+    ):
+        """Stream the trading graph, yielding the state after each node.
+
+        Shared streaming path for the Python API (via ``propagate``) and the
+        CLI. Handles checkpointer setup/cleanup and thread-id injection when
+        ``checkpoint_enabled`` is set, resets the per-run budget tracker, and
+        saves the last streamed state via ``_log_state`` when a budget limit
+        aborts the run mid-stream (:class:`BudgetExceededError` is re-raised
+        for the caller). The checkpoint is NOT cleared on abort — the run
+        stays resumable with ``--checkpoint``; on normal completion it is
+        cleared here so neither entry path leaves stale state behind.
+
+        Args:
+            company_name: Ticker to analyze.
+            trade_date: Trade date for the run.
+            asset_type: "stock" (default) or "crypto"; part of the
+                checkpoint signature.
+            init_agent_state: Optional pre-built initial state. Defaults to
+                the propagator state with memory-log past context and the
+                resolved instrument identity injected.
+            graph_args: Optional pre-built graph args (e.g. with extra
+                callbacks). Defaults to ``self.propagator.get_graph_args()``.
+        """
+        self.ticker = company_name
+
+        # Budgets are per run: a reused graph instance must not inherit the
+        # spend of an earlier propagate()/stream_run() call.
+        if self.spend_tracker is not None:
+            self.spend_tracker.reset()
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
@@ -394,7 +444,58 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", company_name, trade_date)
 
         try:
-            return self._run_graph(company_name, trade_date, asset_type=asset_type)
+            if init_agent_state is None:
+                past_context = self.memory_log.get_past_context(company_name)
+                instrument_context = self.resolve_instrument_context(
+                    company_name, asset_type
+                )
+                init_agent_state = self.propagator.create_initial_state(
+                    company_name,
+                    trade_date,
+                    asset_type=asset_type,
+                    past_context=past_context,
+                    instrument_context=instrument_context,
+                )
+            if graph_args is None:
+                graph_args = self.propagator.get_graph_args()
+
+            # Inject thread_id so same ticker+date+graph-shape resumes; a
+            # different date or graph shape starts fresh (#1089).
+            if self.config.get("checkpoint_enabled"):
+                tid = thread_id(
+                    company_name, str(trade_date), self._run_signature(asset_type)
+                )
+                graph_args.setdefault("config", {}).setdefault("configurable", {})[
+                    "thread_id"
+                ] = tid
+
+            last_state = None
+            try:
+                for chunk in self.graph.stream(init_agent_state, **graph_args):
+                    last_state = chunk
+                    yield chunk
+            except BudgetExceededError as exc:
+                # Partial save: keep the last streamed state so nothing spent
+                # so far is lost. The checkpoint is intentionally NOT cleared
+                # (clear happens only on success), so the run is resumable.
+                if last_state is not None:
+                    self.curr_state = last_state
+                    self._log_state(trade_date, last_state)
+                logger.warning(
+                    "Run aborted by budget limit: %s — partial state saved; "
+                    "resume with --checkpoint",
+                    exc,
+                )
+                raise
+
+            # Normal exhaustion means the run completed: clear the checkpoint
+            # here (not in _run_graph) so the CLI stream path gets the same
+            # stale-state protection as the Python API.
+            if self.config.get("checkpoint_enabled"):
+                clear_checkpoint(
+                    self.config["data_cache_dir"], company_name, str(trade_date),
+                    self._run_signature(asset_type),
+                )
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
@@ -418,46 +519,24 @@ class TradingAgentsGraph:
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
         """Execute the graph and write the resulting state to disk and memory log."""
-        # Initialize state — inject memory log context for PM and the
-        # deterministically resolved instrument identity for all agents.
-        past_context = self.memory_log.get_past_context(company_name)
-        instrument_context = self.resolve_instrument_context(company_name, asset_type)
-        init_agent_state = self.propagator.create_initial_state(
-            company_name,
-            trade_date,
-            asset_type=asset_type,
-            past_context=past_context,
-            instrument_context=instrument_context,
-        )
-        args = self.propagator.get_graph_args()
-
-        # Inject thread_id so same ticker+date+graph-shape resumes; a different
-        # date or graph shape starts fresh (#1089).
-        if self.config.get("checkpoint_enabled"):
-            tid = thread_id(company_name, str(trade_date), self._run_signature(asset_type))
-            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
-
-        if self.debug:
-            trace = []
-            last_printed = None
-            for chunk in self.graph.stream(init_agent_state, **args):
-                if chunk["messages"]:
-                    msg = chunk["messages"][-1]
-                    # Nodes after the trader don't append to messages, so the
-                    # same trailing message repeats across chunks. Print it only
-                    # when it changes (#1027); the trace/state merge is unchanged.
-                    signature = (type(msg).__name__, getattr(msg, "content", None))
-                    if signature != last_printed:
-                        msg.pretty_print()
-                        last_printed = signature
-                    trace.append(chunk)
-            # Streamed chunks are per-node deltas. Merge them so the returned
-            # state matches what graph.invoke() yields in the non-debug path.
-            final_state = {}
-            for chunk in trace:
-                final_state.update(chunk)
-        else:
-            final_state = self.graph.invoke(init_agent_state, **args)
+        # State construction, checkpointer handling, budget reset, and the
+        # success-time checkpoint clear all live in stream_run — shared with
+        # the CLI path.
+        last_printed = None
+        final_state = {}
+        for chunk in self.stream_run(company_name, trade_date, asset_type=asset_type):
+            if self.debug and chunk["messages"]:
+                msg = chunk["messages"][-1]
+                # Nodes after the trader don't append to messages, so the
+                # same trailing message repeats across chunks. Print it only
+                # when it changes (#1027); the trace/state merge is unchanged.
+                signature = (type(msg).__name__, getattr(msg, "content", None))
+                if signature != last_printed:
+                    msg.pretty_print()
+                    last_printed = signature
+            # Merge streamed chunks so the returned state matches what
+            # graph.invoke() used to yield.
+            final_state.update(chunk)
 
         # Store current state for reflection.
         self.curr_state = final_state
@@ -471,13 +550,6 @@ class TradingAgentsGraph:
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
         )
-
-        # Clear checkpoint on successful completion to avoid stale state.
-        if self.config.get("checkpoint_enabled"):
-            clear_checkpoint(
-                self.config["data_cache_dir"], company_name, str(trade_date),
-                self._run_signature(asset_type),
-            )
 
         return final_state, self.process_signal(final_state["final_trade_decision"])
 

@@ -100,6 +100,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # provider/SDK at its own default (usually 2). Raise it to ride out bursty
     # 429 throttling on rate-limited deployments instead of aborting a run (#1091).
     "llm_max_retries": None,
+    # Per-run budget enforcement (#582). max_cost_per_run (USD) requires
+    # user-supplied model_cost_rates ({"<model>": {"input": usd_per_1M_input,
+    # "output": usd_per_1M_output}}) — there is deliberately no hardcoded
+    # price table. max_tokens_per_run is a rate-free alternative. None = off.
+    "max_cost_per_run": None,
+    "max_tokens_per_run": None,
+    "model_cost_rates": {},
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,
