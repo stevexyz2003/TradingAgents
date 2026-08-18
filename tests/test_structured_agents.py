@@ -27,6 +27,8 @@ from tradingagents.agents.schemas import (
     render_trader_proposal,
 )
 from tradingagents.agents.trader.trader import create_trader
+from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+from tradingagents.budget import BudgetExceededError
 
 # ---------------------------------------------------------------------------
 # Render functions
@@ -406,3 +408,100 @@ class TestSentimentAnalystAgent:
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
         assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+def _sample_plan():
+    return ResearchPlan(
+        recommendation=PortfolioRating.HOLD,
+        rationale="Balanced view.",
+        strategic_actions="Hold and reassess.",
+    )
+
+
+@pytest.mark.unit
+class TestRetryThenFallback:
+    def test_retry_succeeds_with_error_context_str_prompt(self):
+        """First failure triggers exactly one retry whose prompt carries the error."""
+        plan = _sample_plan()
+        structured = MagicMock()
+        structured.invoke.side_effect = [Exception("bad json"), plan]
+        plain = MagicMock()
+
+        result = invoke_structured_or_freetext(
+            structured, plain, "original prompt", render_research_plan, "TestAgent"
+        )
+
+        assert result == render_research_plan(plan)
+        plain.invoke.assert_not_called()
+        assert structured.invoke.call_count == 2
+        retry_prompt = structured.invoke.call_args_list[1].args[0]
+        assert isinstance(retry_prompt, str)
+        assert "original prompt" in retry_prompt
+        assert "bad json" in retry_prompt
+
+    def test_double_failure_falls_back_with_original_prompt(self):
+        """Retry failure falls back to prose with the ORIGINAL prompt, no raise."""
+        structured = MagicMock()
+        structured.invoke.side_effect = [Exception("bad json"), Exception("still bad")]
+        plain = MagicMock()
+        plain.invoke.return_value = MagicMock(content="prose text")
+
+        result = invoke_structured_or_freetext(
+            structured, plain, "original prompt", render_research_plan, "TestAgent"
+        )
+
+        assert result == "prose text"
+        assert structured.invoke.call_count == 2
+        plain.invoke.assert_called_once_with("original prompt")
+
+    def test_list_prompt_retry_appends_user_message_without_mutation(self):
+        """Trader-form message lists get an appended user message; original unchanged."""
+        plan = _sample_plan()
+        structured = MagicMock()
+        structured.invoke.side_effect = [Exception("bad json"), plan]
+        plain = MagicMock()
+        original = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user input"},
+        ]
+        snapshot = [dict(m) for m in original]
+
+        result = invoke_structured_or_freetext(
+            structured, plain, original, render_research_plan, "TestAgent"
+        )
+
+        assert result == render_research_plan(plan)
+        assert original == snapshot  # original list not mutated
+        retry_prompt = structured.invoke.call_args_list[1].args[0]
+        assert retry_prompt is not original
+        assert retry_prompt[:2] == snapshot
+        assert retry_prompt[-1]["role"] == "user"
+        assert "bad json" in retry_prompt[-1]["content"]
+
+    def test_budget_exceeded_propagates_without_retry(self):
+        """A budget abort is not a schema failure: no retry, no prose fallback."""
+        structured = MagicMock()
+        structured.invoke.side_effect = BudgetExceededError("cost limit hit")
+        plain = MagicMock()
+
+        with pytest.raises(BudgetExceededError):
+            invoke_structured_or_freetext(
+                structured, plain, "p", render_research_plan, "TestAgent"
+            )
+
+        assert structured.invoke.call_count == 1
+        plain.invoke.assert_not_called()
+
+    def test_budget_exceeded_on_retry_propagates_without_fallback(self):
+        structured = MagicMock()
+        structured.invoke.side_effect = [
+            Exception("bad json"),
+            BudgetExceededError("cost limit hit"),
+        ]
+        plain = MagicMock()
+
+        with pytest.raises(BudgetExceededError):
+            invoke_structured_or_freetext(
+                structured, plain, "p", render_research_plan, "TestAgent"
+            )
+
+        assert structured.invoke.call_count == 2
+        plain.invoke.assert_not_called()
