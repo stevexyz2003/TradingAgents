@@ -650,15 +650,23 @@ class TradingAgentsGraph:
         return final_state, self.process_signal(final_state["final_trade_decision"])
 
     def _save_partial_state(self, trade_date, last_state):
-        """Write the last streamed state of a budget-aborted run (#582).
+        """Best-effort write of a budget-aborted run's last streamed state (#582).
 
         Called by ``_run_graph`` and the CLI when ``BudgetExceededError`` stops
-        the stream. The run's checkpoint is not cleared on this path, so a
-        checkpointed run resumes from its last completed step.
+        the stream. An early abort lacks the final fields ``_log_state`` reads;
+        that failure is logged and swallowed so it never masks the budget
+        error. The run's checkpoint is not cleared on this path, so a
+        checkpointed run resumes from its last completed step either way.
         """
         if last_state is not None:
             self.curr_state = last_state
-            self._log_state(trade_date, last_state)
+            try:
+                self._log_state(trade_date, last_state)
+            except Exception:
+                logger.exception(
+                    "Partial-state save failed after budget abort; "
+                    "the checkpoint (if enabled) still allows resume."
+                )
         logger.warning(
             "Run aborted by budget limit for %s on %s; resume with --checkpoint",
             self.ticker, trade_date,

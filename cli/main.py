@@ -1339,13 +1339,13 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None):
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
     if budget_abort is not None:
-        # Clean abort: the last graph state was saved via _save_partial_state;
-        # report sections written so far are on disk.
+        # Clean abort: _save_partial_state attempted a best-effort state save;
+        # report sections written so far are on disk either way.
         console.print(f"\n[red]Budget limit reached:[/red] {budget_abort}")
         console.print(
-            "[yellow]The last graph state was saved and the report sections "
-            "completed so far are under the results directory. Re-run with "
-            "--checkpoint to resume from the last completed step.[/yellow]"
+            "[yellow]Report sections completed so far are under the results "
+            "directory. If --checkpoint was enabled, re-run to resume from "
+            "the last completed step.[/yellow]"
         )
         raise typer.Exit(1)
 
