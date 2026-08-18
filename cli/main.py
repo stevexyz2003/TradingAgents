@@ -47,7 +47,6 @@ from tradingagents.backtest import iter_grid, run_backtest, summarize
 from tradingagents.budget import BudgetConfigError, BudgetExceededError
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.llm_clients.factory import MissingAPIKeyError
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
     build_analyst_execution_plan,
@@ -55,6 +54,7 @@ from tradingagents.graph.analyst_execution import (
     sync_analyst_tracker_from_chunk,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.llm_clients.factory import MissingAPIKeyError
 from tradingagents.portfolio import load_portfolio
 from tradingagents.reporting import write_report_tree
 
