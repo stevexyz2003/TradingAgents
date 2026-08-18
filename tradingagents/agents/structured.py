@@ -24,9 +24,29 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from tradingagents.budget import BudgetExceededError
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _with_error_context(prompt: Any, exc: Exception) -> Any:
+    """Return a retry prompt carrying the schema-validation error.
+
+    Prompt-form agnostic: strings get the context appended, message-dict
+    lists (Trader form) get a new user message appended to a NEW list —
+    the original list is never mutated. Unknown shapes are returned as-is.
+    """
+    context = (
+        f"Your previous response failed schema validation with this error: {exc}. "
+        "Respond again and strictly match the required schema."
+    )
+    if isinstance(prompt, str):
+        return prompt + "\n\n" + context
+    if isinstance(prompt, list):
+        return list(prompt) + [{"role": "user", "content": context}]
+    return prompt
 
 # Schema-only structured output binds exactly one tool (the schema itself), so a
 # model that reaches for a search tool emits an unknown tool call and the whole
@@ -56,29 +76,54 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
         return None
 
 
+def _invoke_parsed(structured_llm: Any, prompt: Any) -> T:
+    """One structured call that either parses or raises."""
+    result = structured_llm.invoke(prompt)
+    if result is None:
+        # A thinking model can answer in plain text instead of calling
+        # the tool, leaving the parser with nothing to return. Treat it
+        # as a structured miss so the retry states the constraint.
+        raise ValueError("structured output returned no parsed result")
+    return result
+
+
 def invoke_structured(structured_llm: Any | None, prompt: Any, agent_name: str) -> T | None:
-    """Run the structured call; ``None`` when there is none or it fails.
+    """Run the structured call, retrying once with the error as context; ``None``
+    when there is no structured LLM or both attempts fail.
 
     ``prompt`` is whatever the underlying LLM accepts (a string for chat
     invocations, a list of message dicts for chat models that take that
     shape), so a caller can forward the same value to its free-text fallback.
+    A weak model usually misses the schema, not the question, so naming the
+    validation error and asking again recovers the structure that a straight
+    fall back to prose would lose (#583). The retry is where the context goes;
+    the caller's free-text fallback still gets the ORIGINAL prompt, because a
+    prose LLM is not schema-bound and the error would be noise to it.
+
+    ``BudgetExceededError`` is re-raised untouched at every stage: a budget
+    abort must end the run, never be repackaged as a structured miss.
     """
     if structured_llm is None:
         return None
     try:
-        result = structured_llm.invoke(prompt)
-        if result is None:
-            # A thinking model can answer in plain text instead of calling
-            # the tool, leaving the parser with nothing to return. Treat it
-            # as a structured miss and fall back, with a clear reason.
-            raise ValueError("structured output returned no parsed result")
-        return result
+        return _invoke_parsed(structured_llm, prompt)
+    except BudgetExceededError:
+        raise
     except Exception as exc:
         logger.warning(
-            "%s: structured-output invocation failed (%s); retrying once as free text",
+            "%s: structured-output invocation failed (%s); retrying once with error context",
             agent_name, exc,
         )
-        return None
+        try:
+            return _invoke_parsed(structured_llm, _with_error_context(prompt, exc))
+        except BudgetExceededError:
+            raise
+        except Exception as retry_exc:
+            logger.warning(
+                "%s: structured retry failed (%s); falling back to free text",
+                agent_name, retry_exc,
+            )
+            return None
 
 
 def invoke_structured_or_freetext(
