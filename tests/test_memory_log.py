@@ -927,7 +927,9 @@ class TestLegacyRemoval:
         mock_graph.log_states_dict = {}
         mock_graph.debug = False
         mock_graph.config = {"results_dir": str(tmp_path)}
-        mock_graph.graph.invoke.return_value = fake_state
+        # _run_graph streams (budget partial save, #582); stub a single-chunk
+        # stream so the real write path still executes.
+        mock_graph.graph.stream.return_value = iter([fake_state])
         mock_graph.propagator.create_initial_state.return_value = fake_state
         mock_graph.propagator.get_graph_args.return_value = {}
         mock_graph.signal_processor.process_signal.return_value = "Buy"

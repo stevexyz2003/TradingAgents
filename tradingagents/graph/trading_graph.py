@@ -29,6 +29,7 @@ from tradingagents.agents.utils.agent_utils import (
     resolve_instrument_identity,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.budget import BudgetExceededError, build_spend_tracker
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import get_current_date, safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -93,6 +94,11 @@ def _coerce_max_tokens(value):
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
+    # Per-run budget tracker (#582); __init__ sets it when a limit is
+    # configured. The class default keeps graphs built without __init__
+    # (tests, tooling) on the no-budget path.
+    spend_tracker = None
+
     def __init__(
         self,
         selected_analysts=("market", "social", "news", "fundamentals"),
@@ -111,6 +117,15 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+
+        # Per-run budget enforcement (#582). build_spend_tracker raises
+        # BudgetConfigError here — at graph construction — when
+        # max_cost_per_run is set without usable model_cost_rates, so both
+        # the CLI and Python-API users fail fast instead of silently
+        # counting zero cost.
+        self.spend_tracker = build_spend_tracker(self.config)
+        if self.spend_tracker is not None:
+            self.callbacks.append(self.spend_tracker)
 
         # Update the interface's config
         set_config(self.config)
@@ -543,7 +558,13 @@ class TradingAgentsGraph:
         known by the trade date for the Portfolio Manager (#1251) and the
         resolved instrument identity for every agent (#814). An entry point that
         assembled the state itself would skip the decision log.
+
+        Budgets (#582) are per run and this is the shared entry, so the spend
+        tracker is reset first: settling pending decisions calls the reflector
+        LLM, and that spend counts toward this run's cap.
         """
+        if self.spend_tracker is not None:
+            self.spend_tracker.reset()
         self._resolve_pending_entries(company_name)
         return self.propagator.create_initial_state(
             company_name,
@@ -589,11 +610,16 @@ class TradingAgentsGraph:
 
         # None resumes an existing checkpoint; init_agent_state starts fresh (#1249).
         graph_input = self.checkpoint_input(init_agent_state)
-        if self.debug:
-            trace = []
-            last_printed = None
+
+        # Always stream, never invoke: a budget abort (#582) needs the last
+        # completed state to save. get_graph_args uses stream_mode="values", so
+        # each chunk is the full state and the merge equals invoke()'s result.
+        final_state = {}
+        last_state = None
+        last_printed = None
+        try:
             for chunk in self.graph.stream(graph_input, **args):
-                if chunk["messages"]:
+                if self.debug and chunk["messages"]:
                     msg = chunk["messages"][-1]
                     # Nodes after the trader don't append to messages, so the
                     # same trailing message repeats across chunks. Print it only
@@ -602,14 +628,13 @@ class TradingAgentsGraph:
                     if signature != last_printed:
                         msg.pretty_print()
                         last_printed = signature
-                    trace.append(chunk)
-            # Streamed chunks are per-node deltas. Merge them so the returned
-            # state matches what graph.invoke() yields in the non-debug path.
-            final_state = {}
-            for chunk in trace:
                 final_state.update(chunk)
-        else:
-            final_state = self.graph.invoke(graph_input, **args)
+                last_state = chunk
+        except BudgetExceededError:
+            # Keep what was completed, then abort. The decision record and the
+            # checkpoint clear below are skipped, so --checkpoint resumes it.
+            self._save_partial_state(trade_date, last_state)
+            raise
 
         # Store current state for reflection.
         self.curr_state = final_state
@@ -623,6 +648,21 @@ class TradingAgentsGraph:
         self.clear_checkpoint_on_success(company_name, trade_date, asset_type, portfolio)
 
         return final_state, self.process_signal(final_state["final_trade_decision"])
+
+    def _save_partial_state(self, trade_date, last_state):
+        """Write the last streamed state of a budget-aborted run (#582).
+
+        Called by ``_run_graph`` and the CLI when ``BudgetExceededError`` stops
+        the stream. The run's checkpoint is not cleared on this path, so a
+        checkpointed run resumes from its last completed step.
+        """
+        if last_state is not None:
+            self.curr_state = last_state
+            self._log_state(trade_date, last_state)
+        logger.warning(
+            "Run aborted by budget limit for %s on %s; resume with --checkpoint",
+            self.ticker, trade_date,
+        )
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""

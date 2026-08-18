@@ -44,6 +44,7 @@ from cli.utils import (
 )
 from tradingagents.agents.utils.rating import is_review
 from tradingagents.backtest import iter_grid, run_backtest, summarize
+from tradingagents.budget import BudgetConfigError, BudgetExceededError
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.analyst_execution import (
@@ -1062,12 +1063,16 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None):
     analyst_wall_time_tracker = AnalystWallTimeTracker(analyst_execution_plan)
 
     # Initialize the graph with callbacks bound to LLMs
-    graph = TradingAgentsGraph(
-        selected_analyst_keys,
-        config=config,
-        debug=True,
-        callbacks=[stats_handler],
-    )
+    try:
+        graph = TradingAgentsGraph(
+            selected_analyst_keys,
+            config=config,
+            debug=True,
+            callbacks=[stats_handler],
+        )
+    except BudgetConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
 
     # Initialize message buffer with selected analysts
     message_buffer.init_for_analysis(selected_analyst_keys)
@@ -1179,6 +1184,7 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None):
         # interrupted run instead of re-appending the initial state (#1249); the
         # try/finally tears the checkpointer down even if the stream raises.
         trace = []
+        budget_abort = None
         try:
             for chunk in graph.graph.stream(graph.checkpoint_input(init_agent_state), **args):
                 # Process all messages in chunk, deduplicating by message ID
@@ -1295,25 +1301,46 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None):
             graph.clear_checkpoint_on_success(
                 selections["ticker"], selections["analysis_date"], selections["asset_type"], portfolio
             )
+        except BudgetExceededError as exc:
+            # A budget limit (#582) stopped the run before the next LLM call.
+            # Save the last streamed state; the decision record and the
+            # checkpoint clear above are skipped, so --checkpoint resumes it.
+            budget_abort = exc
+            graph.ticker = selections["ticker"]
+            graph._save_partial_state(selections["analysis_date"], trace[-1] if trace else None)
         finally:
             # Always restore the plain uncheckpointed graph, even on failure.
             graph.end_checkpoint()
 
-        # Update all agent statuses to completed
-        for agent in message_buffer.agent_status:
-            message_buffer.update_agent_status(agent, "completed")
+        if budget_abort is not None:
+            message_buffer.add_message("System", f"Budget limit reached: {budget_abort}")
+        else:
+            # Update all agent statuses to completed
+            for agent in message_buffer.agent_status:
+                message_buffer.update_agent_status(agent, "completed")
 
-        message_buffer.add_message(
-            "System", f"Completed analysis for {selections['analysis_date']}"
-        )
-        message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
+            message_buffer.add_message(
+                "System", f"Completed analysis for {selections['analysis_date']}"
+            )
+            message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
 
-        # Update final report sections
-        for section in message_buffer.report_sections:
-            if section in final_state:
-                message_buffer.update_report_section(section, final_state[section])
+            # Update final report sections
+            for section in message_buffer.report_sections:
+                if section in final_state:
+                    message_buffer.update_report_section(section, final_state[section])
 
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
+
+    if budget_abort is not None:
+        # Clean abort: the last graph state was saved via _save_partial_state;
+        # report sections written so far are on disk.
+        console.print(f"\n[red]Budget limit reached:[/red] {budget_abort}")
+        console.print(
+            "[yellow]The last graph state was saved and the report sections "
+            "completed so far are under the results directory. Re-run with "
+            "--checkpoint to resume from the last completed step.[/yellow]"
+        )
+        raise typer.Exit(1)
 
     # Post-analysis prompts (outside Live context for clean interaction)
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")

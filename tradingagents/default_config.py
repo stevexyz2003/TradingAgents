@@ -106,6 +106,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # unbounded reasoning/output and hangs or trips a gateway idle timeout
     # (e.g. some deepseek-v4-flash deployments, #1204).
     "max_tokens": None,
+    # Per-run budget enforcement (#582). max_cost_per_run (USD) requires
+    # user-supplied model_cost_rates ({"<model>": {"input": usd_per_1M_input,
+    # "output": usd_per_1M_output}}) — there is deliberately no hardcoded
+    # price table. max_tokens_per_run is a rate-free alternative. None = off.
+    "max_cost_per_run": None,
+    "max_tokens_per_run": None,
+    "model_cost_rates": {},
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,

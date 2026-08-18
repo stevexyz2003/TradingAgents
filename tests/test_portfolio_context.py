@@ -176,7 +176,8 @@ def test_completed_run_clears_the_checkpoint_it_wrote(tmp_path, monkeypatch):
     graph.propagator.get_graph_args = lambda callbacks=None: {}
     graph.process_signal = lambda d: "Hold"
     graph._log_state = lambda *a, **k: None
-    graph.graph = type("G", (), {"invoke": lambda self, i, **k: {"final_trade_decision": "Rating: Hold\n\nx"}})()
+    # _run_graph streams (budget partial save, #582), so the stub streams one state.
+    graph.graph = type("G", (), {"stream": lambda self, i, **k: iter([{"final_trade_decision": "Rating: Hold\n\nx"}])})()
     book = PortfolioContext.model_validate(HOLDING)
 
     written = graph._run_signature("stock", book)  # what begin_checkpoint keys on
