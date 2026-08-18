@@ -42,6 +42,7 @@ from cli.utils import (
     select_shallow_thinking_agent,
 )
 from tradingagents.budget import BudgetConfigError, BudgetExceededError
+from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients.factory import MissingAPIKeyError
 from tradingagents.graph.analyst_execution import (
@@ -1037,6 +1038,15 @@ def run_analysis(checkpoint: bool | None = None):
     start_time = time.time()
 
     # Create result directory
+    # The ticker flows into results/report paths below — reject path-escaping
+    # values before anything is created on disk (same class as #618, which
+    # covers the graph-side log/checkpoint paths).
+    try:
+        safe_ticker_component(selections["ticker"])
+    except ValueError as exc:
+        console.print(f"[red]Invalid ticker: {exc}[/red]")
+        raise typer.Exit(1)
+
     results_dir = Path(config["results_dir"]) / selections["ticker"] / selections["analysis_date"]
     results_dir.mkdir(parents=True, exist_ok=True)
     report_dir = results_dir / "reports"
