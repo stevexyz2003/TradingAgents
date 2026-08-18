@@ -43,6 +43,7 @@ from cli.utils import (
 )
 from tradingagents.budget import BudgetConfigError, BudgetExceededError
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.llm_clients.factory import MissingAPIKeyError
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
     build_analyst_execution_plan,
@@ -1025,7 +1026,7 @@ def run_analysis(checkpoint: bool | None = None):
             debug=True,
             callbacks=[stats_handler],
         )
-    except BudgetConfigError as exc:
+    except (BudgetConfigError, MissingAPIKeyError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 

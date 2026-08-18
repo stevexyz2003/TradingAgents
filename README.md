@@ -160,6 +160,33 @@ Alternatively, copy `.env.example` to `.env` and fill in your keys:
 cp .env.example .env
 ```
 
+#### Secrets & configuration for production
+
+**Where keys live.** Put keys in a local `.env` (`cp .env.example .env`) — it
+is gitignored and must never be committed — or export them as plain
+environment variables. Enterprise providers (Azure OpenAI) use
+`.env.enterprise` (`cp .env.enterprise.example .env.enterprise`). Docker
+picks up `.env` automatically via `docker compose`. Azure requires:
+`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`,
+`AZURE_OPENAI_DEPLOYMENT_NAME`, and `OPENAI_API_VERSION`.
+
+**Fail-fast validation.** A missing or empty key for the chosen provider
+aborts immediately at startup with a message naming the environment
+variable — instead of crashing mid-run on the first LLM call. Passing an
+explicit `api_key` to the Python API replaces only the key check; Azure
+endpoint/deployment/api-version variables are still validated. Local
+servers (Ollama, `openai_compatible`) never require a key; Bedrock uses
+the AWS credential chain.
+
+**Costs & quotas.** Alpha Vantage has a request quota (the yfinance vendor
+is the default and needs no key). To cap LLM spend on unattended runs, use
+`--max-cost <USD>` on the CLI or set `max_cost_per_run` in config — this
+requires user-supplied `model_cost_rates` (USD per 1M input/output tokens
+per model) and aborts the run cleanly before the next LLM call once the
+limit is exceeded; `max_tokens_per_run` is a rate-free alternative. The
+last graph state is saved on abort and the run stays resumable with
+`--checkpoint`.
+
 ### CLI Usage
 
 Launch the interactive CLI:
