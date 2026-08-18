@@ -140,7 +140,14 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
     # Track start time for elapsed display
     start_time = time.time()
 
-    results_dir = _run_directory(config, selections["ticker"], selections["analysis_date"])
+    # _run_directory rejects a path-escaping ticker before anything is created
+    # on disk (same class as #618); report it as a clean error rather than a
+    # traceback. It now sits outside the Live block, so the message is visible.
+    try:
+        results_dir = _run_directory(config, selections["ticker"], selections["analysis_date"])
+    except ValueError as exc:
+        console.print(f"[red]Invalid ticker: {exc}[/red]")
+        raise typer.Exit(1) from None
     results_dir.mkdir(parents=True, exist_ok=True)
     report_dir = results_dir / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)

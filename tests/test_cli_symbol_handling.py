@@ -73,3 +73,29 @@ def test_the_run_directory_cannot_escape_the_results_directory(tmp_path, monkeyp
 
     ok = cli_run._run_directory({"results_dir": str(tmp_path)}, "NVDA", "2026-09-01")
     assert str(ok).startswith(str(tmp_path))
+
+
+@pytest.mark.unit
+def test_the_cli_reports_a_rejected_ticker_instead_of_a_traceback(tmp_path, monkeypatch, capsys):
+    """Upstream rejects the ticker before any disk write, but only with a raw
+    ValueError; the CLI turns it into a message and exit code 1 (ours)."""
+    import typer
+
+    from cli.models import AnalystType
+
+    monkeypatch.setattr(cli_run, "unattended_gaps", lambda flags: [])
+    monkeypatch.setattr(cli_run, "get_user_selections", lambda flags: {
+        "ticker": "..", "analysis_date": "2026-09-01",
+        "analysts": [AnalystType.MARKET], "asset_type": "stock",
+    })
+    monkeypatch.setattr(cli_run, "_build_run_config",
+                        lambda selections, checkpoint: {"results_dir": str(tmp_path / "results")})
+    monkeypatch.setattr(cli_run, "TradingAgentsGraph", lambda *a, **k: object())
+    monkeypatch.setattr(cli_run.message_buffer, "init_for_analysis", lambda keys: None)
+
+    with pytest.raises(typer.Exit) as excinfo:
+        cli_run.run_analysis()
+
+    assert excinfo.value.exit_code == 1
+    assert "Invalid ticker" in capsys.readouterr().out
+    assert not (tmp_path / "results").exists()
