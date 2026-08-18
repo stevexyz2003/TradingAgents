@@ -32,6 +32,7 @@ from tradingagents.graph.analyst_execution import (
     build_analyst_execution_plan,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.llm_clients.factory import MissingAPIKeyError
 
 
 def _run_directory(config: dict, ticker: str, trade_date: str) -> Path:
@@ -128,7 +129,9 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
             debug=True,
             callbacks=[stats_handler],
         )
-    except BudgetConfigError as exc:
+    except (BudgetConfigError, MissingAPIKeyError) as exc:
+        # A misconfigured budget or a missing provider key is a setup error:
+        # say what is wrong instead of a traceback from graph construction.
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None
 
