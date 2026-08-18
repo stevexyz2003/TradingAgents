@@ -6,7 +6,8 @@ Covers:
 - defensive extraction (malformed LLMResult must never crash the run)
 - build_spend_tracker fail-fast when max_cost_per_run lacks model_cost_rates
 - partial save on BudgetExceededError in _run_graph / _save_partial_state
-  (unbound-method pattern), with no decision record and no checkpoint clear
+  (unbound-method pattern), with no decision record and no checkpoint clear;
+  the save is best-effort and never masks the abort
 - per-run reset in create_run_state; settlement runs inside the graph
   (_memory_step), so its reflection spend counts toward the run
 - a budget abort escaping _memory_step instead of being logged as a
@@ -285,6 +286,41 @@ class TestRunGraphBudgetAbort:
         ]
         assert persisted == ["record_decision", "clear_checkpoint_on_success"]
         mock_graph.record_decision.assert_called_once_with("AAPL", "2026-01-01", final_state)
+
+    def test_a_failed_persistence_keeps_the_checkpoint(self, tmp_path):
+        """The clear comes only after the results are persisted (upstream's
+        record_decision writes the state log), so a failure there leaves the
+        run resumable."""
+        def fake_stream_run(graph_input, **kwargs):
+            yield [], _full_state()
+
+        mock_graph = _run_graph_double(tmp_path, fake_stream_run)
+        mock_graph.record_decision.side_effect = OSError("disk full")
+
+        with pytest.raises(OSError):
+            TradingAgentsGraph._run_graph(mock_graph, "AAPL", "2026-01-01")
+
+        mock_graph.clear_checkpoint_on_success.assert_not_called()
+
+    def test_budget_abort_survives_a_real_partial_save_failure(self, tmp_path):
+        """Through the real _save_partial_state: an early abort whose state
+        lacks the final fields must still surface as BudgetExceededError."""
+        def fake_stream_run(graph_input, **kwargs):
+            yield [], {"messages": []}
+            raise BudgetExceededError("over budget")
+
+        mock_graph = _run_graph_double(tmp_path, fake_stream_run)
+        mock_graph._save_partial_state.side_effect = (
+            lambda *a: TradingAgentsGraph._save_partial_state(mock_graph, *a)
+        )
+        mock_graph._log_state.side_effect = KeyError("company_of_interest")
+
+        with pytest.raises(BudgetExceededError):
+            TradingAgentsGraph._run_graph(mock_graph, "AAPL", "2026-01-01")
+
+        mock_graph._log_state.assert_called_once()
+        mock_graph.clear_checkpoint_on_success.assert_not_called()
+
 
 
 class TestSavePartialState:
