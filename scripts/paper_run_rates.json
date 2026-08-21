@@ -1,0 +1,9 @@
+{
+  "_note": "Operator-maintained price table for scripts/daily_paper_run.py. USD per 1M tokens. The library ships no built-in prices on purpose (#582) - these values are NOT authoritative. VERIFY THEM against your provider's current price list before the first live run, and re-check whenever you switch models. Over-estimating is the safe direction: the budget then trips early instead of late. A model with no entry here is billed at the most expensive configured rate, so keeping the priciest model listed keeps that fallback conservative.",
+  "_verified": "never - placeholder values, see _note",
+  "gpt-5.5": {"input": 5.0, "output": 40.0},
+  "gpt-5.4": {"input": 3.0, "output": 24.0},
+  "gpt-5.4-mini": {"input": 1.0, "output": 8.0},
+  "gpt-5.4-nano": {"input": 0.5, "output": 4.0},
+  "gpt-5.5-pro": {"input": 30.0, "output": 180.0}
+}

@@ -12,7 +12,7 @@ Features from the former `v0.2.5-tex` strand, ported onto upstream v0.3.1.
 
 ### Added
 
-- **Per-run budget enforcement** (#582): `--max-cost` / `max_cost_per_run`
+- **Per-run budget enforcement** (#582): `max_cost_per_run` in config
   with user-supplied `model_cost_rates` (no hardcoded price table), plus
   rate-free `max_tokens_per_run`. Exceeding a limit aborts before the next
   LLM call, saves the last graph state, and stays resumable with
@@ -27,6 +27,12 @@ Features from the former `v0.2.5-tex` strand, ported onto upstream v0.3.1.
 - **Fail-fast credential validation** for the native provider families
   (Anthropic, Google, Azure incl. `OPENAI_API_VERSION`); README section
   "Secrets & configuration for production".
+- **Scheduled paper run** (fork operations): `scripts/daily_paper_run.py`
+  plus the `Daily Paper Run` workflow analyze a short ticker list every
+  trading morning under a hard per-ticker cost cap, publish the reports as a
+  build artifact, and commit the decision log to the `paper-log` branch so
+  realized return and alpha accumulate across days. Operating manual in
+  `scripts/PAPER_RUN.md`.
 
 ### Fixed
 
