@@ -1,0 +1,208 @@
+# Daily paper run - the heartbeat of the TradingEngineX strand.
+#
+# Analyzes a short ticker list once per session close with a hard per-run cost
+# budget, uploads the reports as an artifact, and commits the decision log to
+# the `paper-log` branch so the track record survives artifact retention and
+# keeps the repository active (GitHub disables cron on repos idle for 60 days).
+#
+# Fork operations, not upstream CI. Operating manual: scripts/PAPER_RUN.md
+#
+# Configuration lives in repository variables (Settings > Secrets and
+# variables > Actions), credentials in repository secrets:
+#   vars.PAPER_RUN_TICKERS            default AAPL,MSFT,NVDA
+#   vars.PAPER_RUN_MAX_COST           default 1.50 (USD per ticker, hard cap)
+#   vars.TRADINGAGENTS_LLM_PROVIDER   default openai
+#   vars.TRADINGAGENTS_DEEP_THINK_LLM / _QUICK_THINK_LLM (default: config)
+#   secrets.<PROVIDER>_API_KEY        e.g. OPENAI_API_KEY
+name: Daily Paper Run
+
+on:
+  schedule:
+    # Tue-Sat 06:30 UTC: the morning after each US session, so --date=auto
+    # (previous weekday) maps to exactly one closed session per run.
+    - cron: '30 6 * * 2-6'
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Tickers (comma separated); empty = repository default'
+        required: false
+        type: string
+      date:
+        description: 'Trade date YYYY-MM-DD, or auto'
+        required: false
+        default: 'auto'
+        type: string
+      max_cost:
+        description: 'Hard USD budget per ticker; empty = repository default'
+        required: false
+        type: string
+      preflight_only:
+        description: 'Validate config and credentials without spending anything'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  # Never two writers on the paper-log branch; a queued run must not be
+  # cancelled or that day's decision log is lost.
+  group: daily-paper-run
+  cancel-in-progress: false
+
+jobs:
+  paper-run:
+    name: paper run
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      STATE_BRANCH: paper-log
+      STATE_DIR: ${{ runner.temp }}/paper-state
+      OUT_DIR: ${{ github.workspace }}/paper-run-out
+      TICKERS: ${{ inputs.tickers || vars.PAPER_RUN_TICKERS || 'AAPL,MSFT,NVDA' }}
+      TRADE_DATE: ${{ inputs.date || 'auto' }}
+      MAX_COST: ${{ inputs.max_cost || vars.PAPER_RUN_MAX_COST || '1.50' }}
+      # Non-secret run configuration (empty values fall through to the
+      # library's own defaults - see tradingagents/default_config.py).
+      TRADINGAGENTS_LLM_PROVIDER: ${{ vars.TRADINGAGENTS_LLM_PROVIDER || 'openai' }}
+      TRADINGAGENTS_DEEP_THINK_LLM: ${{ vars.TRADINGAGENTS_DEEP_THINK_LLM }}
+      TRADINGAGENTS_QUICK_THINK_LLM: ${{ vars.TRADINGAGENTS_QUICK_THINK_LLM }}
+      TRADINGAGENTS_LLM_BACKEND_URL: ${{ vars.TRADINGAGENTS_LLM_BACKEND_URL }}
+      TRADINGAGENTS_MAX_DEBATE_ROUNDS: ${{ vars.TRADINGAGENTS_MAX_DEBATE_ROUNDS || '1' }}
+      TRADINGAGENTS_MAX_RISK_ROUNDS: ${{ vars.TRADINGAGENTS_MAX_RISK_ROUNDS || '1' }}
+      TRADINGAGENTS_LLM_MAX_RETRIES: ${{ vars.TRADINGAGENTS_LLM_MAX_RETRIES || '4' }}
+      # Credentials. Only the chosen provider's variable has to exist; the
+      # preflight step names the missing one instead of failing mid-run.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      # Optional data vendors (yfinance is the keyless default).
+      ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the package
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Preflight (config + credentials, no LLM call)
+        id: preflight
+        run: |
+          set +e
+          python scripts/daily_paper_run.py \
+            --preflight \
+            --tickers "$TICKERS" \
+            --date "$TRADE_DATE" \
+            --max-cost "$MAX_COST" \
+            --out "$OUT_DIR" \
+            --state "$STATE_DIR"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 20 ]; then
+            # No key configured yet: skip instead of crying wolf every morning.
+            # The warning keeps it visible without a permanently red schedule.
+            echo "::warning title=Paper run skipped::No provider credentials configured - add the API key secret to enable the daily run."
+            {
+              echo "### Paper run skipped"
+              echo ""
+              echo "No provider credentials configured. Add the API key as a repository secret (see \`scripts/PAPER_RUN.md\`)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Restore the paper-log state branch
+        if: steps.preflight.outputs.skip == 'false' && !inputs.preflight_only
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$STATE_DIR"
+          cd "$STATE_DIR"
+          git init -q -b "$STATE_BRANCH"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch -q --depth=1 origin "$STATE_BRANCH"; then
+            git reset -q --hard FETCH_HEAD
+            echo "state: restored $STATE_BRANCH ($(git rev-parse --short HEAD))"
+          else
+            echo "state: $STATE_BRANCH does not exist yet - starting a fresh log"
+          fi
+
+      - name: Run the analysis
+        id: run
+        if: steps.preflight.outputs.skip == 'false' && !inputs.preflight_only
+        run: |
+          set +e
+          python scripts/daily_paper_run.py \
+            --tickers "$TICKERS" \
+            --date "$TRADE_DATE" \
+            --max-cost "$MAX_COST" \
+            --out "$OUT_DIR" \
+            --state "$STATE_DIR"
+          rc=$?
+          set -e
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f "$OUT_DIR/summary.md" ]; then
+            cat "$OUT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the run artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-run-${{ github.run_number }}
+          path: ${{ env.OUT_DIR }}
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Commit the decision log
+        # Runs even when the analysis exited non-zero: a partial day still
+        # produced decisions worth keeping, and dropping them would also drop
+        # the pending entries whose realized return resolves on a later run.
+        if: always() && steps.run.outcome != 'skipped'
+        run: |
+          cd "$STATE_DIR"
+          # Isolated state checkout under RUNNER_TEMP - it holds only files
+          # this workflow generates, so staging everything is the right scope.
+          git add -A .
+          if git diff --cached --quiet; then
+            echo "state: nothing to commit"
+            exit 0
+          fi
+          git commit -q -m "paper-run: ${TRADE_DATE} (${TICKERS})" \
+            -m "Run ${GITHUB_RUN_ID} on ${GITHUB_SHA}."
+          git push -q origin "HEAD:$STATE_BRANCH"
+          echo "state: pushed $(git rev-parse --short HEAD) to $STATE_BRANCH"
+
+      - name: Propagate the run result
+        if: always() && steps.run.outcome != 'skipped'
+        run: |
+          rc="${{ steps.run.outputs.exit_code }}"
+          case "$rc" in
+            0) echo "paper run OK" ;;
+            3) echo "::error title=Paper run::At least one ticker failed - see the job summary." ;;
+            4) echo "::error title=Paper run::The cost budget aborted a ticker. Raise PAPER_RUN_MAX_COST or switch to a cheaper model." ;;
+            *) echo "::error title=Paper run::Runner exited with code $rc." ;;
+          esac
+          exit "$rc"
