@@ -58,7 +58,6 @@ jobs:
     timeout-minutes: 60
     env:
       STATE_BRANCH: paper-log
-      STATE_DIR: ${{ runner.temp }}/paper-state
       OUT_DIR: ${{ github.workspace }}/paper-run-out
       TICKERS: ${{ inputs.tickers || vars.PAPER_RUN_TICKERS || 'AAPL,MSFT,NVDA' }}
       TRADE_DATE: ${{ inputs.date || 'auto' }}
@@ -85,6 +84,12 @@ jobs:
       FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
 
     steps:
+      # $RUNNER_TEMP keeps the state checkout out of the source tree. It is a
+      # shell variable, not a job-env expression - the `runner` context is not
+      # available in jobs.<id>.env.
+      - name: Resolve the state directory
+        run: echo "STATE_DIR=$RUNNER_TEMP/paper-state" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
