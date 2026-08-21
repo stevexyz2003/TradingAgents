@@ -4,9 +4,15 @@
 **Ziel:** Das Framework soll in nächster Zeit produktiv eingesetzt werden. Dieser Meilenstein hält fest, was dafür bereits steht und was noch fehlt.
 
 > Kontext: TradingEngineX ist der lokale Arbeitsklon von `TauricResearch/TradingAgents`
-> (Multi-Agent-LLM-Trading-Framework, LangGraph). Der produktive Einsatz selbst
-> (Paper-Trading-Loop) läuft im Schwesterprojekt `ai_tradex`; dieses Repo liefert
-> das Framework darunter und muss dafür releasefähig und betriebssicher sein.
+> (Multi-Agent-LLM-Trading-Framework, LangGraph).
+>
+> **Korrektur 2026-08-21:** Die ursprüngliche Annahme, der Produktivbetrieb laufe
+> im Schwesterprojekt `ai_tradex` und dieses Repo liefere „das Framework darunter",
+> ist faktisch falsch — `ai_tradex` referenziert `tradingagents` in keiner einzigen
+> Code-Datei und baut das Muster per ADR-0026 nativ nach. Dieses Repo hat seinen
+> Betriebszweck deshalb in sich selbst: den täglichen Paper-Lauf im Fork
+> (`scripts/PAPER_RUN.md`), der zugleich als Heartbeat gegen erneuten Stillstand
+> dient. Produktionsreife heißt hier: dieser Lauf trägt sich unbeaufsichtigt.
 
 ---
 
