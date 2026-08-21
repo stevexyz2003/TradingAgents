@@ -36,6 +36,10 @@ on:
         description: 'Hard USD budget per ticker; empty = repository default'
         required: false
         type: string
+      provider:
+        description: 'LLM provider override for this run; empty = repository default'
+        required: false
+        type: string
       preflight_only:
         description: 'Validate config and credentials without spending anything'
         required: false
@@ -64,7 +68,7 @@ jobs:
       MAX_COST: ${{ inputs.max_cost || vars.PAPER_RUN_MAX_COST || '1.50' }}
       # Non-secret run configuration (empty values fall through to the
       # library's own defaults - see tradingagents/default_config.py).
-      TRADINGAGENTS_LLM_PROVIDER: ${{ vars.TRADINGAGENTS_LLM_PROVIDER || 'openai' }}
+      TRADINGAGENTS_LLM_PROVIDER: ${{ inputs.provider || vars.TRADINGAGENTS_LLM_PROVIDER || 'openai' }}
       TRADINGAGENTS_DEEP_THINK_LLM: ${{ vars.TRADINGAGENTS_DEEP_THINK_LLM }}
       TRADINGAGENTS_QUICK_THINK_LLM: ${{ vars.TRADINGAGENTS_QUICK_THINK_LLM }}
       TRADINGAGENTS_LLM_BACKEND_URL: ${{ vars.TRADINGAGENTS_LLM_BACKEND_URL }}
