@@ -179,13 +179,16 @@ servers (Ollama, `openai_compatible`) never require a key; Bedrock uses
 the AWS credential chain.
 
 **Costs & quotas.** Alpha Vantage has a request quota (the yfinance vendor
-is the default and needs no key). To cap LLM spend on unattended runs, use
-`--max-cost <USD>` on the CLI or set `max_cost_per_run` in config — this
-requires user-supplied `model_cost_rates` (USD per 1M input/output tokens
-per model) and aborts the run cleanly before the next LLM call once the
-limit is exceeded; `max_tokens_per_run` is a rate-free alternative. The
-last graph state is saved on abort and the run stays resumable with
-`--checkpoint`.
+is the default and needs no key). To cap LLM spend on unattended runs, set
+`max_cost_per_run` (USD) in the config dict you pass to
+`TradingAgentsGraph` — it requires user-supplied `model_cost_rates` (USD per
+1M input/output tokens per model) and aborts the run cleanly before the next
+LLM call once the limit is exceeded; `max_tokens_per_run` is a rate-free
+alternative that needs no rates. Both are validated at graph construction, so
+a cost limit without rates fails immediately instead of silently counting
+zero. The last graph state is saved on abort and the run stays resumable with
+`--checkpoint`. `scripts/daily_paper_run.py` wires this up for scheduled,
+unattended runs — see `scripts/PAPER_RUN.md`.
 
 ### CLI Usage
 
