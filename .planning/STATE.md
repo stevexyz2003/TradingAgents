@@ -5,7 +5,26 @@
 
 ## Current Position
 
-Last activity: 2026-08-18 - Rebase auf Upstream v0.3.1 (origin/main a33fd4c) abgeschlossen: 4 Feature-Ports + 4 Docs-Commits, Release-/CI-Commits gedroppt (upstream erledigt), 616 Tests grün
+Last activity: 2026-08-21 - Täglicher Paper-Lauf als Heartbeat gebaut (Cron-Workflow + Runner + paper-log-Branch). Davor 2026-08-18: Rebase auf Upstream v0.3.1 (origin/main a33fd4c), 4 Feature-Ports + 4 Docs-Commits, Fork-CI vollständig grün (Run 32138694932).
+
+### Heartbeat: täglicher Paper-Lauf (2026-08-21)
+
+Beschluss nach der Stillstands-Analyse: Dieses Repo bekommt einen eigenen
+Betriebszweck statt nur Framework-Zulieferer zu sein.
+
+- **Was:** `.github/workflows/daily-paper-run.yml` (Di-Sa 06:30 UTC) ruft
+  `scripts/daily_paper_run.py` für 2-3 Ticker mit hartem Kosten-Cap pro Ticker.
+- **Wohin:** Reports als Build-Artefakt (90 Tage), Decision-Log + Index +
+  Tages-Summary dauerhaft auf Branch `paper-log`. Der tägliche Commit hält
+  außerdem den Cron am Leben (GitHub deaktiviert Schedules nach 60 Tagen
+  Repo-Inaktivität).
+- **Warum rot sichtbar wird:** Fehlende Credentials = grün mit Warning
+  (kein Cry-Wolf), echte Fehler = rot mit Exit-Code-Semantik (1 Config,
+  3 Ticker-Fehler, 4 Budget). Handbuch: `scripts/PAPER_RUN.md`.
+- **Operator-Restaufgaben (bewusst offen, brauchen Zugangsdaten):**
+  Provider-Secret im Fork setzen, `scripts/paper_run_rates.json` gegen die
+  echte Preisliste prüfen (aktuell konservative Platzhalter), danach einen
+  scharfen Lauf beobachten und `PAPER_RUN_MAX_COST` kalibrieren.
 
 ### Rebase-Protokoll (2026-08-18)
 
@@ -20,7 +39,15 @@ Last activity: 2026-08-18 - Rebase auf Upstream v0.3.1 (origin/main a33fd4c) abg
 - uv.lock: Upstream hat die Datei entfernt (0b61eff) — Operator-Kopie liegt untracked auf Disk + Scratchpad-Backup; Lockfile-Thema damit erledigt
 - CLI-Memory-Parität (kein past_context im CLI-initState) besteht auch upstream weiter — Known Issue, kein Port-Regress
 - Known Issues (v0.2.6-Kandidaten): `python-dotenv` undeklariert (nur transitiv, Fix ändert uv.lock); CLI-Memory-Parität (kein past_context/_resolve_pending_entries im CLI-Pfad — vorbestehend, Codex-Finding #4); CI-Lockfile-Policy (`uv sync` ohne `--locked`, bis uv.lock-Drift geklärt)
-- Erster GitHub-Actions-Lauf nach Push beobachten (dev-group-Install-Annahme, Fallback-Kommentar in ci.yml)
+- Fork-CI läuft und ist grün (Run 32138694932, alle 6 Jobs) — erledigt
+- **Prämissen-Korrektur (2026-08-21):** `ai_tradex` konsumiert dieses Repo
+  NICHT (0 Code-Referenzen; ADR-0026 baut das TradingAgents-Muster nativ
+  nach). Die MILESTONE-Annahme „liefert das Framework unter ai_tradex" war
+  falsch — daher der eigene Paper-Lauf als Daseinszweck.
+- Reflexions-Horizont: `_fetch_returns` löst schon bei 2 Kursbalken auf, bei
+  täglicher Kadenz also nach ~1 Handelstag statt der vorgesehenen 5. Der
+  Track-Record ist damit eine 1-Tages-Renditereihe. Sauberer Fix (`len(bars)
+  > holding_days`) wäre upstream-relevant — bewusst nicht mitgemacht.
 
 ### Quick Tasks Completed
 
