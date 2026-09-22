@@ -123,13 +123,13 @@ up. `--date auto` is the previous weekday; pass `YYYY-MM-DD` for a backfill.
 
 ## Known limitations
 
-- **The reflection horizon collapses to about one trading day.** Upstream's
-  `_fetch_returns` defaults to a five-day holding period but resolves as soon
-  as two price bars exist, so with a daily cadence on the same tickers every
-  entry is scored one day after the decision. The track record is therefore a
-  1-day return series, not a 5-day one. Fixing it properly means requiring
-  `len(bars) > holding_days` before resolving — an upstream-relevant change,
-  deliberately not made here.
+- **A decision is scored only after its full holding window.** An entry stays
+  `pending` until `holding_period_days` trading days (config key, default 5)
+  have traded after the decision (upstream #1169). With the daily cadence each
+  decision is therefore scored about five trading days later, on the next run
+  of the same ticker after that, and the track record is a 5-day return
+  series. A different window means setting `holding_period_days` in the
+  config the runner builds.
 - **Exchange holidays are not modelled.** On a holiday the pipeline analyzes
   the last session's data; the run is green and the report shows it.
 - **LLM output is not deterministic.** Two runs on the same date can disagree.
