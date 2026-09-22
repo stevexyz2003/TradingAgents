@@ -78,3 +78,4 @@ Betriebszweck statt nur Framework-Zulieferer zu sein.
 |---|-------------|------|--------|--------|-----------|
 | 260814-fast | Meilenstein Produktionsreife erstellen (Codex-reviewed) | 2026-08-14 | 216e1d4 | Verified | — |
 | 260814-k1j | P1-Punkte umsetzen: v0.2.5-Release (Tag auf cf351de), CI-Paket, Kosten-Budget (#582), Schema-Retry (#583), Fail-fast-Keys + 4 Codex-Review-Fix-Commits | 2026-08-14 | f5839f3 | Verified | [260814-k1j](./quick/260814-k1j-setz-die-p1-punkte-um-fang-mit-dem-v0-2-/) |
+| 260922-iz5 | Rebase strand onto upstream v0.5.0 (Budget auf #1249-Lifecycle neu aufgesetzt, gpt-5.6-Raten ergänzt, 402cd8b gedroppt) | 2026-09-22 | 164869a | Gates re-run (Promotion offen) | [260922-iz5](./quick/260922-iz5-rebase-strand-onto-upstream-v0-5-0/) |
