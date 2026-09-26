@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-09-26T11:42:58.496263+00:00",
+  "finished_at": "2026-09-26T11:43:31.077092+00:00",
+  "trade_date": "2026-09-25",
+  "provider": "openai",
+  "deep_think_llm": "gpt-5.6",
+  "quick_think_llm": "gpt-5.6-luna",
+  "max_cost_per_run_usd": 1.5,
+  "max_total_cost_usd": 4.5,
+  "commit": "cc6a5dc8aa3c61d86cab970bae8d41bed5b77b68",
+  "status": "failed",
+  "totals": {
+    "tickers": 3,
+    "cost_usd": 0.0,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "ok": 0,
+    "failed": 3,
+    "budget_aborted": 0,
+    "skipped": 0
+  },
+  "runs": [
+    {
+      "ticker": "AAPL",
+      "status": "failed",
+      "signal": null,
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "duration_s": 13.15014641900001,
+      "report": null,
+      "error": "OpenAIRateLimitError: Error code: 429 - {'error': {'message': 'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.', 'type': 'insufficient_quota', 'param': None, 'code': 'credit_balance_exhausted'}}"
+    },
+    {
+      "ticker": "MSFT",
+      "status": "failed",
+      "signal": null,
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "duration_s": 9.12015450900003,
+      "report": null,
+      "error": "OpenAIRateLimitError: Error code: 429 - {'error': {'message': 'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.', 'type': 'insufficient_quota', 'param': None, 'code': 'credit_balance_exhausted'}}"
+    },
+    {
+      "ticker": "NVDA",
+      "status": "failed",
+      "signal": null,
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "duration_s": 9.620690048999904,
+      "report": null,
+      "error": "OpenAIRateLimitError: Error code: 429 - {'error': {'message': 'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.', 'type': 'insufficient_quota', 'param': None, 'code': 'credit_balance_exhausted'}}"
+    }
+  ]
+}
