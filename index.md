@@ -38,3 +38,6 @@ One row per ticker run. Written by `scripts/daily_paper_run.py`.
 | 2026-10-08 | AAPL | - | failed | 0.0000 | 0/0 | runs/2026-10-08/summary.json |
 | 2026-10-08 | MSFT | - | failed | 0.0000 | 0/0 | runs/2026-10-08/summary.json |
 | 2026-10-08 | NVDA | - | failed | 0.0000 | 0/0 | runs/2026-10-08/summary.json |
+| 2026-10-09 | AAPL | - | failed | 0.0000 | 0/0 | runs/2026-10-09/summary.json |
+| 2026-10-09 | MSFT | - | failed | 0.0000 | 0/0 | runs/2026-10-09/summary.json |
+| 2026-10-09 | NVDA | - | failed | 0.0000 | 0/0 | runs/2026-10-09/summary.json |
