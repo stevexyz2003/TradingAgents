@@ -123,13 +123,22 @@ up. `--date auto` is the previous weekday; pass `YYYY-MM-DD` for a backfill.
 
 ## Known limitations
 
-- **A decision is scored only after its full holding window.** An entry stays
+- **A decision is scored once its holding window has traded.** An entry stays
   `pending` until `holding_period_days` trading days (config key, default 5)
-  have traded after the decision (upstream #1169). With the daily cadence each
-  decision is therefore scored about five trading days later, on the next run
-  of the same ticker after that, and the track record is a 5-day return
-  series. A different window means setting `holding_period_days` in the
-  config the runner builds.
+  have traded after the decision (upstream #1169; the check is
+  `len(stock) <= holding_days` in `tradingagents/memory/settlement.py:81`,
+  and the window is read at `settlement.py:130`). Since upstream v0.6.0 a run
+  settles every ticker's due decisions while its analysts work, not only the
+  analyzed ticker's: the graph's Memory Log step calls
+  `settle_all_pending(wait=False)`
+  (`tradingagents/graph/trading_graph.py:330-343`), which walks every pending
+  ticker (`settlement.py:158-170`; #1428, #1445). With the daily cadence a
+  decision is therefore scored on the first run after its window has traded,
+  whichever tickers that run analyzes, and the track record is a 5-day return
+  series. If settling fails, the run still completes and the report header
+  says which decisions stayed pending (`memory_note`,
+  `trading_graph.py:336-362`). A different window means setting
+  `holding_period_days` in the config the runner builds.
 - **Exchange holidays are not modelled.** On a holiday the pipeline analyzes
   the last session's data; the run is green and the report shows it.
 - **LLM output is not deterministic.** Two runs on the same date can disagree.
