@@ -27,9 +27,11 @@ Titelleiste „IBKR-GATEWAY", API-Server verbunden), aber der API-Port ist auf
 **7497** konfiguriert, nicht auf dem Gateway-Default 4002. Port 4002 ist zu.
 
 Das belegt den Recherche-Satz, dass der Port **keine** Paper-Garantie ist — hier
-trägt ein Gateway den TWS-Paper-Port. `.env` trägt derzeit `IBKR_PORT=4002` und
-stimmt damit nicht mit dem Ist-Zustand überein: entweder den Port im Gateway auf
-4002 stellen oder `.env` auf 7497 korrigieren. Offen als Operator-Entscheidung.
+trägt ein Gateway den TWS-Paper-Port. **Entschieden am 2026-10-11:** `.env` wurde
+auf `IBKR_PORT=7497` korrigiert, das Gateway bleibt unverändert; der Grund für die
+Abweichung vom Default steht als Kommentar in `.env`. Damit ist die Port-Angabe
+nur noch Konfiguration, und die Paper-Zusicherung hängt allein am
+`managedAccounts`-Guard — so, wie REQ-IBKR-04 es verlangt.
 
 Verbindungsdaten: `serverVersion=178`, Gateway-Zeit `2026-10-11 18:00:40+00:00`.
 
@@ -92,7 +94,7 @@ und verfälscht den Kontostand. Die Sonde hat deshalb nichts platziert, auch kei
 
 ## Handlungsbedarf (Operator)
 
-1. **Port-Widerspruch auflösen:** Gateway auf 4002 stellen oder `.env` auf 7497.
+1. ~~Port-Widerspruch auflösen~~ — **erledigt 2026-10-11**, `.env` steht auf 7497.
 2. **„Read-Only API" im Gateway aktivieren**, danach den 10015-Nachweis
    nachholen — erst dann ist Phase 1 vollständig und Gate G1 offen für Phase 2.
 
