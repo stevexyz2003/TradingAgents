@@ -105,11 +105,22 @@
 - [ ] State-Retention/Backup/Recovery dokumentiert — **offen (P2)**
 
 **Nicht in der DoD, aber der eigentliche Zweck (siehe Korrektur oben):** der
-tägliche Paper-Lauf trägt sich noch nicht unbeaufsichtigt — es gibt bis heute
-keinen einzigen Lauf mit einer Entscheidung, weil kein Provider-Key nutzbar ist
-(Anthropic 401, OpenAI ohne Guthaben; jeder Fehlversuch $0.00). Die Mechanik
-rundherum ist verifiziert: Preflight, Fehler-Semantik, Keep-alive-Commit auf
-`paper-log`.
+tägliche Paper-Lauf produziert **seit 2026-10-11** Entscheidungen. Erster
+erfolgreicher Lauf: AAPL auf Handelstag 2026-10-09, `signal=Hold`, **$0.1800**
+(123305 in / 32004 out Tokens, 131 s) — 12 % des $1.50-Caps pro Ticker. Der
+Eintrag liegt dauerhaft auf `paper-log` (`runs/2026-10-09/summary.json`).
+
+Kostenprojektion für den Cron-Default (3 Ticker, Di–Sa): ~$0.54/Tag, also
+~$12/Monat — und das ist die *konservative* Rechnung, weil die Rate-Tabelle
+`claude-haiku-5-5` absichtlich zum >100K-Tarif ansetzt. Der Cap bleibt zunächst
+bei $1.50: der Reflexions-Anteil wächst mit der Historie des Decision-Logs, und
+8-facher Kopfraum ist billiger als ein abgebrochener Lauf.
+
+Die 12 roten Läufe vom 2026-09-25 bis 2026-10-10 lagen ausschließlich an
+Zugangsdaten (OpenAI ohne Guthaben, danach ein widerrufener Anthropic-Key mit
+401), nicht am Code; jeder Fehlversuch kostete $0.00. Verifiziert ist damit die
+ganze Kette: Preflight, Fehler-Semantik mit Exit-Codes, Keep-alive-Commit auch
+im Fehlerfall, Budget-Buchhaltung und das persistente Decision-Log.
 
 ---
 

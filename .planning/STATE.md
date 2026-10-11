@@ -5,7 +5,7 @@
 
 ## Current Position
 
-Last activity: 2026-10-11 - v0.6.0-Rebase promoviert (main = fork/main = 1849413, Fork-CI gruen auf py3.11-3.14 + Clean-Install-Smoke + strict ruff; Backup `backup/pre-rebase-v0.6.0`, Arbeits-Worktree entfernt). Danach Paper-Lauf auf Anthropic umgestellt: Provider + beide Modell-Stufen im Workflow gepinnt (claude-sonnet-5-5 deep / claude-haiku-5-5 quick), echte Anthropic-Raten, aktuelle Claude-IDs im Katalog, Credential-Pruefung jetzt ueber alle Tier-Provider (#1440). OFFEN: noch kein Lauf mit Entscheidung - der .env/Secret-Anthropic-Key antwortet mit 401 (lokal wie in CI), der OpenAI-Key hat kein Guthaben; jeder Fehlversuch kostete $0.00. Der Cron bleibt bis zu einem gueltigen Key jeden Morgen rot.
+Last activity: 2026-10-11 - **Erster erfolgreicher Paper-Lauf.** AAPL auf Handelstag 2026-10-09: signal=Hold, $0.1800 (123305 in / 32004 out Tokens), 131s, 12% des $1.50-Caps; Eintrag liegt auf `paper-log` (runs/2026-10-09/summary.json, status ok). Davor am selben Tag: v0.6.0-Rebase promoviert (main = fork/main, Fork-CI gruen py3.11-3.14), Umstellung auf Anthropic (provider + beide Stufen im Workflow gepinnt: claude-sonnet-5-5 deep / claude-haiku-5-5 quick, echte Anthropic-Raten, Credential-Pruefung ueber alle Tier-Provider #1440) und P3-Repo-Hygiene abgeschlossen. Die 12 roten Laeufe davor lagen an Zugangsdaten (OpenAI ohne Guthaben, dann ein widerrufener Anthropic-Key mit 401) - nicht am Code; jeder Fehlversuch kostete $0.00.
 
 ### Heartbeat: täglicher Paper-Lauf (2026-08-21)
 
