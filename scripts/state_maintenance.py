@@ -283,7 +283,18 @@ def prune(
     report_days: int,
     apply_changes: bool,
 ) -> int:
-    """Prune checkpoints and report directories. Dry run unless ``apply_changes``."""
+    """Prune checkpoints and report directories. Dry run unless ``apply_changes``.
+
+    The day limits are validated before anything is scanned. They are the only
+    guard rail this tool has, and a negative value inverts it: the cutoff moves
+    into the *future*, so every candidate counts as expired and ``--report-days
+    -1`` deletes today's reports. ``0`` stays legal — it means "everything is
+    older than the limit" and is the documented way to clear a tree.
+    """
+    for flag, value in (("--checkpoint-days", checkpoint_days), ("--report-days", report_days)):
+        if value < 0:
+            print(f"FAIL: {flag} must be >= 0, got {value} - refusing to delete anything")
+            return EXIT_CONFIG
     mode = "apply" if apply_changes else "dry run"
     print(f"prune ({mode})")
     cp_dir = _checkpoint_dir(cache_dir)

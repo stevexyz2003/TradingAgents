@@ -346,6 +346,96 @@ def test_prune_apply_removes_old_report_directories_by_stamp(tmp_path, capsys):
     assert "notareport" in out
 
 
+# --- prune: the day limit is the only guard rail, so it has a lower bound ---
+
+
+def _today_report(results: Path) -> Path:
+    report = results / "reports" / f"AAPL_{datetime.now():%Y%m%d_%H%M%S}"
+    report.mkdir(parents=True)
+    (report / "complete_report.md").write_text("today's analysis", encoding="utf-8")
+    return report
+
+
+def test_prune_refuses_negative_day_limits(tmp_path, capsys):
+    """A sign typo must not delete today's state.
+
+    A negative limit pushes the cutoff into the *future*, so every candidate is
+    "expired": ``--report-days -1`` rmtree'd today's consolidated report tree,
+    irreplaceable analysis output under a declared 90-day retention.
+    """
+    cache = tmp_path / "cache"
+    results = tmp_path / "logs"
+    db = _make_checkpoint_db(cache, "AAPL")
+    report = _today_report(results)
+
+    rc = tool.main(
+        [
+            "prune",
+            "--apply",
+            "--checkpoint-days",
+            "-1",
+            "--report-days",
+            "-1",
+            "--cache-dir",
+            str(cache),
+            "--results-dir",
+            str(results),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert report.exists(), "a negative --report-days deleted today's report tree"
+    assert db.exists(), "a negative --checkpoint-days deleted a fresh checkpoint"
+    assert rc == 1
+    assert "--checkpoint-days" in out
+
+
+def test_prune_refuses_a_negative_report_day_limit_on_its_own(tmp_path, capsys):
+    """Both limits are checked, not just the first one."""
+    results = tmp_path / "logs"
+    report = _today_report(results)
+
+    rc = tool.main(
+        [
+            "prune",
+            "--apply",
+            "--report-days",
+            "-90",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--results-dir",
+            str(results),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert report.exists()
+    assert "--report-days" in out
+
+
+def test_prune_accepts_a_zero_report_day_limit(tmp_path):
+    """Zero stays legal: it means "everything is older than the limit"."""
+    results = tmp_path / "logs"
+    report = _today_report(results)
+
+    rc = tool.main(
+        [
+            "prune",
+            "--apply",
+            "--report-days",
+            "0",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--results-dir",
+            str(results),
+        ]
+    )
+
+    assert rc == 0
+    assert not report.exists()
+
+
 # --- backup ---
 
 
