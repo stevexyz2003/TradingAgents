@@ -258,7 +258,17 @@ if ! grep -Eq "$NEG_MARKERS" <<<"$NEG_OUT"; then
     printf '%s\n' "$NEG_OUT"
     fail "the negative control exited $NEG_RC but without a connection-error marker — the cause must be the unreachable endpoint"
 fi
-NEG_MARKER=$(grep -Eo "$NEG_MARKERS" <<<"$NEG_OUT" | head -1)
+# The same rule as above, and this line is why it is a rule: `grep -Eo ... |
+# head -1` put the pipe straight back. `head` exits after the first line, `grep`
+# keeps writing, takes SIGPIPE (141) once its output passes the 64 KiB pipe
+# buffer, and `pipefail` makes that 141 the status of the whole script — here,
+# *after* every assertion has already passed, so the job dies between the last
+# check and `echo "SMOKE OK"` with no `SMOKE FAIL:` line and a log that simply
+# stops. Reproduced at ~2700 marker occurrences, and the first CI failure
+# already proved this script's error output is bigger on the runner than it is
+# locally. `awk` needs no pipe: it prints the first match and exits, the shell
+# reads the substitution to EOF, so there is no reader to lose.
+NEG_MARKER=$(awk -v pat="$NEG_MARKERS" 'match($0, pat) { print substr($0, RSTART, RLENGTH); exit }' <<<"$NEG_OUT")
 
 echo "== 9/9 done"
 echo "artefacts: $TA"
