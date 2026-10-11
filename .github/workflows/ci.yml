@@ -51,6 +51,19 @@ jobs:
           # install must import the package and the CLI module.
           python -c "import tradingagents, cli.main; print('clean-install import OK')"
 
+  docker-smoke:
+    name: docker smoke (stub LLM, no network)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # No setup-python: the script needs no host Python. It builds the image,
+      # runs the CLI through it against a stub LLM on an --internal network and
+      # ends with its own negative control. Unit tests cover none of that, and
+      # the Dockerfile is the unknown after every upstream rebase.
+      - name: End-to-end CLI run through the image
+        run: bash scripts/smoke/docker_smoke.sh
+
   lint:
     name: ruff (strict, full repo)
     runs-on: ubuntu-latest
