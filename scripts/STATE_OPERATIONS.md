@@ -87,6 +87,17 @@ Three details worth knowing:
 | Report directories | **90 days** | `state_maintenance.py prune` (`--report-days`) |
 | Workflow artifact `paper-run-<n>` | **90 days** | `daily-paper-run.yml:192` |
 
+**What this table does not cover.** `prune` touches exactly two places:
+`<cache>/checkpoints` and the direct children of `<results_dir>/reports`. So
+"report directories 90 days" means the *consolidated* tree only — the per-run
+tree (`logs/<TICKER>/<date>/reports/*.md`, `message_tool.log`,
+`full_states_log_<date>.json`), both data caches and `cli_prefs.json` have **no
+retention and no automatic cleanup**. They grow with every run. That is a
+deliberate gap, not an oversight: the per-run tree is what a human reads when
+reconstructing a single decision, and no measurement exists yet for how much it
+grows per month. Delete it by hand (`rm -rf ~/.tradingagents/logs/<TICKER>`) or
+file an extension of `prune` once the growth is known.
+
 The decision log is kept forever on purpose: it is the track record and the
 basis of the alpha evaluation. A trimmed log silently changes every aggregate
 computed over it, and the past-context injection that feeds earlier lessons back
