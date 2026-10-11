@@ -249,3 +249,9 @@ graphify-out/
 # Policy vor; die lokale Kopie bleibt darum untracked statt gegen Upstream zu
 # divergieren (siehe .planning/MILESTONE.md, DoD "Lockfile-Policy").
 uv.lock
+
+# Screenshots aus dem Arbeitsalltag (Gateway-Protokolle, Konto-Dialoge). Sie
+# zeigen Kontonummer, Kontostand und Verbindungsdetails und haben in einem
+# oeffentlichen Fork nichts verloren. Befunde gehoeren als Text nach
+# .planning/, wo man sie lesen und pruefen kann.
+docs/screenshots/
