@@ -52,7 +52,17 @@ CHECKPOINT_TABLES = ("checkpoints", "writes")
 #: Report directories are ``<TICKER>_<YYYYmmdd>_<HHMMSS>`` (trading_graph.py:307).
 #: Anything else is left alone: this tool deletes directories, so the name
 #: pattern is the guard rail, not a convenience.
-REPORT_DIR_RE = re.compile(r"^[A-Za-z0-9._-]+_(\d{8})_(\d{6})$")
+#:
+#: The ticker part is the character class ``safe_ticker_component`` accepts
+#: (``_TICKER_PATH_RE = ^[A-Za-z0-9._\-\^=+]+$``, dataflows/symbols.py), and it
+#: must not be narrower than that: ``^``, ``=`` and ``+`` carry the standard
+#: yfinance spellings for indices, futures and forex (``^GSPC``, ``BTC=F``,
+#: ``XAUUSD+``). A name this codebase produces but this regex rejects is a
+#: report tree the 90-day retention never touches — and the tool prints
+#: "name is not <TICKER>_<YYYYmmdd>_<HHMMSS>" about a name that is exactly
+#: that. ``test_report_dir_re_accepts_every_ticker_the_validator_allows`` keeps
+#: the two in step.
+REPORT_DIR_RE = re.compile(r"^[A-Za-z0-9._\-\^=+]+_(\d{8})_(\d{6})$")
 
 #: Sidecars and scratch files never belong in a backup.
 BACKUP_EXCLUDED_SUFFIXES = (".lock", ".tmp", ".db")

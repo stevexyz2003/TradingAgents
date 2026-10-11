@@ -20,6 +20,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.graph.checkpointer import get_checkpointer
 from tradingagents.memory.log import TradingMemoryLog
 
@@ -375,6 +376,52 @@ def test_prune_apply_removes_old_report_directories_by_stamp(tmp_path, capsys):
     assert fresh.exists()
     assert foreign.exists()
     assert "notareport" in out
+
+
+def test_prune_apply_removes_index_and_futures_report_directories(tmp_path, capsys):
+    """``^GSPC_*`` and ``BTC=F_*`` are names this codebase produces itself.
+
+    The directory name comes from ``safe_ticker_component``, which allows ``^``,
+    ``=`` and ``+`` — the standard yfinance spellings for indices, futures and
+    forex/CFDs. A narrower prune regex means the 90-day retention silently does
+    not apply to them (unbounded growth), and the output claims the name is
+    malformed when it is exactly the documented shape.
+    """
+    results = tmp_path / "logs"
+    reports = results / "reports"
+    reports.mkdir(parents=True)
+    expired = []
+    for ticker in ("^GSPC", "BTC=F", "XAUUSD+"):
+        directory = reports / f"{ticker}_20250101_120000"
+        directory.mkdir()
+        (directory / "complete_report.md").write_text("old", encoding="utf-8")
+        expired.append(directory)
+    fresh = reports / f"^DJI_{datetime.now():%Y%m%d_%H%M%S}"
+    fresh.mkdir()
+
+    rc = tool.main(
+        ["prune", "--apply", "--cache-dir", str(tmp_path / "cache"), "--results-dir", str(results)]
+    )
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    for directory in expired:
+        assert not directory.exists(), f"{directory.name} was not pruned:\n{out}"
+    assert fresh.exists()
+    assert "name is not" not in out, out
+
+
+def test_report_dir_re_accepts_every_ticker_the_validator_allows(tmp_path):
+    """Drift guard: the regex must not be narrower than the name producer.
+
+    ``trading_graph.default_report_path`` builds the directory name from
+    ``safe_ticker_component``; this tool's regex is the guard rail that decides
+    what may be deleted. If the two disagree, the difference is a tree nobody
+    ever prunes.
+    """
+    for ticker in ("AAPL", "^GSPC", "BTC=F", "XAUUSD+", "BRK-B", "BF.B", "7203.T", "A_B"):
+        assert safe_ticker_component(ticker) == ticker
+        assert tool.REPORT_DIR_RE.match(f"{ticker}_20250101_120000"), ticker
 
 
 # --- prune: the day limit is the only guard rail, so it has a lower bound ---
