@@ -62,6 +62,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Warum das eine Phase ist und kein Nebensatz:** Ob der Paper-Login einen Zweitfaktor verlangt, ist offiziell **widersprüchlich** dokumentiert — IBKRs Aussagen betreffen die Enrollment-Pflicht auf Kontoebene, nicht den Prompt beim Login mit dem separaten Paper-Username, und die Community-Berichte widersprechen sich direkt. Diese eine Antwort entscheidet, ob unbeaufsichtigter Wochenbetrieb überhaupt möglich ist, also über den Zuschnitt von Phase 8. Sie ist in fünf Minuten am Konto messbar und durch keine weitere Recherche zu beschaffen. Dasselbe gilt für vier weitere Punkte, deren Doku nachweislich falsch oder widersprüchlich ist (`ineligibilityReasonList`-Felder, `reqExecutions`-Fenster, `orderRef`-Zeichen, `managedAccounts`-Inhalt).
 
 **Success Criteria** (was wahr sein muss):
+
 1. `.planning/ibkr-konto-befund.md` liegt committet im Repo und beantwortet alle fünf Fragen aus REQ-IBKR-01 — jeweils mit der **Rohausgabe**, nicht nur mit einer Zusammenfassung, und mit Datum.
 2. Die 2FA-Frage ist mit „ja" oder „nein" beantwortet, und der Befund enthält den daraus abgeleiteten Satz zur Betriebsform („Wochenlogin automatisierbar" oder „ein manueller Quittierungsvorgang pro Woche").
 3. Das IB Gateway läuft im Paper-Modus, der API-Port auf `127.0.0.1:4002` antwortet, und `managedAccounts` ist wörtlich notiert.
@@ -69,6 +70,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 5. ~~Read-Only ist noch **an**, Platzierungsversuch scheitert mit **10015**~~ — **erfüllt am 2026-10-11, mit zwei Korrekturen:** der reale Marker ist **321** („Die API befindet sich im schreibgeschützten Modus", Order-Status `ValidationError`) — **gemessen 2026-10-11 an Gateway 10.50.1**; der in der Recherche erwartete Code **10015** trat nicht auf; und Read-Only war am Gateway **nicht** voreingestellt, sondern aus (erste Probe wurde angenommen und sofort storniert). Siehe [ibkr-konto-befund.md](./ibkr-konto-befund.md).
 
 **Was diese Phase NICHT tut:**
+
 - Keine Zeile Ausführungscode, kein Adapter, keine Abhängigkeitsänderung.
 - Keine Order, auch keine `whatIf`-Order (das Preview gehört in Phase 4, wo die Mengenrechnung existiert).
 - Keine Entscheidung über das Signal→Order-Mapping — das ist in REQUIREMENTS.md bereits gesetzt und wird hier nicht neu aufgerollt.
@@ -85,6 +87,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Requirements:** REQ-IBKR-03, -04, -05, -06, -07, -08, -09, -11, -12, -55
 
 **Success Criteria:**
+
 1. Ein Kommando liest gegen das laufende Gateway Positionen und Cash und schreibt ein JSON, das `tradingagents.portfolio.load_portfolio()` ohne Fehler validiert; Exit 0.
 2. Der Paper-Guard ist bewiesen, nicht behauptet: ein Stub, der eine abweichende Kontomenge liefert, führt zu Exit 8, zu einer Trennung und zu keinem einzigen Platzierungsaufruf.
 3. Ohne laufendes Gateway endet der Lauf mit Exit 3 und einer Logzeile, die den Zustand benennt (502 / „Gateway nicht erreichbar") — nicht mit einem Traceback. Fehlende Zugangsdaten ergeben Exit 20.
@@ -95,12 +98,35 @@ Vier Regeln haben den Zuschnitt bestimmt:
 8. `git ls-files .env` ist leer, und in `.github/workflows/` steht keine IBKR-Secret-Referenz.
 
 **Was diese Phase NICHT tut:**
+
 - Keine Order und kein `whatIf`; die Verbindung läuft durchgehend mit `readonly=True`.
 - Keine Symbol-Auflösung über das hinaus, was zum Lesen der Positionen nötig ist (die eigene Auflösungskette ist Phase 3).
 - Kein Lesen von `paper-log`, keine Entscheidungsübernahme.
 - **Keine Änderung am CI-Produktivpfad.** Das Portfolio-JSON wird in dieser Phase nur lokal übergeben; die Verdrahtung in den täglichen Lauf braucht den Veröffentlichungsbranch und passiert in Phase 7.
 
-**Plans:** TBD
+**Plans:** 6 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — Extra `ibkr` mit Pin + Kommentar, Kriterium 6 umformuliert, CI-/`.env`-Wächter, Paket-Freigabe, `.venv` aufgefrischt, Pin-Deckel gemessen
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-02-PLAN.md — Adapter `scripts/ibkr_broker.py`: Schreibsperre vor dem Connect, Paper-Guard, Zustandstabelle, Liveness-Probe, frisches Konto-Lesen (Fake-IB)
+- [ ] 02-03-PLAN.md — `--portfolio` in `daily_paper_run.py` + additiver Portfolio-Block in `reporting._header`
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 02-04-PLAN.md — Kommando `scripts/ibkr_executor.py account`: Exit-Codes, `.env`, UTF-8-Log, atomares JSON + Gegenprobe; Handbuch `scripts/IBKR_EXECUTION.md`
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 02-05-PLAN.md — Operator-Checkpoint Read-Only an, echter `account`-Lauf gegen DUQ634065, Abnahme
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 02-06-PLAN.md — Preflight mit echtem JSON, Operator-Checkpoint echter Paper-Lauf mit `--portfolio`
 
 ---
 
@@ -112,6 +138,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Warum vor der ersten Order:** Das ist die fünfschichtige Kette gegen die gefährlichste Fehlerklasse dieses Meilensteins — eine falsche Auflösung wirft keine Exception, sie kauft etwas Handelbares mit falschem Nominal und füllt das Decision-Log mit Returns, die zu einer anderen Position gehören als die Entscheidung.
 
 **Success Criteria:**
+
 1. `AAPL`, `MSFT`, `NVDA` lösen auf genau einen Contract auf, und `conId`, `primaryExchange`, `currency`, `localSymbol` stimmen mit dem Befund aus Phase 1 überein; der `conId` ist persistiert und wird ab dem zweiten Lauf als Auflösungsweg benutzt.
 2. Ein nicht gemappter Roh-Ticker (`XYZQ`) wird abgewiesen, **ohne** „SMART/USD zu probieren"; ein gemappter Nicht-`STK`-Ticker (`^GSPC`, `XAUUSD+`) wird mit Verweis auf die Allow-List abgewiesen.
 3. Ein künstlich mehrdeutiger Request führt zum Abbruch, und die Kandidatenliste aus `returnAll=True` steht im Log — nicht nur im Bibliotheks-Log.
@@ -122,6 +149,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 8. `reqMarketDataType(3)` ist gesetzt, und 10089/10090 erscheinen im Log als erwarteter Zustand, nicht als Fehler.
 
 **Was diese Phase NICHT tut:**
+
 - Keine Order, kein `whatIf`, keine Mengenrechnung.
 - Keine Entscheidung von `paper-log` gelesen.
 - Keine Marktdaten über den delayed-Default hinaus; kein Limitpreis, keine Preisabfrage im Order-Pfad.
@@ -138,6 +166,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Requirements:** REQ-IBKR-13, -14, -15, -16, -17, -18, -19, -20, -21, -22, -23, -24, -25, -38
 
 **Success Criteria:**
+
 1. Der Trockenlauf gegen den **echten** Branchstand vom 2026-10-09 (AAPL, `Hold`) erzeugt keine Order und protokolliert `skipped: hold`. Das ist der wichtigste Einzelnachweis dieser Phase: die eine reale Entscheidung im Bestand darf am Tag 1 nichts kaufen.
 2. Ein Fixture mit `Buy` und flacher Position erzeugt die Absicht „2 Blöcke kaufen", durchläuft `whatIf` und protokolliert Margin-Impact, Kommission und `rejectReason` — und sendet nichts; ein versehentliches `place` scheitert in dieser Phase an 321 — aber nur, solange der Operator den Gateway-Schreibschutz gesetzt hat (am 2026-10-11 war er wieder aus).
 3. Der Divergenzfall ist abgedeckt: ein Fixture, in dem `summary.json` ein anderes Signal zeigt als `decision-log.md`, endet mit Exit 2 und protokollierter Abweichung — und der Lauf hat die Fassung aus `decision-log.md` gelesen, nicht die aus dem Summary.
@@ -148,6 +177,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 8. Ein `Sell` ohne Bestand ist eine protokollierte Nulloperation und kein Short.
 
 **Was diese Phase NICHT tut:**
+
 - Kein `placeOrder`. Gate **G2** ist genau diese Grenze.
 - Kein Kill-Switch, keine Größen-Obergrenze, keine Reconciliation — die Leitplanken sind Phase 5, und bis dahin ist Read-Only der Schutz.
 - Das Trockenlauf-Protokoll ist **noch nicht** der Ledger, auf den sich Idempotenz stützt: es gibt in dieser Phase keine Write-Ahead-Disziplin und keinen Lock.
@@ -165,6 +195,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Warum eigene Phase:** Alle Nachweise dieser Phase sind **ohne** Gateway führbar (Stub nach dem Muster von `scripts/smoke/stub_llm.py`) bzw. read-only. Eine Leitplanke, die erst nach der ersten echten Order geprüft wird, ist keine Leitplanke.
 
 **Success Criteria:**
+
 1. Fail-closed ist in allen drei Varianten bewiesen: Freigabe fehlt · Kill-Datei vorhanden · Zustand nicht lesbar → jeweils Exit 4, kein Platzierungsaufruf, Schalterzustand protokolliert.
 2. Ein Test, der den Kill-Switch **zwischen** zwei Orders eines Laufs aktiviert, weist nach, dass die zweite Order nicht entsteht — die Prüfung sitzt unmittelbar vor jeder einzelnen Order, nicht einmal pro Lauf.
 3. Bei aktivem Kill-Switch wird `reqGlobalCancel` aufgerufen; nachgewiesen gegen den Stub und einmal gegen das Gateway mit einer manuell in TWS platzierten Order, die danach storniert ist.
@@ -175,6 +206,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 8. `decision_key` steht als `orderRef` in der (noch nicht gesendeten) Order, und der gelesene `paper-log`-SHA steht als Provenienz im Ledger-Eintrag; eine zweite, abweichende Fassung derselben `(trade_date, ticker)`-Entscheidung wird protokolliert und nicht ausgeführt.
 
 **Was diese Phase NICHT tut:**
+
 - Keine echte Order; das Schreibrecht bleibt gesperrt.
 - Keine Fill-Verarbeitung (es gibt noch keine Fills).
 - Kein Branch, kein Heartbeat, kein Scheduler.
@@ -192,6 +224,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Diese Phase ist bewusst klein: sie schaltet um, sie baut nicht.** Dass hier nur vier Anforderungen liegen, ist das Ergebnis des Zuschnitts und kein Versehen — alles, was eine Order riskant macht, ist in den Phasen 2 bis 5 abgeschlossen.
 
 **Success Criteria:**
+
 1. Die Freischaltung des API-Schreibrechts ist mit Datum, Grund und Vorher-/Nachher-Zustand im Betriebshandbuch notiert, und der gesperrte Zustand ist vorher über Fehler 321 belegt.
 2. Die Prüfkette läuft an genau einer Stelle und in der festgelegten Reihenfolge (Lock → Reconciliation → Quellen/Integrität → Aktualität → Auflösung/Handelbarkeit → Menge → Größe → Handelszeit → Kill-Switch → `whatIf` → `intent` → platzieren); ein Test prüft die **Aufrufreihenfolge** gegen einen Stub-Broker, nicht nur das Ergebnis.
 3. Eine echte Markt-Order über einen Block ist platziert, und der Ledger zeigt die vollständige Kette `intent → placed → filled` mit `orderId`, `permId`, `orderRef == decision_key`, `execId`(s), `filled_qty` und `avg_price`.
@@ -201,6 +234,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 7. Ein `whatIf` mit gesetztem `rejectReason` verhindert die Order auch im scharfen Pfad — nachgewiesen, indem die Order bewusst über ein Limit getrieben wird, das IBKR ablehnt (z. B. Größen-/Margin-Grenze), und der Lauf mit Exit 5 endet.
 
 **Was diese Phase NICHT tut:**
+
 - Kein Scheduler, kein Push, kein Heartbeat, kein Soll-Ist-Bericht.
 - Keine Limit-Order; Markt-Order im Sitzungsfenster bleibt der einzige Pfad.
 - Kein zweiter oder dritter Ticker zwingend — ein Durchstich genügt, die Mechanik ist tickerunabhängig.
@@ -217,6 +251,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Requirements:** REQ-IBKR-49, -50, -51, -52
 
 **Success Criteria:**
+
 1. Der Ausführer veröffentlicht auf einem eigenen Branch, den ausschließlich er schreibt; nach einem Ausführungslauf zeigt `paper-log` **keinen** neuen Commit vom lokalen Prozess. Die Invariante „ein Schreiber pro Branch" ist im Handbuch als Invariante benannt, nicht als Gewohnheit.
 2. Ein Berichtsskript liest beide Branches und erzeugt eine Tabelle über `(trade_date, ticker)` mit Rating, Zielposition, Ist-Position, Ordermenge, Fill-Menge, Durchschnittspreis, Abweichung Ziel↔Ist und `weekend_gap`-Markierung — der Join passiert beim **Lesen**, kein Prozess schreibt dafür woanders hin.
 3. Der Bericht trennt Ausführungsmetriken (Slippage, Fill-Quote, Abweichung) sichtbar von Entscheidungsmetriken (realisierter Return, Alpha) — zwei Tabellen oder zwei klar getrennte Spaltengruppen — und trägt den Hinweis, dass Paper-Fills aus Top-of-Book-Simulation stammen und systematisch nach oben verzerrt sind.
@@ -225,6 +260,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 6. Die Analyse liest das Portfolio-JSON vom Veröffentlichungsbranch und bekommt es als `portfolio` übergeben; **fehlt die Datei, verhält sich der Lauf exakt wie heute** (fail-open). Das ist die einzige Berührung des Produktivpfads in diesem Meilenstein, sie ist additiv, read-only und ohne neue Fehlerquelle.
 
 **Was diese Phase NICHT tut:**
+
 - Kein Schreiben auf `paper-log` und keine Änderung an dessen Commit-Schritt (`fetch --depth=1` → `reset --hard` → `push` ohne Rebase/Retry bleibt, wie es ist — ein zweiter Schreiber kostet im Konflikt einen ganzen Entscheidungstag).
 - Keine Alpha-/Backtest-Auswertung aus Fills.
 - Kein Alarm — der Bericht ist eine Lesefunktion, die Alarmierung ist Phase 8.
@@ -240,6 +276,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Requirements:** REQ-IBKR-53, -54, -56, -57, -58, -59, -60
 
 **Success Criteria:**
+
 1. Der Task-Scheduler-Task ist mit den festgelegten Einstellungen eingerichtet und als Export (`schtasks /query /xml`) im Handbuch dokumentiert; „Run whether user is logged on or not" ist **nicht** gesetzt, „Do not start a new instance" ist gesetzt.
 2. Jeder Lauf pusht einen Heartbeat — nachgewiesen für drei Fälle: normaler Lauf, „nichts zu tun" (Hold/Toleranzband), „Gateway nicht erreichbar".
 3. Ein CI-Cron, der **nur** den Veröffentlichungsbranch liest, wird rot, wenn der Heartbeat älter als die erwartete Kadenz ist; nachgewiesen mit einem künstlich alten Heartbeat. Der Job hat keine Secrets, und `gh`-seitig ist belegt, dass er keine braucht.
@@ -249,6 +286,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 7. `scripts/IBKR_EXECUTION.md` existiert und deckt Einrichtung, Gateway- und Scheduler-Einstellungen, die Exit-Code-Tabelle, Bedienung des Kill-Switch, das Wochenlogin-Ritual, die typischen Fehlerbilder und den Soll-Ist-Bericht ab.
 
 **Was diese Phase NICHT tut:**
+
 - Keine Erweiterung auf neue Instrumentenklassen, keine größere Leiter, kein Live-Konto.
 - **Keine vollständige Lösung von P2 #6.** Dieser Meilenstein liefert den Heartbeat-Kanal samt Alarm für die *Ausführungsseite*. Metriken und Alerting für die *Analyseseite* (Vendor-Ausfälle, Fehlerraten, Latenz, Kosten je Run) bleiben offen und sind in MILESTONE.md weiter als offen zu führen.
 - Keine Berührung von P2 #8 (Provider-Ausfall-Policy). Für den Ausführer ist ein ausgefallener Analyselauf „keine Entscheidung für heute" und damit ein normaler, protokollierter Zustand.

@@ -449,20 +449,25 @@ Kriterium-2-Test: `FakeIB(accounts=["DU0000001"])` → Exit 8, `"disconnect" in 
 | A6 | Session-Fixtures werden vor der funktionsskopierten autouse-Netzsperre instanziiert | Pitfall 5 | Testinfrastruktur scheitert lokal → Loop zur Collection-Zeit anlegen |
 | A7 | `whatIf` scheitert bei aktivem Gateway-Read-Only ebenfalls (321) | Checkpoint-Empfehlung | Betrifft nur, wann der Schalter vor Phase 4 wieder aus muss |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Kriterium 6 umformulieren?**
    - Bekannt: Ohne Pin löst es auf; mit `tzdata>=2026.1` ist es unauflösbar (gemessen, pip + uv).
    - Unklar: ob der Operator den Wortlaut in ROADMAP.md korrigieren will.
    - Empfehlung: Der Plan weist den gemessenen Negativnachweis nach und notiert die Abweichung im SUMMARY. Der Wortlaut ist ein Doku-Fix des Operators.
+   - **RESOLVED:** per D-03 — Kriterium 6 wird auf den gemessenen Negativnachweis umformuliert (Plan 02-01 Task 1 ändert ROADMAP.md und REQUIREMENTS.md; Plan 02-01 Task 3 misst `ResolutionImpossible`).
 2. **Read-Only im Gateway für Phase 2 wieder einschalten?**
    - Bekannt: Zurzeit aus, `readonly=True` sperrt nicht, Phase 2 braucht kein Schreibrecht. Phase 4 (`whatIf`) braucht es vermutlich wieder aus (A7).
    - Empfehlung: **Blockierender `checkpoint:human-action` vor der ersten Aufgabe, die gegen das echte Gateway verbindet.** Der Operator schaltet „Read-Only API" ein und bestätigt das. Der erste echte Lauf bestätigt dann zugleich A5. Lehnt der Operator ab, wird das im Handbuch mit Datum festgehalten, und die Sperre in der Client-Schicht ist die einzige Barriere.
+   - **RESOLVED:** per D-02 — blockierender Operator-Checkpoint direkt VOR der ersten echten Verbindung, also in Plan 02-05 Task 1 (nicht vor früheren Aufgaben; Plans 02-01 bis 02-04 verbinden nie gegen das echte Gateway). Ergebnis „an“ oder begründete, datierte Ablehnung steht im Handbuch.
 3. **Kriterium 7: Upstream-Datei `reporting.py` berühren oder nicht?**
    - Bekannt: Der Block steht heute in keinem Report. Die Änderung in `_header` ist klein (~3 Zeilen + Test), erzeugt aber eine weitere Konfliktstelle beim nächsten Upstream-Rebase.
    - Empfehlung: `reporting.py` ändern, weil Kriterium 7 wörtlich „im Report" sagt und CLI-Läufe mit `--portfolio` denselben Nutzen haben. Fallback ohne Upstream-Diff: Block in `summary.md` des Paper-Laufs.
+   - **RESOLVED:** per D-04 — `reporting.py` wird minimal und nur additiv geändert (Block im `_header`, mit Test); `--portfolio` bleibt in unserem eigenen `scripts/daily_paper_run.py`.
 4. **Gateway-Version:** Der Befund nennt erst 1045.1 (Code 2172, Ablauf 2026-12-15), der zweite Durchgang „Gateway 10.50.1". Ob inzwischen aktualisiert wurde, ist offen → Phase 8, hier nur notieren. `serverVersion` und `2172` gehören ins Log.
+   - **RESOLVED:** auf Phase 8 verschoben — in Phase 2 nur protokolliert (`serverVersion` und Code 2172 im Log, Gateway-Version im Abschnitt „## First real run“ von Plan 02-05).
 5. **Soll ein CI-Job das Extra installieren?** Wegen des Lazy-Imports laufen alle Phase-2-Tests ohne `ib_async`. Nur der Sperren-Test gegen das echte `ib_async`-`Client`-Objekt braucht es (`pytest.importorskip`). Empfehlung: ein kleiner zusätzlicher Job in `ci.yml` (Py 3.13, `pip install -e ".[dev,ibkr]"`, `pytest tests/test_ibkr_*.py`). Er belegt nebenbei die positive Auflösung in einer frischen Umgebung (Kriterium 6) und berührt `daily-paper-run.yml` nicht.
+   - **RESOLVED:** per D-05 — KEIN CI-Job für das Extra in Phase 2; `ib_async` bleibt ein optionales Extra außerhalb der Kern-`dependencies`, die CI-Suite läuft wegen des Lazy-Imports ohne die Bibliothek, der Sperren-Test gegen das echte Client-Objekt nutzt `pytest.importorskip`, und der Positivnachweis von Kriterium 6 läuft lokal (Plan 02-01 Task 3, `uv pip compile`). Die obige Empfehlung ist damit verworfen.
 
 ## Environment Availability
 

@@ -1,20 +1,38 @@
+---
+gsd_state_version: 1.0
+milestone: M2
+milestone_name: IBKR Paper Execution
+status: ready_to_execute
+last_updated: "2026-10-11T19:12:07.597Z"
+last_activity: 2026-10-11 -- Phase 2 planning complete
+progress:
+  total_phases: 8
+  completed_phases: 0
+  total_plans: 6
+  completed_plans: 0
+  percent: 0
+---
+
 # Project State — TradingEngineX (TradingAgents)
 
-**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 60 Anforderungen, Phase 1 offen
+**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 60 Anforderungen, Phase 1 abgeschlossen (Gate G1 zu seit 8f4b6ea), Phase 2 geplant
 **Vorgänger:** Produktionsreife v0.2.x → v0.2.5 — **abgeschlossen 2026-10-11** (siehe [MILESTONE.md](./MILESTONE.md)); bewusst offen geblieben: P2 #6 Observability (von M2 Phase 8 teilweise mitbedient) und P2 #8 Provider-Ausfall-Policy
 **Branch:** main
 
 ## Current Position
 
-**Nächster Schritt: M2 Phase 1 — Konto-Messung (Operator-Gate, kein Code).**
-Zu messen ist, ob der Login mit dem Paper-Benutzer `stevexyzp2` im IB Gateway
-einen Zweitfaktor verlangt: die offizielle Doku ist dazu widersprüchlich
-(„all accounts required to enroll in 2FA" betrifft Enrollment auf Kontoebene,
-nicht den Prompt beim Paper-Login), und das Ergebnis entscheidet, ob
-unbeaufsichtigter Wochenbetrieb möglich ist oder täglich Handarbeit kostet.
-Gate G1 hängt daran. Danach: `/gsd:plan-phase 2`.
+**Nächster Schritt: M2 Phase 2 ausführen — `/gsd:execute-phase 2`.**
+6 Pläne in 5 Wellen (`.planning/phases/02-verbindung-paper-guard-und-kontolesen/`),
+Plan-Checker bestanden nach einer Revisionsrunde. Drei Pläne halten an
+Operator-Checkpoints: Paket-Freigabe `ib_async`/`tzdata` (02-01), Gateway-Read-Only
+wieder an oder begründet abgelehnt + echter `account`-Lauf (02-05), echter
+Paper-Lauf mit `--portfolio` (02-06, kostet LLM). Wichtigster Recherchebefund:
+`readonly=True` sperrt in `ib_async` 2.1.0 **keine** Orders — die Schreibsperre
+baut der Adapter selbst auf `ib.client`.
 
-Last activity: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
+Last activity: 2026-10-11 - **M2 Phase 2 geplant** (6 Pläne, 5 Wellen; Research + Validation 5876373). Entscheidungen D-01..D-10 vom Orchestrator gesetzt (kein CONTEXT.md): eigene Schreibsperre statt `readonly=True`-Vertrauen, Read-Only-Checkpoint direkt vor der ersten echten Verbindung, Kriterium 6 auf den messbaren Negativnachweis (`ib_async==2.1.0` + `tzdata>=2026.1` unauflösbar) umzuformulieren, `--portfolio` nur in unserem `daily_paper_run.py` plus additiver Block in `reporting._header`, Extra `ibkr` ohne CI-Job, `clientId` 20001. Checker-Runde 1: 2 Blocker (u. a. `netstat`-LISTEN-Grep scheitert auf deutschem Windows an `ABHÖREN`) + 5 Warnungen, alle behoben; Runde 2 bestanden.
+
+Davor: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
 
 ### Heartbeat: täglicher Paper-Lauf (2026-08-21)
 
@@ -23,13 +41,16 @@ Betriebszweck statt nur Framework-Zulieferer zu sein.
 
 - **Was:** `.github/workflows/daily-paper-run.yml` (Di-Sa 06:30 UTC) ruft
   `scripts/daily_paper_run.py` für 2-3 Ticker mit hartem Kosten-Cap pro Ticker.
+
 - **Wohin:** Reports als Build-Artefakt (90 Tage), Decision-Log + Index +
   Tages-Summary dauerhaft auf Branch `paper-log`. Der tägliche Commit hält
   außerdem den Cron am Leben (GitHub deaktiviert Schedules nach 60 Tagen
   Repo-Inaktivität).
+
 - **Warum rot sichtbar wird:** Fehlende Credentials = grün mit Warning
   (kein Cry-Wolf), echte Fehler = rot mit Exit-Code-Semantik (1 Config,
   3 Ticker-Fehler, 4 Budget). Handbuch: `scripts/PAPER_RUN.md`.
+
 - **Operator-Restaufgaben (bewusst offen, brauchen Zugangsdaten):**
   Provider-Secret im Fork setzen, `scripts/paper_run_rates.json` gegen die
   echte Preisliste prüfen (aktuell konservative Platzhalter), danach einen
@@ -92,6 +113,7 @@ Betriebszweck statt nur Framework-Zulieferer zu sein.
   NICHT (0 Code-Referenzen; ADR-0026 baut das TradingAgents-Muster nativ
   nach). Die MILESTONE-Annahme „liefert das Framework unter ai_tradex" war
   falsch — daher der eigene Paper-Lauf als Daseinszweck.
+
 - Reflexions-Horizont — **erledigt upstream (neu geprüft 2026-10-10 gegen v0.6.0):**
   die Logik ist aus `trading_graph.py` in das Settlement-Modul gezogen:
   `fetch_returns` lässt einen Eintrag pending, bis das volle Haltefenster
