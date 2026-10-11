@@ -228,18 +228,27 @@ def _prune_checkpoints(cp_dir: Path, days: int, apply_changes: bool) -> None:
         if db.is_symlink():
             print(f"  keep {db.name} (symlink, not followed)")
             continue
-        mtime = db.stat().st_mtime
-        age = (time.time() - mtime) / _DAY
-        if mtime > cutoff:
-            print(f"  keep {db.name} ({age:.1f} d old, limit {days} d)")
-            continue
         group = [db, *(p for p in _sidecar_files(db) if not p.is_symlink())]
+        # The group's age is its *newest* mtime, not the ``.db``'s. In WAL mode
+        # the main database is only touched on a clean close
+        # (STATE_OPERATIONS.md:75-80), so the one case the sidecars exist for —
+        # a ``-wal`` that survived a crash — is the case where the ``.db`` is
+        # stale and the WAL holds the recent data. Reading the ``.db`` alone
+        # deleted a one-minute-old recovery point under a 7-day policy and
+        # printed "10.0 d old" while doing it. Hence the printed line names
+        # which clock decided.
+        mtime = max(p.stat().st_mtime for p in group)
+        age = (time.time() - mtime) / _DAY
+        aged = f"{age:.1f} d old by the newest mtime in the group, limit {days} d"
+        if mtime > cutoff:
+            print(f"  keep {db.name} ({aged})")
+            continue
         names = ", ".join(p.name for p in group)
         if apply_changes:
             for path in group:
                 path.unlink(missing_ok=True)
         verb = "deleted" if apply_changes else "would delete"
-        print(f"  {verb} {names} ({age:.1f} d old, limit {days} d)")
+        print(f"  {verb} {names} ({aged})")
 
 
 def _prune_reports(results_dir: str, days: int, apply_changes: bool) -> None:

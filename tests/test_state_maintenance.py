@@ -283,6 +283,37 @@ def test_prune_apply_keeps_the_sidecars_of_a_db_it_decided_to_keep(tmp_path, cap
     assert "backup1.db-wal" not in deleted[0], f"the printed group is wrong: {deleted[0]}"
 
 
+def test_prune_ages_a_checkpoint_group_by_its_newest_file(tmp_path, capsys):
+    """The ``.db`` mtime alone is wrong in exactly the crash case.
+
+    In WAL mode the main database is only touched on a clean close
+    (STATE_OPERATIONS.md:75-80), so the situation the sidecar handling exists
+    for — a ``-wal`` that survived a **crash** — is the situation where the
+    ``.db`` is stale and the WAL holds the recent data. Ageing the group by the
+    ``.db`` deleted a one-minute-old recovery point under a 7-day policy and
+    printed ``10.0 d old`` while doing it.
+    """
+    cache = tmp_path / "cache"
+    db = _make_checkpoint_db(cache, "MSFT")
+    for leftover in db.parent.iterdir():
+        if leftover != db:
+            leftover.unlink()
+    wal = db.with_name(db.name + "-wal")
+    wal.write_bytes(b"committed rows from the crashed run")
+    _age(db, 10)
+    _age(wal, 1 / 1440)  # one minute ago
+
+    rc = tool.main(
+        ["prune", "--apply", "--cache-dir", str(cache), "--results-dir", str(tmp_path / "logs")]
+    )
+
+    out = capsys.readouterr().out
+    assert wal.exists(), "a one-minute-old WAL was deleted under a 7-day policy"
+    assert db.exists(), "its database went with it"
+    assert rc == 0
+    assert "0.0 d old by the newest mtime in the group" in out, out
+
+
 def test_prune_never_touches_the_decision_log(tmp_path, capsys):
     """Operator decision: the decision log has unlimited retention.
 
