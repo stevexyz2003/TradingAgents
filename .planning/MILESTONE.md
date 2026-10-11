@@ -64,7 +64,12 @@
 11. **Betriebs-Runbook:** Checkpoint-Hygiene (`--clear-checkpoints`), Memory-Log-Pflege (`memory_log_max_entries`), Vendor-Quota-Verhalten, Recovery-Ablauf.
 
 ### P3 — Hygiene
-12. Repo-Hygiene: lokale Tool-Artefakte (`.mcp.json`, `scripts/graphify.sh`, `.gitignore`-Erweiterung) bewusst committen oder lokal halten.
+12. ~~Repo-Hygiene: lokale Tool-Artefakte bewusst committen oder lokal halten.~~
+    **Erledigt 2026-10-11** (`4c1769b`): committet sind `CLAUDE.md`, `AGENTS.md`,
+    `scripts/graphify.sh` und die `.gitignore`-Erweiterung; lokal bleiben
+    `.mcp.json`, `.codex/`, `.claude/`, `.agents/`, `.serena/`, `.idea/` und
+    `uv.lock` — die ersten tragen absolute `C:\Users\<name>\`-Pfade und dieses
+    Fork ist öffentlich. Arbeitsbaum seitdem sauber (`git status` leer).
 
 ---
 
