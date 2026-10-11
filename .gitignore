@@ -221,3 +221,31 @@ __marimo__/
 # Enterprise env file (secrets) and generated run reports
 .env.enterprise
 reports/
+
+# Graphify knowledge-graph output (generated). Reproduzierbar via scripts/graphify.sh.
+graphify-out/
+.graphify_*.json
+.graphify_*.txt
+
+# Serena MCP (LSP) — lokaler Symbol-Cache & Logs (regenerierbar).
+.serena/cache/
+.serena/logs/
+
+# Lokale KI-Werkzeug-Konfiguration. Dieses Repo ist ein oeffentlicher Fork; die
+# folgenden Dateien tragen maschinenspezifische Pfade (C:\Users\<name>\...) oder
+# sind reine Arbeitsplatz-Einstellungen und haben darum keinen Nutzen fuer andere.
+# Die PROJEKTregeln stehen committet in CLAUDE.md / AGENTS.md — dort steht auch,
+# wie man Serena und Graphify einmalig lokal einrichtet.
+.mcp.json
+.codex/
+.claude/
+.agents/
+.serena/
+
+# IDE
+.idea/
+
+# uv.lock: Upstream hat die Datei mit 0b61eff entfernt und gibt keine Lockfile-
+# Policy vor; die lokale Kopie bleibt darum untracked statt gegen Upstream zu
+# divergieren (siehe .planning/MILESTONE.md, DoD "Lockfile-Policy").
+uv.lock
