@@ -62,6 +62,24 @@ DEFAULT_REPORT_DAYS = 90
 _DAY = 86400.0
 
 
+# --- shared -----------------------------------------------------------------
+
+
+def _sidecar_files(db: Path) -> list[Path]:
+    """The ``-wal``/``-shm``/``-journal`` files that belong to ``db``.
+
+    Deliberately **not** ``db.parent.glob(f"{db.name}-*")``: ``db.name`` comes
+    off the filesystem, not from the validated ticker, so a glob metacharacter
+    in it re-targets the pattern at other files. ``backup[1].db`` becomes the
+    pattern ``backup[1].db-*``, whose ``[1]`` is a character class — it matches
+    ``backup1.db-wal``, the WAL of a *different* database, and ``AAPL.db-old.db``
+    is matched as a sidecar of ``AAPL.db`` and so skips its own age check. A
+    literal prefix test cannot do either; it also keeps the printed group honest.
+    """
+    prefix = db.name + "-"
+    return sorted(p for p in db.parent.iterdir() if p.name.startswith(prefix) and p.is_file())
+
+
 # --- verify -----------------------------------------------------------------
 
 
@@ -76,9 +94,8 @@ def check_checkpoint_db(db: Path) -> str | None:
     with tempfile.TemporaryDirectory(prefix="tex-verify-") as tmp:
         work = Path(tmp) / db.name
         shutil.copy2(db, work)
-        for sidecar in sorted(db.parent.glob(f"{db.name}-*")):
-            if sidecar.is_file():
-                shutil.copy2(sidecar, Path(tmp) / sidecar.name)
+        for sidecar in _sidecar_files(db):
+            shutil.copy2(sidecar, Path(tmp) / sidecar.name)
         try:
             conn = sqlite3.connect(str(work))
         except sqlite3.DatabaseError as exc:
@@ -192,8 +209,12 @@ def _prune_checkpoints(cp_dir: Path, days: int, apply_changes: bool) -> None:
     A *successful* run calls ``clear_checkpoint``, which deletes rows, not the
     file — so one ``.db`` per ticker accumulates forever. And ``-wal``/``-shm``
     survive a crash, which is why deleting only the ``.db`` would leave
-    committed data on disk. Same glob logic as
-    ``checkpointer.clear_all_checkpoints`` (checkpointer.py:80).
+    committed data on disk.
+
+    The group is built by ``_sidecar_files``, a literal prefix test — *not* by
+    ``clear_all_checkpoints``'s ``glob(f"{db.name}-*")`` (checkpointer.py:80).
+    There that pattern is latent (the function deletes every checkpoint
+    anyway); here it would cross the keep/delete boundary.
     """
     if not cp_dir.is_dir():
         print(f"checkpoints: no directory at {cp_dir}")
@@ -212,7 +233,7 @@ def _prune_checkpoints(cp_dir: Path, days: int, apply_changes: bool) -> None:
         if mtime > cutoff:
             print(f"  keep {db.name} ({age:.1f} d old, limit {days} d)")
             continue
-        group = [db, *(p for p in sorted(cp_dir.glob(f"{db.name}-*")) if not p.is_symlink())]
+        group = [db, *(p for p in _sidecar_files(db) if not p.is_symlink())]
         names = ", ".join(p.name for p in group)
         if apply_changes:
             for path in group:

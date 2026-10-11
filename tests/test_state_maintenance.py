@@ -248,6 +248,41 @@ def test_prune_apply_removes_old_checkpoints_with_their_sidecars(tmp_path):
     assert recent_wal.exists()
 
 
+def test_prune_apply_keeps_the_sidecars_of_a_db_it_decided_to_keep(tmp_path, capsys):
+    """A glob metacharacter in a filename must not re-target the sidecar group.
+
+    ``glob(f"{db.name}-*")`` turned the expired ``backup[1].db`` into the
+    pattern ``backup[1].db-*``, whose ``[1]`` is a character class — so it
+    matched ``backup1.db-wal``, the WAL of the database the same run had just
+    decided to *keep*. In WAL mode that sidecar can hold the only copy of
+    committed rows, so the surviving checkpoint is silently corrupted while the
+    output reads as if nothing happened.
+    """
+    cache = tmp_path / "cache"
+    cp_dir = cache / "checkpoints"
+    cp_dir.mkdir(parents=True)
+    expired = cp_dir / "backup[1].db"
+    expired.write_bytes(b"expired, unrelated to backup1.db")
+    _age(expired, 30)
+    kept = cp_dir / "backup1.db"
+    kept.write_bytes(b"fresh")
+    kept_wal = cp_dir / "backup1.db-wal"
+    kept_wal.write_bytes(b"committed rows that exist nowhere else")
+
+    rc = tool.main(
+        ["prune", "--apply", "--cache-dir", str(cache), "--results-dir", str(tmp_path / "logs")]
+    )
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert not expired.exists()
+    assert kept.exists()
+    assert kept_wal.exists(), "the WAL of a kept database was deleted"
+    deleted = [line for line in out.splitlines() if "deleted" in line]
+    assert len(deleted) == 1
+    assert "backup1.db-wal" not in deleted[0], f"the printed group is wrong: {deleted[0]}"
+
+
 def test_prune_never_touches_the_decision_log(tmp_path, capsys):
     """Operator decision: the decision log has unlimited retention.
 
