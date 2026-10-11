@@ -74,14 +74,37 @@
 - **Kosten:** Ein Full-Run über alle Agenten ist teuer; bis Budget-Enforcement (P1/3) steht, kein unbeaufsichtigter Dauerbetrieb.
 
 ## Definition of Done für diesen Meilenstein
-- [ ] v0.2.5 getaggt, CHANGELOG vollständig (inkl. #618, DeepSeek V4)
-- [ ] CI-Pipeline grün (Tests + Lint + Security-Scan) auf mind. 2 Python-Versionen, Dev-Deps deklariert
-- [ ] Kosten-Budget pro Run erzwingbar
-- [ ] Schema-Fehler der Provider führen nicht mehr zum Run-Abbruch
-- [ ] Secrets-/Konfig-Doku für Produktion vorhanden, Fail-fast-Konfigvalidierung
-- [ ] Docker-/CLI-Smoke mit Stub-Providern läuft reproduzierbar
-- [ ] Lockfile-Policy geklärt, `uv.lock`-Drift aufgelöst
-- [ ] State-Retention/Backup/Recovery (Decision-Log, Checkpoints) dokumentiert
+
+**Stand 2026-10-11** (nachgezogen; die Haken sind gegen den Code auf `main` =
+`1849413` geprüft, nicht gegen die Absicht):
+
+- [x] ~~v0.2.5 getaggt~~ **obsolet durch die Rebase-Strategie:** `pyproject`
+  trägt die Upstream-Version (jetzt 0.6.0), eigene Features stehen in der
+  CHANGELOG-Sektion „Unreleased", eigene Tags gibt es seit 2026-08-18 nicht
+  mehr (`v0.2.5-tex` war der letzte). #618 und DeepSeek V4 sind in Upstreams
+  eigenen Releases dokumentiert.
+- [x] CI-Pipeline grün — Fork-CI auf **py3.11–3.14** + Clean-Install-Smoke +
+  strict ruff, Dev-Deps als `[dev]`-Extra deklariert (zuletzt grün: Run auf
+  `0462c1a`).
+- [x] Kosten-Budget pro Run erzwingbar — `tradingagents/budget.py`, hartes
+  `max_cost_per_run`, Abbruch vor dem nächsten LLM-Call, Teilzustand wird
+  gesichert; seit dem v0.5.0-Rebase zählen auch die Reflexions-Calls mit.
+- [x] Schema-Fehler brechen den Run nicht ab — Retry mit Fehlerkontext in
+  `tradingagents/agents/structured.py`, danach Prosa-Fallback.
+- [x] Secrets-/Konfig-Doku + Fail-fast — README-Abschnitt „Secrets &
+  configuration for production", `scripts/PAPER_RUN.md`, Credential-Prüfung
+  über alle Tier-Provider (#1440).
+- [ ] Docker-/CLI-Smoke mit Stub-Providern läuft reproduzierbar — **offen (P2)**
+- [x] Lockfile-Policy geklärt — Upstream hat `uv.lock` entfernt (0b61eff), die
+  Operator-Kopie liegt untracked auf Disk; damit erledigt, kein Drift mehr.
+- [ ] State-Retention/Backup/Recovery dokumentiert — **offen (P2)**
+
+**Nicht in der DoD, aber der eigentliche Zweck (siehe Korrektur oben):** der
+tägliche Paper-Lauf trägt sich noch nicht unbeaufsichtigt — es gibt bis heute
+keinen einzigen Lauf mit einer Entscheidung, weil kein Provider-Key nutzbar ist
+(Anthropic 401, OpenAI ohne Guthaben; jeder Fehlversuch $0.00). Die Mechanik
+rundherum ist verifiziert: Preflight, Fehler-Semantik, Keep-alive-Commit auf
+`paper-log`.
 
 ---
 

@@ -5,7 +5,7 @@
 
 ## Current Position
 
-Last activity: 2026-10-10 - Rebase auf Upstream v0.6.0 (origin/main 1394a3f) auf Branch `rebase/upstream-v0.6.0`: alle 18 Strang-Commits neu aufgesetzt, 5 Features portiert (Budget #582 auf v0.6.0s In-Graph-Settlement, Structured-Retry #583 in Upstreams neues `agents/structured.py`, Fail-fast-Keys jetzt pro Tier-Provider, CLI-Ticker-Fehlermeldung und Budget-Abbruch in `cli/run.py`, Paper-Lauf mit gpt-6-Raten). Gates: ruff clean (0.17.0, target py311), Paper-Preflight ohne Keys rc=20, pytest 1353 passed / 1 failed — derselbe umgebungsabhängige Upstream-Test wie auf purem v0.6.0 (`test_suite_isolation`, Windows-Tempdir liegt unter `Path.home()`). Davor 2026-09-22: Rebase auf v0.5.0.
+Last activity: 2026-10-11 - v0.6.0-Rebase promoviert (main = fork/main = 1849413, Fork-CI gruen auf py3.11-3.14 + Clean-Install-Smoke + strict ruff; Backup `backup/pre-rebase-v0.6.0`, Arbeits-Worktree entfernt). Danach Paper-Lauf auf Anthropic umgestellt: Provider + beide Modell-Stufen im Workflow gepinnt (claude-sonnet-5-5 deep / claude-haiku-5-5 quick), echte Anthropic-Raten, aktuelle Claude-IDs im Katalog, Credential-Pruefung jetzt ueber alle Tier-Provider (#1440). OFFEN: noch kein Lauf mit Entscheidung - der .env/Secret-Anthropic-Key antwortet mit 401 (lokal wie in CI), der OpenAI-Key hat kein Guthaben; jeder Fehlversuch kostete $0.00. Der Cron bleibt bis zu einem gueltigen Key jeden Morgen rot.
 
 ### Heartbeat: täglicher Paper-Lauf (2026-08-21)
 
@@ -103,5 +103,5 @@ Betriebszweck statt nur Framework-Zulieferer zu sein.
 |---|-------------|------|--------|--------|-----------|
 | 260814-fast | Meilenstein Produktionsreife erstellen (Codex-reviewed) | 2026-08-14 | 216e1d4 | Verified | — |
 | 260814-k1j | P1-Punkte umsetzen: v0.2.5-Release (Tag auf cf351de), CI-Paket, Kosten-Budget (#582), Schema-Retry (#583), Fail-fast-Keys + 4 Codex-Review-Fix-Commits | 2026-08-14 | f5839f3 | Verified | [260814-k1j](./quick/260814-k1j-setz-die-p1-punkte-um-fang-mit-dem-v0-2-/) |
-| 260922-iz5 | Rebase strand onto upstream v0.5.0 (Budget auf #1249-Lifecycle neu aufgesetzt, gpt-5.6-Raten ergänzt, 402cd8b gedroppt) | 2026-09-22 | 164869a | Gates re-run (Promotion offen) | [260922-iz5](./quick/260922-iz5-rebase-strand-onto-upstream-v0-5-0/) |
-| 261010-raj | Rebase strand onto upstream v0.6.0 (#583-Retry in upstreams invoke_structured neu angesetzt, CLI-Ports nach cli/run.py, Budget-Re-raise durch _memory_step, gpt-6-Raten) | 2026-10-10 | a6a06b2 | Gates re-run (Promotion offen) | [261010-raj](./quick/261010-raj-rebase-strand-onto-upstream-v0-6-0/) |
+| 260922-iz5 | Rebase strand onto upstream v0.5.0 (Budget auf #1249-Lifecycle neu aufgesetzt, gpt-5.6-Raten ergänzt, 402cd8b gedroppt) | 2026-09-22 | 164869a | Promoted (fork/main) | [260922-iz5](./quick/260922-iz5-rebase-strand-onto-upstream-v0-5-0/) |
+| 261010-raj | Rebase strand onto upstream v0.6.0 (#583-Retry in upstreams invoke_structured neu angesetzt, CLI-Ports nach cli/run.py, Budget-Re-raise durch _memory_step, gpt-6-Raten) | 2026-10-10 | a6a06b2 | Promoted (fork/main) | [261010-raj](./quick/261010-raj-rebase-strand-onto-upstream-v0-6-0/) |
