@@ -15,6 +15,7 @@ Underweight / Sell).
 | Workflow | `.github/workflows/daily-paper-run.yml` |
 | Runner | `scripts/daily_paper_run.py` |
 | Rate table | `scripts/paper_run_rates.json` (operator-maintained) |
+| State & recovery | `scripts/STATE_OPERATIONS.md` |
 | Schedule | Tue–Sat 06:30 UTC — the morning after each US session |
 | Per-run output | Workflow artifact `paper-run-<n>` (90 days) |
 | Track record | Branch `paper-log`, kept forever |
@@ -107,6 +108,10 @@ index.md                one row per ticker run, all days
 runs/<date>/summary.json
 runs/<date>/<TICKER>.md the consolidated report
 ```
+
+Retention, backup, recovery from a corrupt checkpoint and the known locking
+gaps are in `scripts/STATE_OPERATIONS.md`, together with the maintenance tool
+`scripts/state_maintenance.py` (`verify` / `prune` / `backup`).
 
 `decision-log.md` is the part that compounds. Each run appends its decision as
 `pending`; a later run of the same ticker resolves it with the realized return
