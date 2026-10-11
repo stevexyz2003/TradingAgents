@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "started_at": "2026-10-10T06:55:24.604005+00:00",
-  "finished_at": "2026-10-10T06:55:56.538187+00:00",
+  "started_at": "2026-10-11T10:25:12.429800+00:00",
+  "finished_at": "2026-10-11T10:25:15.368678+00:00",
   "trade_date": "2026-10-09",
-  "provider": "openai",
-  "deep_think_llm": "gpt-5.6",
-  "quick_think_llm": "gpt-5.6-luna",
+  "provider": "anthropic",
+  "deep_think_llm": "claude-sonnet-5-5",
+  "quick_think_llm": "claude-haiku-5-5",
   "max_cost_per_run_usd": 1.5,
-  "max_total_cost_usd": 4.5,
-  "commit": "cc6a5dc8aa3c61d86cab970bae8d41bed5b77b68",
+  "max_total_cost_usd": 1.5,
+  "commit": "18494137deb9338510bff9be03870030a4c9cafd",
   "status": "failed",
   "totals": {
-    "tickers": 3,
+    "tickers": 1,
     "cost_usd": 0.0,
     "tokens_in": 0,
     "tokens_out": 0,
     "ok": 0,
-    "failed": 3,
+    "failed": 1,
     "budget_aborted": 0,
     "skipped": 0
   },
@@ -28,31 +28,9 @@
       "cost_usd": 0.0,
       "tokens_in": 0,
       "tokens_out": 0,
-      "duration_s": 12.430934951000012,
+      "duration_s": 1.247955090000005,
       "report": null,
-      "error": "OpenAIRateLimitError: Error code: 429 - {'error': {'message': 'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.', 'type': 'insufficient_quota', 'param': None, 'code': 'credit_balance_exhausted'}}"
-    },
-    {
-      "ticker": "MSFT",
-      "status": "failed",
-      "signal": null,
-      "cost_usd": 0.0,
-      "tokens_in": 0,
-      "tokens_out": 0,
-      "duration_s": 9.748142787000006,
-      "report": null,
-      "error": "OpenAIRateLimitError: Error code: 429 - {'error': {'message': 'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.', 'type': 'insufficient_quota', 'param': None, 'code': 'credit_balance_exhausted'}}"
-    },
-    {
-      "ticker": "NVDA",
-      "status": "failed",
-      "signal": null,
-      "cost_usd": 0.0,
-      "tokens_in": 0,
-      "tokens_out": 0,
-      "duration_s": 9.13531949999998,
-      "report": null,
-      "error": "OpenAIRateLimitError: Error code: 429 - {'error': {'message': 'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.', 'type': 'insufficient_quota', 'param': None, 'code': 'credit_balance_exhausted'}}"
+      "error": "AnthropicAuthenticationError: Error code: 401 - {'type': 'error', 'error': {'type': 'authentication_error', 'message': 'invalid x-api-key'}, 'request_id': 'req_011CfvHedpXXQK4PkyTHuPHp'}"
     }
   ]
 }
