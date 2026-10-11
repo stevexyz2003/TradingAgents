@@ -1,9 +1,18 @@
 # Project State — TradingEngineX (TradingAgents)
 
-**Milestone:** Produktionsreife v0.2.x → v0.2.5 (siehe [MILESTONE.md](./MILESTONE.md))
+**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 60 Anforderungen, Phase 1 offen
+**Vorgänger:** Produktionsreife v0.2.x → v0.2.5 — **abgeschlossen 2026-10-11** (siehe [MILESTONE.md](./MILESTONE.md)); bewusst offen geblieben: P2 #6 Observability (von M2 Phase 8 teilweise mitbedient) und P2 #8 Provider-Ausfall-Policy
 **Branch:** main
 
 ## Current Position
+
+**Nächster Schritt: M2 Phase 1 — Konto-Messung (Operator-Gate, kein Code).**
+Zu messen ist, ob der Login mit dem Paper-Benutzer `stevexyzp2` im IB Gateway
+einen Zweitfaktor verlangt: die offizielle Doku ist dazu widersprüchlich
+(„all accounts required to enroll in 2FA" betrifft Enrollment auf Kontoebene,
+nicht den Prompt beim Paper-Login), und das Ergebnis entscheidet, ob
+unbeaufsichtigter Wochenbetrieb möglich ist oder täglich Handarbeit kostet.
+Gate G1 hängt daran. Danach: `/gsd:plan-phase 2`.
 
 Last activity: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
 

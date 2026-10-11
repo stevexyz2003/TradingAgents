@@ -1,5 +1,13 @@
 # Meilenstein: Produktionsreife v0.2.x → v0.2.5
 
+> **ABGESCHLOSSEN am 2026-10-11.** Nachfolger ist **M2 — IBKR Paper Execution**
+> ([ROADMAP.md](./ROADMAP.md), [REQUIREMENTS.md](./REQUIREMENTS.md)). Von der
+> P2-Liste blieben bewusst zwei Punkte offen: #6 Observability/Alerting (M2
+> Phase 8 bedient die Ausführungsseite credential-frei mit, die Analyseseite
+> bleibt offen) und #8 Provider-Ausfall-Policy. Der eigentliche Beweis, dass
+> der Meilenstein trägt: der tägliche Paper-Lauf produziert seit 2026-10-11
+> Entscheidungen (AAPL Hold, $0.18 bei 12 % des Caps).
+
 **Stand:** 2026-08-14 · Branch `main`, HEAD `7e9e7b8` — 2 Commits nach Tag `v0.2.4`, noch ungetaggt (`pyproject.toml` steht auf 0.2.4)
 **Ziel:** Das Framework soll in nächster Zeit produktiv eingesetzt werden. Dieser Meilenstein hält fest, was dafür bereits steht und was noch fehlt.
 
