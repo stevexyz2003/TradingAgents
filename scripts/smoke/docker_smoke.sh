@@ -141,10 +141,17 @@ if [ "$READY" -ne 1 ]; then
     fail "stub did not answer GET /__count within 30 s"
 fi
 
-# 5. All seven env vars are required: without *both* round counts the
+# 5. All eight env vars are required: without *both* round counts the
 #    unattended gap check asks the depth question, without *both* model tiers the
 #    other one falls back to a gpt-6-* name. `openai_compatible` is
 #    key_optional=True / require_base_url=True — no key needed.
+#    TRADINGAGENTS_LLM_MAX_RETRIES=0 is what makes step 7f's exact `-eq 9`
+#    sound, and it is not optional: `llm_max_retries` defaults to None
+#    (default_config.py), so factory.py never passes `max_retries` and the
+#    openai SDK client keeps its own default — measured as 2. One transient
+#    failure in the parallel analyst burst would then be retried silently,
+#    counted by the stub, and the job would go red pointing at an upstream
+#    rebase. The negative control pins the same variable for the same reason.
 #    Never mount a host volume on /home/appuser/.tradingagents: a non-empty mount
 #    with a foreign uid ends in PermissionError on cli_prefs.json.<uuid>.tmp.
 echo "== 5/9 run the CLI through the image"
@@ -159,6 +166,7 @@ RUN_RC=0
   -e TRADINGAGENTS_MAX_RISK_ROUNDS=1 \
   -e TRADINGAGENTS_LLM_PROVIDER=openai_compatible \
   -e TRADINGAGENTS_LLM_BACKEND_URL=http://stub:8000/v1 \
+  -e TRADINGAGENTS_LLM_MAX_RETRIES=0 \
   -e TRADINGAGENTS_QUICK_THINK_LLM=stub-quick \
   -e TRADINGAGENTS_DEEP_THINK_LLM=stub-deep \
   "$SMOKE_IMAGE" --ticker "$SMOKE_TICKER" --date "$SMOKE_DATE" \
@@ -204,7 +212,9 @@ grep -qF "[$SMOKE_DATE | $SMOKE_TICKER | Overweight | pending]" "$MEM_LOG" || \
 # f) the stub's own counter. *Fewer* than the expected number means a call did
 #    not go to the stub (so possibly to a real endpoint); *more* means a decider
 #    failed to parse the stub's arguments and invoke_structured retried once per
-#    decider with error context. The counter is therefore both a schema and a
+#    decider with error context — an inference that only holds because step 5
+#    pins TRADINGAGENTS_LLM_MAX_RETRIES=0, so a transport retry cannot inflate
+#    this number. The counter is therefore both a schema and a
 #    graph-shape sensor. The *proof* of "no real LLM call" is the --internal
 #    network; the counter is the control that no call landed elsewhere.
 CALLS=$(docker exec tex-smoke-stub python -c \
