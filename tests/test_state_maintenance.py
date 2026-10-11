@@ -190,6 +190,29 @@ def test_verify_flags_a_broken_entry_without_a_trailing_separator(tmp_path):
     assert _verify(tmp_path / "cache", log) == 2
 
 
+def test_verify_reports_a_decision_log_that_is_not_utf8(tmp_path, capsys):
+    """Invalid UTF-8 is a corruption mode, not a usage error.
+
+    ``read_text`` raised ``UnicodeDecodeError``, so the tool died with a
+    traceback on one of the very conditions it exists to detect — and Python's
+    exit code 1 is the one this module's docstring reserves for
+    "usage/configuration error - nothing was done". An automated caller reading
+    that code concludes the *invocation* was wrong, not the data.
+    """
+    log = tmp_path / "state" / "decision-log.md"
+    log.parent.mkdir(parents=True)
+    log.write_bytes(
+        b"[2026-10-08 | AAPL | Overweight | pending]\n\n\xffDECISION:\nStub decision text.\n"
+    )
+
+    rc = _verify(tmp_path / "cache", log)
+
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "UTF-8" in out
+    assert f"FAIL: {log.name}" in out
+
+
 def test_verify_accepts_an_empty_decision_log(tmp_path):
     log = tmp_path / "state" / "decision-log.md"
     log.parent.mkdir(parents=True)

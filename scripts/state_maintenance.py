@@ -149,8 +149,19 @@ def check_decision_log(path: Path) -> str | None:
     and hide a real one in the other direction. A block whose tag line has fewer
     than four fields is dropped *silently* by ``_parse_entry``; comparing blocks
     against parsed entries is the only way to see it.
+
+    A log that cannot be read or decoded is a *finding*, not a crash: invalid
+    UTF-8 is a textbook corruption mode for the one file this tool calls
+    irreplaceable, and letting the exception out exits 1 — the code reserved
+    for "usage/configuration error - nothing was done", which tells an
+    automated caller the opposite of what happened.
     """
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        return f"not valid UTF-8: {exc}"
+    except OSError as exc:
+        return f"cannot read: {exc}"
     if not text.strip():
         return None
     blocks = [block for block in text.split(TradingMemoryLog._SEPARATOR) if block.strip()]
