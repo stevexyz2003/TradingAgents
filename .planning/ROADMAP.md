@@ -66,7 +66,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 2. Die 2FA-Frage ist mit „ja" oder „nein" beantwortet, und der Befund enthält den daraus abgeleiteten Satz zur Betriebsform („Wochenlogin automatisierbar" oder „ein manueller Quittierungsvorgang pro Woche").
 3. Das IB Gateway läuft im Paper-Modus, der API-Port auf `127.0.0.1:4002` antwortet, und `managedAccounts` ist wörtlich notiert.
 4. Für `AAPL` stehen `conId`, `primaryExchange`, `currency`, `localSymbol`, `validExchanges`, `ineligibilityReasonList` und das `tradingHours`/`liquidHours`/`timeZoneId`-Tripel im Rohformat im Befund; für je ein Exemplar von `IND`, `FUT`, `CMDTY`, `CASH`, `CRYPTO` entweder dasselbe oder die Fehlermeldung, die stattdessen kam.
-5. Read-Only ist zu diesem Zeitpunkt noch **an**, und ein bewusster Platzierungsversuch während der Messung scheitert nachweislich mit Fehler **10015** — damit ist die Sicherheitsannahme aller folgenden Lesephasen belegt und nicht behauptet.
+5. ~~Read-Only ist noch **an**, Platzierungsversuch scheitert mit **10015**~~ — **erfüllt am 2026-10-11, mit zwei Korrekturen:** der reale Marker ist **321** („Die API befindet sich im schreibgeschützten Modus", Order-Status `ValidationError`) — **gemessen 2026-10-11 an Gateway 10.50.1**; der in der Recherche erwartete Code **10015** trat nicht auf; und Read-Only war am Gateway **nicht** voreingestellt, sondern aus (erste Probe wurde angenommen und sofort storniert). Siehe [ibkr-konto-befund.md](./ibkr-konto-befund.md).
 
 **Was diese Phase NICHT tut:**
 - Keine Zeile Ausführungscode, kein Adapter, keine Abhängigkeitsänderung.
@@ -139,7 +139,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 
 **Success Criteria:**
 1. Der Trockenlauf gegen den **echten** Branchstand vom 2026-10-09 (AAPL, `Hold`) erzeugt keine Order und protokolliert `skipped: hold`. Das ist der wichtigste Einzelnachweis dieser Phase: die eine reale Entscheidung im Bestand darf am Tag 1 nichts kaufen.
-2. Ein Fixture mit `Buy` und flacher Position erzeugt die Absicht „2 Blöcke kaufen", durchläuft `whatIf` und protokolliert Margin-Impact, Kommission und `rejectReason` — und sendet nichts; ein versehentliches `place` scheitert in dieser Phase noch an 10015.
+2. Ein Fixture mit `Buy` und flacher Position erzeugt die Absicht „2 Blöcke kaufen", durchläuft `whatIf` und protokolliert Margin-Impact, Kommission und `rejectReason` — und sendet nichts; ein versehentliches `place` scheitert in dieser Phase an 321 — aber nur, solange der Operator den Gateway-Schreibschutz gesetzt hat (am 2026-10-11 war er wieder aus).
 3. Der Divergenzfall ist abgedeckt: ein Fixture, in dem `summary.json` ein anderes Signal zeigt als `decision-log.md`, endet mit Exit 2 und protokollierter Abweichung — und der Lauf hat die Fassung aus `decision-log.md` gelesen, nicht die aus dem Summary.
 4. Die Aktualitätsregel ist **in Sitzungen** getestet, mit allen vier Gegenproben: Di-Lauf/`trade_date`=Mo → ausführbar · Sa-Entscheidung am Mo → ausführbar, markiert als `weekend_gap` · Mi verpasst, Do nachgeholt → Exit 2 · Feiertagsmontag, Di-Lauf → ausführbar.
 5. `null`, `"REVIEW"`, `status != "ok"`, `schema_version != 1` und ein Befund von `state_maintenance.py verify` führen jeweils zu einem eigenen protokollierten Zustand und zu keiner Order.
@@ -192,7 +192,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 **Diese Phase ist bewusst klein: sie schaltet um, sie baut nicht.** Dass hier nur vier Anforderungen liegen, ist das Ergebnis des Zuschnitts und kein Versehen — alles, was eine Order riskant macht, ist in den Phasen 2 bis 5 abgeschlossen.
 
 **Success Criteria:**
-1. Die Freischaltung des API-Schreibrechts ist mit Datum, Grund und Vorher-/Nachher-Zustand im Betriebshandbuch notiert, und der gesperrte Zustand ist vorher über Fehler 10015 belegt.
+1. Die Freischaltung des API-Schreibrechts ist mit Datum, Grund und Vorher-/Nachher-Zustand im Betriebshandbuch notiert, und der gesperrte Zustand ist vorher über Fehler 321 belegt.
 2. Die Prüfkette läuft an genau einer Stelle und in der festgelegten Reihenfolge (Lock → Reconciliation → Quellen/Integrität → Aktualität → Auflösung/Handelbarkeit → Menge → Größe → Handelszeit → Kill-Switch → `whatIf` → `intent` → platzieren); ein Test prüft die **Aufrufreihenfolge** gegen einen Stub-Broker, nicht nur das Ergebnis.
 3. Eine echte Markt-Order über einen Block ist platziert, und der Ledger zeigt die vollständige Kette `intent → placed → filled` mit `orderId`, `permId`, `orderRef == decision_key`, `execId`(s), `filled_qty` und `avg_price`.
 4. Die Position im Konto entspricht dem Ziel der Leiter, und ein **zweiter Lauf am selben Tag** erzeugt keine zweite Order — Toleranzband, Ledger-Guard und Reconciliation greifen nachweislich zusammen.
@@ -273,7 +273,7 @@ Alle 60 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer 
 | REQ-IBKR-07 | Adapter mit ≤ 10 Methoden, einziger `ib_async`-Importort | 2 |
 | REQ-IBKR-08 | Fester `clientId`, Order-IDs ab `nextValidId` | 2 |
 | REQ-IBKR-09 | Betriebszustände benannt, Liveness über Probe-Antwort | 2 |
-| REQ-IBKR-10 | Schreibrecht als dokumentierte Einmalhandlung (Marker 10015) | 6 |
+| REQ-IBKR-10 | Schreibrecht als dokumentierte Einmalhandlung (Marker 321) | 6 |
 | REQ-IBKR-11 | Kontolesen füllt `PortfolioContext` für die Analyse | 2 |
 | REQ-IBKR-12 | Ist-Position bei jedem Lauf frisch vom Broker | 2 |
 | REQ-IBKR-13 | Lesequelle ist genau `decision-log.md` | 4 |

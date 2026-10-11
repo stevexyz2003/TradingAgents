@@ -1,6 +1,6 @@
 # IBKR-Konto-Befund — M2 Phase 1 (REQ-IBKR-01, REQ-IBKR-02)
 
-**Gemessen:** 2026-10-11 · Konto `DUQ634065` · gemessen per Wegwerf-Sonde über
+**Gemessen:** 2026-10-11 (zweiter Durchgang am Gateway 10.50.1) · Konto `DUQ634065` · gemessen per Wegwerf-Sonde über
 `ib_async` 2.1.0, ausschließlich lesend (`readonly=True`), nichts platziert.
 
 ## Die fünf Fragen
@@ -84,7 +84,7 @@ zeitzonenbewusste `datetime`-Paare. Feiertage und Halbtage kommen damit vom
 Server, ein eigener Kalender ist nicht nötig (REQ-IBKR zur Handelszeit ist
 umsetzbar wie geplant).
 
-## Erfolgskriterium 5: Read-Only — **gemessen, und das Ergebnis ist NEGATIV**
+## Erfolgskriterium 5: Read-Only — **erfüllt (2. Messung), mit zwei Korrekturen**
 
 **Read-Only ist am Gateway NICHT aktiv** (gemessen 2026-10-11 20:15). Der
 bewusste Platzierungsversuch (`BUY 1 AAPL LMT 1.00`, ein Limit, das nie füllt)
@@ -134,13 +134,51 @@ der Freigabe fehlt.
    ist damit keine Formalie — ohne sie entsteht eine Order, die Stunden später
    zu einem unbekannten Kurs auf den Markt trifft.
 
+## 2. Messung (20:24): Read-Only aktiv — Nachweis erbracht
+
+Nach Aktivierung von „Read-Only API" im Gateway **10.50.1** wurde derselbe
+Platzierungsversuch wiederholt und **abgelehnt**:
+
+```text
+managedAccounts=['DUQ634065']
+platziere: BUY 1 AAPL LMT 1.00 (nie fuellbar)
+  [API] code=321 msg=Bei der Validierung der Anfrage ist ein Fehler aufgetreten.
+                     -'bC' : cause - Die API befindet sich im schreibgeschuetzten Modus.
+orderStatus='ValidationError' orderId=4 filled=0.0
+offene Orders gesamt=0 davon aus dieser Probe=0
+```
+
+**Korrektur 1 — der Fehlercode:** Erwartet war **10015** („Trading is not allowed
+in the API"). Das reale Gateway 10.50.1 liefert **321** mit der Klartextursache
+„Die API befindet sich im schreibgeschützten Modus", und der Order-Status bleibt
+`ValidationError`. REQUIREMENTS.md und ROADMAP.md sind entsprechend korrigiert —
+ein Test gegen 10015 wäre nie grün geworden.
+
+**Korrektur 2 — Read-Only ist keine Voreinstellung.** Die Annahme „im Gateway
+standardmäßig an" ist falsch: In der ersten Messung war der Schreibschutz aus und
+die Order wurde angenommen. Es ist eine aktive Handlung des Operators, auf deren
+Vorhandensein sich keine Phase verlassen darf.
+
+**Zustand danach:** Der Operator hat den Schreibschutz nach dem Nachweis wieder
+**deaktiviert** (20:27). Für die Phasen 2–4 heißt das: Es gibt keinen
+Gateway-seitigen Schutz mehr, es trägt allein der clientseitige
+`readonly=True`-Parameter von `ib_async`. Das ist schwächer — eine Verbindung,
+die ihn vergisst, darf schreiben. REQ-IBKR-03 muss das behandeln.
+
+**Nebenbeobachtung, nicht isoliert:** Mit aktivem Read-Only kamen bereits beim
+Verbinden zwei 321-Meldungen, bevor eine Order im Spiel war, und ein
+anschließender Sondierungslauf über die Lese-Aufrufe **blieb ohne Antwort
+hängen** statt zu scheitern. Welcher Aufruf das war, ist nicht isoliert — der
+Schreibschutz wurde vorher wieder deaktiviert. Für Phase 2 bleibt die
+belastbare Konsequenz: **jeder API-Aufruf braucht ein Timeout**, ein Hänger ohne
+Zeitgrenze legt den täglichen Ausführer still.
+
 ## Handlungsbedarf (Operator)
 
 1. ~~Port-Widerspruch auflösen~~ — **erledigt 2026-10-11**, `.env` steht auf 7497.
-2. **„Read-Only API" im Gateway aktivieren** (Konfigurieren → Einstellungen →
-   API → Settings), danach den 10015-Nachweis wiederholen — erst dann ist
-   Phase 1 vollständig und Gate G1 offen für Phase 2. Gemessen ist bisher das
-   Gegenteil: der Schreibpfad ist offen.
+2. ~~„Read-Only API" aktivieren und Nachweis wiederholen~~ — **erledigt
+   2026-10-11 20:24** (Marker 321 statt 10015). Schreibschutz danach vom
+   Operator wieder deaktiviert.
 3. **Gateway-Upgrade auf ≥ 1050.1 vor dem 2026-12-15** einplanen (Code 2172).
 
 ## Rohausgabe der Sonde
