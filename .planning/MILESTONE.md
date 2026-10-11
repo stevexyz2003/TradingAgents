@@ -57,11 +57,39 @@
 
 ### P2 — wichtig
 6. **Observability für Dauerbetrieb:** Logs existieren, aber keine Metriken/Alerting (Vendor-Ausfälle, Fehlerraten, Latenz, Kosten je Run).
-7. **State-Betrieb definieren:** Retention/Backup für Decision-Log und Checkpoints, Verhalten bei parallelen Runs (Locking), Recovery bei korrupten SQLite-Dateien.
+7. ~~**State-Betrieb definieren:** Retention/Backup für Decision-Log und Checkpoints, Verhalten bei parallelen Runs (Locking), Recovery bei korrupten SQLite-Dateien.~~
+   **Erledigt 2026-10-11** (`28f4a75`, `e32c6a4`): `scripts/STATE_OPERATIONS.md`
+   hält Pfade, Sidecars, Fristen und die fünf Locking-Lücken fest;
+   `scripts/state_maintenance.py` (`verify`/`prune`/`backup`) macht
+   Integritätsprüfung und Recovery ausführbar statt behauptet — 18 Tests, darunter
+   eine künstlich korrupte DB (das `quick_check`-Pragma *wirft* dort, ein
+   Rückgabevergleich hätte nie etwas gesehen) und der Beweis, dass `prune` die
+   `-wal`/`-shm`-Sidecars mitnimmt und das Decision-Log nie anfasst.
 8. **Provider-Ausfall-/Quota-Policy technisch verankern:** Timeout-/Retry-Obergrenzen, Degradations-Strategie (welcher Fallback wann), nicht nur dokumentieren.
 9. **Release-Reproduzierbarkeit:** `uv.lock`-Drift klären (lokale Änderung +322/−1596 Zeilen — reviewen, committen oder verwerfen) und Lockfile-Policy festlegen; Build-/Publish-Prozedur für v0.2.5 festhalten.
-10. **End-to-End-Smoke in Docker:** Tests sind unit-nah; ein reproduzierbarer CLI-/Docker-Smoke mit Stub-Providern fehlt.
-11. **Betriebs-Runbook:** Checkpoint-Hygiene (`--clear-checkpoints`), Memory-Log-Pflege (`memory_log_max_entries`), Vendor-Quota-Verhalten, Recovery-Ablauf.
+10. ~~**End-to-End-Smoke in Docker:** Tests sind unit-nah; ein reproduzierbarer CLI-/Docker-Smoke mit Stub-Providern fehlt.~~
+    **Erledigt 2026-10-11** (`12ed32d`): `scripts/smoke/docker_smoke.sh` +
+    `scripts/smoke/stub_llm.py`, in CI als Job `docker-smoke`. Ein echter CLI-Lauf
+    **durch das Image** gegen einen Stub-LLM im `--internal`-Netz, mit eingebauter
+    Negativ-Kontrolle gegen einen unerreichbaren Endpunkt — damit ist genau das
+    abgedeckt, was Unit-Tests nicht erreichen: Image, Entrypoint,
+    Pfade/Permissions und die Client-Kette. Was der Smoke **nicht** beweist:
+    inhaltliche Analysequalität — im isolierten Netz liefern alle Datenvendoren
+    `DATA_UNAVAILABLE`.
+11. **Betriebs-Runbook — Restumfang: Vendor-Quota-Verhalten.** Checkpoint-Hygiene
+    (`--clear-checkpoints`), Memory-Log-Pflege (`memory_log_max_entries`) und der
+    Recovery-Ablauf sind seit 2026-10-11 mit `scripts/STATE_OPERATIONS.md`
+    (`e32c6a4`) abgedeckt. Offen bleibt allein das Vendor-Quota-Verhalten; es
+    gehört sachlich zu Punkt 8 und wird dort entschieden, deshalb ist dieser Punkt
+    reduziert und nicht abgehakt.
+
+> **Bewusst offen (Operator-Entscheidung 2026-10-11):** Punkt 6
+> (Observability/Alerting) und Punkt 8 (Provider-Ausfall-/Quota-Policy) wurden in
+> der P2-Schlussrunde **nicht** angefasst und bleiben sichtbar offen. Der
+> Produktivpfad (`daily-paper-run.yml`, `scripts/daily_paper_run.py`) läuft seit
+> 2026-10-11 täglich und bekommt keine neuen beweglichen Teile — auch das
+> Wartungswerkzeug aus Punkt 7 ist absichtlich *nicht* in den täglichen Lauf
+> eingehängt.
 
 ### P3 — Hygiene
 12. ~~Repo-Hygiene: lokale Tool-Artefakte bewusst committen oder lokal halten.~~
@@ -99,10 +127,30 @@
 - [x] Secrets-/Konfig-Doku + Fail-fast — README-Abschnitt „Secrets &
   configuration for production", `scripts/PAPER_RUN.md`, Credential-Prüfung
   über alle Tier-Provider (#1440).
-- [ ] Docker-/CLI-Smoke mit Stub-Providern läuft reproduzierbar — **offen (P2)**
+- [x] Docker-/CLI-Smoke mit Stub-Providern läuft reproduzierbar —
+  `scripts/smoke/docker_smoke.sh` + `scripts/smoke/stub_llm.py` (`12ed32d`),
+  in CI als Job `docker-smoke` (`.github/workflows/ci.yml`, Zeitlimit 10 min).
+  Lokal nachgewiesen am 2026-10-11: **zweimal hintereinander Exit 0**, beide mit
+  `SMOKE OK (9 stub calls, exit 0, negative control exit 1 via APIConnectionError)`;
+  der zweite Lauf war auch dann grün, wenn der erste per `SMOKE_KEEP=1`
+  absichtlich Container und Netz stehen ließ (idempotentes Pre-Flight-Teardown).
+  Die Negativ-Kontrolle läuft in einem eigenen Container `tex-smoke-neg` und endet
+  mit Exit 1 — nicht 125 — plus Verbindungsfehler-Marker in der Ausgabe. Kein
+  API-Key, kein echter LLM-Call: der Lauf hängt an einem `--internal`-Docker-Netz,
+  in dem nur der Stub auflösbar ist, und der Stub-Zähler == 9 ist die Kontrolle,
+  dass kein Call woanders landete.
 - [x] Lockfile-Policy geklärt — Upstream hat `uv.lock` entfernt (0b61eff), die
   Operator-Kopie liegt untracked auf Disk; damit erledigt, kein Drift mehr.
-- [ ] State-Retention/Backup/Recovery dokumentiert — **offen (P2)**
+- [x] State-Retention/Backup/Recovery dokumentiert — `scripts/STATE_OPERATIONS.md`
+  (`e32c6a4`): beide Decision-Log-Orte getrennt, Sidecars mit ihren echten Namen,
+  Fristen (Log unbegrenzt / Checkpoints 7 d / Reports 90 d) inklusive der ehrlichen
+  Einschränkung, dass die 90 Tage nur das Workflow-Artefakt treffen, Rotation,
+  Backup-Allow-List, Recovery ohne `.recover` und die fünf Locking-Lücken — jede
+  Aussage mit `file:line`. Nicht nur Doku: `scripts/state_maintenance.py`
+  (`verify`/`prune`/`backup`) mit **18 Tests** (`28f4a75`) macht die
+  Integritätsprüfung ausführbar. Suite mit dem einen vorbestehenden
+  `test_suite_isolation`-Knoten deselektiert: `1374 passed, 4 skipped,
+  2 deselected, 20 warnings, 101 subtests passed in 29.62s`, rc=0.
 
 **Nicht in der DoD, aber der eigentliche Zweck (siehe Korrektur oben):** der
 tägliche Paper-Lauf produziert **seit 2026-10-11** Entscheidungen. Erster
