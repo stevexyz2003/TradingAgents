@@ -240,18 +240,25 @@ if [ "$NEG_RC" -eq 125 ]; then
     printf '%s\n' "$NEG_OUT"
     fail "the negative control exited 125 — that is a docker start error, not a passed control"
 fi
-if ! printf '%s' "$NEG_OUT" | \
-    grep -Eq 'APIConnectionError|Connection refused|Failed to establish a new connection'; then
+# Here-string, never `printf ... | grep -q`: grep -q exits on the first match
+# and closes the pipe, printf dies of SIGPIPE (141), and under `set -o pipefail`
+# that 141 becomes the pipeline's status — so `if !` would report FAILURE exactly
+# when the marker WAS found. It stayed hidden locally because the shorter
+# traceback fit the 64 KiB pipe buffer; on the runner it did not, and the first
+# CI run failed with "printf: write error: Broken pipe" on this very line.
+# A here-string has no pipe and no reader to lose.
+#
+# The marker list spans the wrapper names of several langchain-openai versions:
+# the image is rebuilt on every run, so the exception class is whatever the
+# current release raises (`OpenAIConnectionError` on the runner,
+# `APIConnectionError` with an older local image) — the assertion must pin the
+# CAUSE (a refused connection), not one library's spelling.
+NEG_MARKERS='APIConnectionError|OpenAIConnectionError|Connection error|Connection refused|Failed to establish a new connection'
+if ! grep -Eq "$NEG_MARKERS" <<<"$NEG_OUT"; then
     printf '%s\n' "$NEG_OUT"
     fail "the negative control exited $NEG_RC but without a connection-error marker — the cause must be the unreachable endpoint"
 fi
-NEG_MARKER=""
-for marker in 'APIConnectionError' 'Connection refused' 'Failed to establish a new connection'; do
-    if printf '%s' "$NEG_OUT" | grep -qF "$marker"; then
-        NEG_MARKER="$marker"
-        break
-    fi
-done
+NEG_MARKER=$(grep -Eo "$NEG_MARKERS" <<<"$NEG_OUT" | head -1)
 
 echo "== 9/9 done"
 echo "artefacts: $TA"
