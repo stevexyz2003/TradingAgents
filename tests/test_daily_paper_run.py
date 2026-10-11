@@ -9,6 +9,7 @@ LLM access. The graph itself is stubbed.
 import importlib.util
 import json
 import os
+import re
 from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
@@ -146,6 +147,24 @@ class TestLoadRates:
         for key in ("deep_think_llm", "quick_think_llm"):
             assert DEFAULT_CONFIG[key] in rates, DEFAULT_CONFIG[key]
 
+    def test_the_committed_table_prices_the_models_the_workflow_pins(self):
+        # The scheduled run pins its own models in the workflow (upstream
+        # re-points its defaults every release), so those are the names that
+        # actually get billed - an unpriced one exits 1 before any analysis.
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "daily-paper-run.yml"
+        ).read_text(encoding="utf-8")
+        pinned = re.findall(
+            r"TRADINGAGENTS_(?:DEEP|QUICK)_THINK_LLM:.*\|\|\s*'([^']+)'", workflow
+        )
+        assert len(pinned) == 2, f"expected both tiers pinned, found {pinned}"
+        rates = runner.load_rates(_SCRIPT.with_name("paper_run_rates.json"))
+        for model in pinned:
+            assert model in rates, model
+
 
 class TestCredentials:
     def test_openai_needs_its_key(self):
@@ -158,6 +177,32 @@ class TestCredentials:
 
     def test_present_key_satisfies_the_check(self):
         assert runner.missing_credentials("openai", {"OPENAI_API_KEY": "sk-x"}) == []
+
+    def test_a_tiers_own_provider_is_checked_too(self):
+        # #1440 lets a tier name its own provider. Checking llm_provider alone
+        # would pass preflight and then exit 1 mid-run on the missing key.
+        config = {
+            "llm_provider": "anthropic",
+            "quick_think_provider": "openai",
+            "deep_think_provider": None,
+        }
+        assert runner.providers_in_use(config) == ["anthropic", "openai"]
+        assert runner.missing_credentials_for_config(
+            config, {"ANTHROPIC_API_KEY": "sk-ant-x"}
+        ) == ["OPENAI_API_KEY"]
+
+    def test_both_tiers_on_the_configured_provider_need_one_key(self):
+        config = {
+            "llm_provider": "anthropic",
+            "quick_think_provider": None,
+            "deep_think_provider": None,
+        }
+        assert runner.providers_in_use(config) == ["anthropic"]
+        assert runner.missing_credentials_for_config(config, {}) == ["ANTHROPIC_API_KEY"]
+        assert (
+            runner.missing_credentials_for_config(config, {"ANTHROPIC_API_KEY": "sk-ant-x"})
+            == []
+        )
 
     def test_local_runtime_needs_nothing(self):
         assert runner.missing_credentials("ollama", {}) == []

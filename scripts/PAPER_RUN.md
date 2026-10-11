@@ -25,9 +25,12 @@ Underweight / Sell).
    with Actions disabled, and a fork's scheduled workflows only run once they
    are enabled.
 2. **Add the provider secret** (Settings → Secrets and variables → Actions →
-   *Secrets*), e.g. `OPENAI_API_KEY`. Until then the workflow ends green with
-   a *"Paper run skipped"* warning — a missing key is a setup gap, not a
-   failure, and a schedule that is red every morning stops being read.
+   *Secrets*): `ANTHROPIC_API_KEY` for the pinned default provider. Until then
+   the workflow ends green with a *"Paper run skipped"* warning — a missing key
+   is a setup gap, not a failure, and a schedule that is red every morning
+   stops being read. A key that exists but has no credit is a different case:
+   that is a real error and the run goes red (observed daily 2026-09-25 →
+   2026-10-10 with an exhausted OpenAI account, $0.00 spent per run).
 3. **Set the repository variables** you want to deviate on (same page →
    *Variables*):
 
@@ -35,14 +38,21 @@ Underweight / Sell).
    |---|---|---|
    | `PAPER_RUN_TICKERS` | `AAPL,MSFT,NVDA` | comma-separated, max 10 |
    | `PAPER_RUN_MAX_COST` | `1.50` | **hard** USD cap per ticker |
-   | `TRADINGAGENTS_LLM_PROVIDER` | `openai` | any supported provider |
-   | `TRADINGAGENTS_DEEP_THINK_LLM` | config default | the expensive model |
-   | `TRADINGAGENTS_QUICK_THINK_LLM` | config default | the cheap model |
+   | `TRADINGAGENTS_LLM_PROVIDER` | `anthropic` | any supported provider |
+   | `TRADINGAGENTS_DEEP_THINK_LLM` | `claude-sonnet-5-5` | the expensive model |
+   | `TRADINGAGENTS_QUICK_THINK_LLM` | `claude-haiku-5-5` | the cheap model |
    | `TRADINGAGENTS_MAX_DEBATE_ROUNDS` | `1` | raise = better, pricier |
 
+   The provider and both model tiers are **pinned in the workflow**, not left
+   to the library's defaults: upstream re-points `deep_think_llm` /
+   `quick_think_llm` at its newest models every release (gpt-5.6 → gpt-6-sol
+   inside three weeks), and a model with no rate entry fails the run at the
+   config check. A variable still overrides the pin.
+
 4. **Verify the rate table** in `scripts/paper_run_rates.json` against your
-   provider's current price list. The values committed there are conservative
-   **placeholders**, not quotes. This matters: the cap is enforced against
+   provider's current price list. The `claude-*` entries are real Anthropic
+   first-party rates (verified 2026-10-11); the `gpt-*` entries are
+   conservative **placeholders**, not quotes. This matters: the cap is enforced against
    *computed* cost, so wrong rates mean a wrong cap. Overestimating is the safe
    direction — the run then aborts early rather than overspending.
 5. **Dry-run it once:** Actions → *Daily Paper Run* → *Run workflow* with

@@ -168,6 +168,31 @@ def _key_optional(provider_lower: str) -> bool:
     return bool(spec is not None and spec.key_optional)
 
 
+def providers_in_use(config: dict) -> list[str]:
+    """Every provider this config calls: ``llm_provider`` plus any tier's own (#1440)."""
+    from tradingagents.llm_clients.factory import tier_provider
+
+    return sorted(
+        {config["llm_provider"].lower()}
+        | {tier_provider(config, tier) for tier in ("quick", "deep")}
+    )
+
+
+def missing_credentials_for_config(config: dict, environ: dict | None = None) -> list[str]:
+    """Absent key env vars across every provider this config actually calls.
+
+    A tier may name its own provider (#1440), so checking ``llm_provider``
+    alone can miss the key the run needs: the morning job would pass preflight
+    and then exit 1 mid-run instead of skipping cleanly with rc 20.
+    """
+    absent: list[str] = []
+    for provider in providers_in_use(config):
+        for name in missing_credentials(provider, environ):
+            if name not in absent:
+                absent.append(name)
+    return absent
+
+
 def missing_credentials(provider: str, environ: dict | None = None) -> list[str]:
     """Names of the env vars this provider needs that are absent or empty."""
     env = os.environ if environ is None else environ
@@ -369,7 +394,7 @@ def main(argv=None) -> int:
         return EXIT_CONFIG
 
     provider = config["llm_provider"]
-    absent = missing_credentials(provider)
+    absent = missing_credentials_for_config(config)
     print(
         f"paper-run: {len(tickers)} ticker(s) {', '.join(tickers)} on {trade_date} | "
         f"provider={provider} deep={config['deep_think_llm']} quick={config['quick_think_llm']} | "

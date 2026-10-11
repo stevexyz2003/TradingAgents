@@ -11,9 +11,15 @@
 # variables > Actions), credentials in repository secrets:
 #   vars.PAPER_RUN_TICKERS            default AAPL,MSFT,NVDA
 #   vars.PAPER_RUN_MAX_COST           default 1.50 (USD per ticker, hard cap)
-#   vars.TRADINGAGENTS_LLM_PROVIDER   default openai
-#   vars.TRADINGAGENTS_DEEP_THINK_LLM / _QUICK_THINK_LLM (default: config)
-#   secrets.<PROVIDER>_API_KEY        e.g. OPENAI_API_KEY
+#   vars.TRADINGAGENTS_LLM_PROVIDER   default anthropic (see below)
+#   vars.TRADINGAGENTS_DEEP_THINK_LLM / _QUICK_THINK_LLM (defaults below)
+#   secrets.<PROVIDER>_API_KEY        e.g. ANTHROPIC_API_KEY
+#
+# The provider and the two model tiers are pinned HERE rather than left to the
+# library's defaults: upstream re-points deep_think_llm/quick_think_llm at its
+# newest models every release (gpt-5.6 -> gpt-6-sol within three weeks), and an
+# unpriced model fails the run at the config check. Pinning keeps the run and
+# scripts/paper_run_rates.json in step. Repository variables still override.
 name: Daily Paper Run
 
 on:
@@ -68,9 +74,9 @@ jobs:
       MAX_COST: ${{ inputs.max_cost || vars.PAPER_RUN_MAX_COST || '1.50' }}
       # Non-secret run configuration (empty values fall through to the
       # library's own defaults - see tradingagents/default_config.py).
-      TRADINGAGENTS_LLM_PROVIDER: ${{ inputs.provider || vars.TRADINGAGENTS_LLM_PROVIDER || 'openai' }}
-      TRADINGAGENTS_DEEP_THINK_LLM: ${{ vars.TRADINGAGENTS_DEEP_THINK_LLM }}
-      TRADINGAGENTS_QUICK_THINK_LLM: ${{ vars.TRADINGAGENTS_QUICK_THINK_LLM }}
+      TRADINGAGENTS_LLM_PROVIDER: ${{ inputs.provider || vars.TRADINGAGENTS_LLM_PROVIDER || 'anthropic' }}
+      TRADINGAGENTS_DEEP_THINK_LLM: ${{ vars.TRADINGAGENTS_DEEP_THINK_LLM || 'claude-sonnet-5-5' }}
+      TRADINGAGENTS_QUICK_THINK_LLM: ${{ vars.TRADINGAGENTS_QUICK_THINK_LLM || 'claude-haiku-5-5' }}
       TRADINGAGENTS_LLM_BACKEND_URL: ${{ vars.TRADINGAGENTS_LLM_BACKEND_URL }}
       TRADINGAGENTS_MAX_DEBATE_ROUNDS: ${{ vars.TRADINGAGENTS_MAX_DEBATE_ROUNDS || '1' }}
       TRADINGAGENTS_MAX_RISK_ROUNDS: ${{ vars.TRADINGAGENTS_MAX_RISK_ROUNDS || '1' }}
