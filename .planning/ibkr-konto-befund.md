@@ -84,19 +84,64 @@ zeitzonenbewusste `datetime`-Paare. Feiertage und Halbtage kommen damit vom
 Server, ein eigener Kalender ist nicht nötig (REQ-IBKR zur Handelszeit ist
 umsetzbar wie geplant).
 
-## Offen: Read-Only-Beweis (Erfolgskriterium 5 der Phase)
+## Erfolgskriterium 5: Read-Only — **gemessen, und das Ergebnis ist NEGATIV**
 
-**Noch nicht gemessen.** Der Nachweis verlangt einen bewussten
-Platzierungsversuch, der mit Fehler **10015** scheitert. Dafür muss im Gateway
-„Read-Only API" aktiv sein — sonst platziert der Versuch eine echte Paper-Order
-und verfälscht den Kontostand. Die Sonde hat deshalb nichts platziert, auch kein
-`whatIf`. Siehe Handlungsbedarf unten.
+**Read-Only ist am Gateway NICHT aktiv** (gemessen 2026-10-11 20:15). Der
+bewusste Platzierungsversuch (`BUY 1 AAPL LMT 1.00`, ein Limit, das nie füllt)
+wurde **angenommen** statt mit Fehler 10015 abgelehnt:
+
+```text
+managedAccounts=['DUQ634065']
+contract conId=265598 AAPL
+platziere: BUY 1 AAPL LMT 1.00 (nie fuellbar)
+  [API] code=10349 msg=Die Gueltigkeitsdauer der Order wurde gemaess Order-Voreinstellungen auf DAY gesetzt.
+  [API] code=399  msg=Order-Mitteilung: KAUFEN 1 AAPL NASDAQ.NMS Warnung: Ihre Order
+                      wird nicht vor 2026-10-12 09:30:00 US/Eastern an der Boerse platziert.
+orderStatus='PreSubmitted' orderId=4 filled=0.0
+ERGEBNIS: Read-Only ist NICHT aktiv - Order wurde angenommen.
+storniere sofort ...
+  [API] code=202 msg=Order storniert - Grund:
+  Status nach Cancel: 'Cancelled'
+offene Orders gesamt=0 davon aus dieser Probe=0
+```
+
+Die Probe-Order wurde sofort storniert, nichts wurde gefüllt, keine Order blieb
+im Buch, der Kontostand ist unverändert. **Erfolgskriterium 5 ist damit NICHT
+erfüllt** — es verlangt, dass ein Platzierungsversuch scheitert. Erfüllbar wird
+es erst, nachdem „Read-Only API" im Gateway aktiviert wurde; der Nachweis ist
+dann zu wiederholen.
+
+Was die Messung trotzdem belegt: Der **Schreibpfad funktioniert** (das Gateway
+nimmt Orders an, vergibt `orderId`, akzeptiert `orderRef`, storniert auf
+`cancelOrder`) — für Phase 6 ist das die Vorab-Bestätigung, dass nichts außer
+der Freigabe fehlt.
+
+### Drei Nebenbefunde mit Folgen
+
+1. **Das Gateway läuft am 2026-12-15 aus.** Code 2172 wörtlich: „Die von Ihnen
+   verwendete Version der Anwendung (1045.1) erfordert ein Upgrade, da die
+   momentane Version ab 20261215 nicht mehr unterstützt wird. Die unterstützte
+   Mindestversion ab diesem Zeitpunkt ist 1050.1." Das fällt mitten in die
+   Bauzeit von M2 und gehört in Phase 8 (Betrieb), nicht in eine Fußnote.
+2. **Die Order-Voreinstellungen überschreiben die Gültigkeitsdauer** (Code
+   10349: TIF wurde auf DAY gesetzt, ohne dass die Order das verlangt hat). Wer
+   GTC erwartet, bekommt stillschweigend DAY. Die Order-Erzeugung muss den
+   tatsächlich gesetzten TIF aus dem `Trade`-Objekt zurücklesen statt dem
+   eigenen Wunsch zu vertrauen.
+3. **Warnung 399 bestätigt die Handelszeiten-Regel aus der Praxis:** Eine Order
+   außerhalb der Sitzung wird nicht abgelehnt, sondern angenommen und bis zur
+   Eröffnung geparkt. Die Prüfung auf `tradingSessions()` vor der Platzierung
+   ist damit keine Formalie — ohne sie entsteht eine Order, die Stunden später
+   zu einem unbekannten Kurs auf den Markt trifft.
 
 ## Handlungsbedarf (Operator)
 
 1. ~~Port-Widerspruch auflösen~~ — **erledigt 2026-10-11**, `.env` steht auf 7497.
-2. **„Read-Only API" im Gateway aktivieren**, danach den 10015-Nachweis
-   nachholen — erst dann ist Phase 1 vollständig und Gate G1 offen für Phase 2.
+2. **„Read-Only API" im Gateway aktivieren** (Konfigurieren → Einstellungen →
+   API → Settings), danach den 10015-Nachweis wiederholen — erst dann ist
+   Phase 1 vollständig und Gate G1 offen für Phase 2. Gemessen ist bisher das
+   Gegenteil: der Schreibpfad ist offen.
+3. **Gateway-Upgrade auf ≥ 1050.1 vor dem 2026-12-15** einplanen (Code 2172).
 
 ## Rohausgabe der Sonde
 
