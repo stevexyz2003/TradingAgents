@@ -168,6 +168,60 @@ class BrokerPosition:
 
 
 @dataclass(frozen=True)
+class ContractInfo:
+    """One contract as the broker reports it, broker-neutral (no library object leaves here).
+
+    The session fields stay empty on a symbol search and are filled by
+    ``contract_details``.
+    """
+
+    con_id: int
+    symbol: str
+    sec_type: str
+    exchange: str
+    primary_exchange: str
+    currency: str
+    local_symbol: str
+    trading_class: str
+    long_name: str = ""
+    valid_exchanges: str = ""
+    order_types: str = ""
+    time_zone_id: str = ""
+    liquid_hours: str = ""
+    trading_hours: str = ""
+
+
+def _text(obj, name: str) -> str:
+    value = getattr(obj, name, "")
+    return "" if value is None else str(value)
+
+
+def _info_from_contract(contract, details=None) -> ContractInfo:
+    """A ``ContractInfo`` from a library contract and, optionally, its details row."""
+    extra = {}
+    if details is not None:
+        extra = {
+            "long_name": _text(details, "longName"),
+            "valid_exchanges": _text(details, "validExchanges"),
+            "order_types": _text(details, "orderTypes"),
+            "time_zone_id": _text(details, "timeZoneId"),
+            "liquid_hours": _text(details, "liquidHours"),
+            "trading_hours": _text(details, "tradingHours"),
+        }
+    return ContractInfo(
+        con_id=int(contract.conId),
+        symbol=_text(contract, "symbol"),
+        sec_type=_text(contract, "secType"),
+        exchange=_text(contract, "exchange"),
+        primary_exchange=_text(contract, "primaryExchange"),
+        currency=_text(contract, "currency"),
+        local_symbol=_text(contract, "localSymbol"),
+        trading_class=_text(contract, "tradingClass"),
+        **extra,
+    )
+
+
+@dataclass(frozen=True)
 class AccountSnapshot:
     """Positions and cash of the paper account, read fresh at ``as_of`` (UTC)."""
 
@@ -249,7 +303,8 @@ def _arm_write_barrier(client) -> None:
 class IbkrBroker:
     """One read-only session against the paper gateway.
 
-    Public in phase 2: ``connect``, ``positions``, ``health``. Use as a context
+    Public: ``connect``, ``positions``, ``health``, ``search_contract``,
+    ``contract_details``. Use as a context
     manager; leaving it disconnects.
     """
 
@@ -521,6 +576,64 @@ class IbkrBroker:
             cash_currency=cash.currency,
             as_of=datetime.now(UTC),
         )
+
+    def search_contract(self, spec) -> tuple[ContractInfo, ...]:
+        """All contracts matching the search keys of ``spec``: 0, 1 or n (REQ-IBKR-29).
+
+        Calls ``qualifyContractsAsync(contract, returnAll=True)``. The library
+        mutates the contract it is given (and caches nothing for us), so each
+        call builds a fresh one from the spec. Whether exactly one match is
+        required is the caller's decision (the resolver), not this method's.
+        """
+
+        def ask():
+            handles = self._handles
+            contract = handles.contract(
+                symbol=spec.symbol,
+                secType=spec.sec_type,
+                exchange=spec.exchange,
+                currency=spec.currency,
+                primaryExchange=spec.primary_exchange,
+            )
+            return self._ib.qualifyContractsAsync(contract, returnAll=True)
+
+        slots = self._read("qualifyContracts", ask)
+        if not slots or slots[0] is None:
+            return ()
+        slot = slots[0]
+        found = slot if isinstance(slot, list) else [slot]
+        return tuple(_info_from_contract(c) for c in found if c is not None)
+
+    def contract_details(self, con_id: int, exchange: str) -> tuple[ContractInfo, ...]:
+        """Every details row for ``conId`` on ``exchange`` (REQ-IBKR-30).
+
+        Calls ``reqContractDetailsAsync`` with a fresh contract. Carries the
+        valid exchanges, order types, time zone and trading hours.
+        """
+
+        def ask():
+            contract = self._handles.contract(conId=con_id, exchange=exchange)
+            return self._ib.reqContractDetailsAsync(contract)
+
+        rows = self._read("reqContractDetails", ask)
+        return tuple(_info_from_contract(d.contract, d) for d in rows)
+
+    def _read(self, name: str, make_awaitable):
+        """One fail-closed read: timeout, no open link before, no link event during."""
+        if self._ib is None or self._handles is None:
+            raise GatewayUnavailable("NOT_CONNECTED", 504, "no session; connect() first")
+        opened = self._open_link()
+        if opened is not None:
+            raise GatewayUnavailable(opened[0], None, f"{opened[1]}; no {name} sent")
+        mark = len(self._link_codes)
+        result = self._request(name, make_awaitable)
+        event = self._link_event_since(mark)
+        if event is not None:
+            state, code = event
+            raise GatewayUnavailable(
+                state, code, f"link event {code} while {name} was in flight; answer discarded"
+            )
+        return result
 
     def _request(self, name: str, make_awaitable):
         """One read request under the request timeout; a hang becomes a named state."""
