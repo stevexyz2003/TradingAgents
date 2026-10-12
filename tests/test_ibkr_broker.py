@@ -1087,3 +1087,96 @@ def test_whatif_barrier_message_level_refuses_a_shifted_layout_and_a_truncated_s
     with pytest.raises(broker.ReadOnlyViolation):
         client.sendMsg("3\0" + "1\0")
     assert sent == []
+
+
+# --- phase 4: conId, AvailableFunds, open orders of every client ------------------------
+
+
+def test_positions_carry_the_con_id(loop):
+    fake = FakeIB(positions=[position("DUQ634065", "AAPL", 2, conId=265598)])
+    (held,) = _connected(fake, loop).positions().positions
+    assert held.con_id == 265598
+
+
+def test_positions_available_funds_comes_from_one_summary_row(loop):
+    summary = [
+        account_value("TotalCashValue", "1005459.44"),
+        account_value("AvailableFunds", "1000.0"),
+    ]
+    snapshot = _connected(FakeIB(summary=summary), loop).positions()
+    assert snapshot.available_funds == 1000.0
+    assert snapshot.available_funds_currency == "EUR"
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        [account_value("TotalCashValue", "1.0")],
+        [
+            account_value("TotalCashValue", "1.0"),
+            account_value("AvailableFunds", "1.0"),
+            account_value("AvailableFunds", "2.0"),
+        ],
+    ],
+    ids=["missing", "duplicate"],
+)
+def test_positions_available_funds_row_must_be_unique(loop, summary):
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _connected(FakeIB(summary=summary), loop).positions()
+    assert info.value.state == "SNAPSHOT_INCOMPLETE"
+    assert "AvailableFunds" in info.value.detail
+
+
+def test_open_orders_reads_every_client_and_filters_con_id_and_status(loop):
+    trades = [
+        ibkr_fakes.open_trade(265598, status="Submitted", client_id=0),
+        ibkr_fakes.open_trade(265598, status="Filled"),
+        ibkr_fakes.open_trade(272093, status="PreSubmitted"),
+    ]
+    fake = FakeIB(open_orders=trades)
+    result = _connected(fake, loop).open_orders(265598)
+    assert result == (
+        broker.OpenOrder(
+            con_id=265598,
+            action="BUY",
+            quantity=1.0,
+            order_type="LMT",
+            status="Submitted",
+            client_id=0,
+        ),
+    )
+    assert "open_orders" in fake.calls
+    assert "placeOrder" not in fake.calls
+    assert not any(call in fake.calls for call in FORBIDDEN_CALLS)
+
+
+def test_open_orders_request_timeout(loop):
+    adapter = _connected(FakeIB(open_orders="hang"), loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.open_orders(265598)
+    assert info.value.state == "REQUEST_TIMEOUT"
+
+
+def test_open_orders_discards_an_answer_with_a_link_event_inside(loop):
+    fake = FakeIB(
+        open_orders=[ibkr_fakes.open_trade(265598)],
+        emit_during={"open_orders": [(-1, 1100, "lost", None)]},
+    )
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _connected(fake, loop).open_orders(265598)
+    assert info.value.state == "CONNECTIVITY_LOST"
+
+
+def test_open_orders_when_not_connected(loop):
+    adapter = broker.IbkrBroker("127.0.0.1", 7497, loop=loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.open_orders(265598)
+    assert info.value.state == "NOT_CONNECTED"
+
+
+def test_the_fake_forbids_market_data():
+    fake = FakeIB()
+    for name in ("reqMktData", "reqTickers"):
+        with pytest.raises(AssertionError):
+            getattr(fake, name)()
+        assert name in fake.calls
