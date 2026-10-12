@@ -3,15 +3,14 @@ gsd_state_version: 1.0
 milestone: M2
 milestone_name: IBKR Paper Execution
 status: ready_to_plan
-last_updated: 2026-10-12T15:15:01.247Z
-last_activity: 2026-10-12 -- Phase 2 abgeschlossen (Verifikation passed, UAT complete)
+last_updated: "2026-10-12T15:34:51.419Z"
+last_activity: "2026-10-12 - **M2 Phase 2 abgeschlossen.** Das Kommando `scripts/ibkr_executor.py account` liest `DUQ634065` read-only (clientId 20001, exakter Paper-Guard, Timeout auf jedem Aufruf) und schreibt ein `PortfolioContext`-JSON mit `as_of`; `daily_paper_run.py --portfolio` lehnt veraltete Dateien ab. Nach den Review-Fixes am echten System belegt (16:34 lokal, `account` Exit 0, danach Paper-Lauf AAPL Hold für 0,13 $ mit Portfolio-Block im Report). 1553 Tests grün (bekannter Windows-Fehlschlag `test_yfinance_keeps_its_cache_out_of_the_users_home`). Nebenbefunde: Das OpenAI-**API**-Guthaben der Org `scharfe-gmbh` ist leer (getrennt vom ChatGPT-Abo), lokale Läufe sind deshalb in `.env` auf Anthropic gepinnt wie das CI (0178678); lokal laufen yfinance und SEC EDGAR wegen des SSL-Problems der Maschine auf Fallback-Quellen; „Allow connections from localhost only“ ist im Gateway gesetzt. Neu in REQUIREMENTS: REQ-IBKR-61..68 aus dem Sicherungsprinzip `261012-ap2`."
 progress:
   total_phases: 8
-  completed_phases: 2
+  completed_phases: 1
   total_plans: 6
   completed_plans: 6
-  percent: 25
-stopped_at: Phase 2 complete (6/6) — ready to discuss Phase 3
+  percent: 13
 ---
 
 # Project State — TradingEngineX (TradingAgents)
