@@ -129,7 +129,7 @@ def test_classify_non_stock_is_not_allowed(raw, sec_type):
 
 
 def test_allow_list_is_stock_only():
-    assert c.ALLOWED_SEC_TYPES == frozenset({"STK"})
+    assert frozenset({"STK"}) == c.ALLOWED_SEC_TYPES
 
 
 # --- tradability (D-19) ------------------------------------------------------------------
@@ -165,7 +165,12 @@ def test_check_tradable_tolerates_whitespace_around_elements():
 
 
 def _ident(**kw):
-    base = {"con_id": 265598, "primary_exchange": "NASDAQ", "currency": "USD", "local_symbol": "AAPL"}
+    base = {
+        "con_id": 265598,
+        "primary_exchange": "NASDAQ",
+        "currency": "USD",
+        "local_symbol": "AAPL",
+    }
     base.update(kw)
     return c.Identity(**base)
 
