@@ -190,8 +190,12 @@ same rule voids a probe answer that arrived together with a link event.
    account, a superset or an empty list disconnects and ends with exit 8
    (`scripts/ibkr_broker.py:294`).
 4. Health probe (above); unhealthy → exit 3, no file.
-5. Positions and `TotalCashValue` (EUR), asked fresh on every run
-   (`positions()`, `scripts/ibkr_broker.py:347`). Average prices in another
+5. Positions and `TotalCashValue` (EUR), asked fresh on every call
+   (`positions()` in `scripts/ibkr_broker.py`). The client library answers
+   the account summary from its own cache after the first request of a
+   session; the adapter empties that cache before each call, so every call
+   sends the request again. Known limit: each call leaves one summary
+   subscription open in the session (one call per run in phase 2). Average prices in another
    currency than the cash — e.g. USD stocks in the EUR account — are written
    as `average_price: null` and logged as a WARNING, because
    `PortfolioContext` carries one currency label only; conversion comes with

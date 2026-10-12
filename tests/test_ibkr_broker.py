@@ -348,12 +348,49 @@ def _summary(*extra):
 
 
 def test_positions_fresh_each_call(loop):
+    # WR-02: the fake caches the summary like the library does, so a second
+    # call only asks the gateway again if the adapter makes it do so.
     fake = FakeIB(positions=[position("DUQ634065", "AAPL", 3)], summary=_summary())
     adapter = _connected(fake, loop)
-    adapter.positions()
-    adapter.positions()
+    first = adapter.positions()
+    fake._summary = [account_value("TotalCashValue", "4242.0")]
+    second = adapter.positions()
     assert fake.calls.count("positions") == 2
     assert fake.calls.count("account_summary") == 2
+    assert (first.cash, second.cash) == (1005459.44, 4242.0)
+
+
+def test_the_library_answers_the_summary_from_its_cache(loop):
+    # The behaviour WR-02 rests on, pinned on the real IB object: a request goes
+    # out only while wrapper.acctSummary is empty. Should a library update change
+    # that, the fake above no longer models it and this test says so.
+    ib_async = pytest.importorskip("ib_async")
+    ib = ib_async.IB()
+    sent = []
+
+    async def no_request():
+        sent.append("reqAccountSummary")
+
+    ib.reqAccountSummaryAsync = no_request
+    ib.wrapper.acctSummary[("DUQ634065", "TotalCashValue", "EUR")] = account_value(
+        "TotalCashValue", "1.0"
+    )
+    loop.run_until_complete(ib.accountSummaryAsync("DUQ634065"))
+    assert sent == []
+    ib.wrapper.acctSummary.clear()
+    loop.run_until_complete(ib.accountSummaryAsync("DUQ634065"))
+    assert sent == ["reqAccountSummary"]
+
+
+def test_positions_drops_summary_rows_of_an_earlier_call(loop):
+    fake = FakeIB(summary=_summary())
+    adapter = _connected(fake, loop)
+    adapter.positions()
+    # The second answer has no cash row; an old cached one must not stand in for it.
+    fake._summary = [account_value("BuyingPower", "1.0")]
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.positions()
+    assert info.value.state == "SNAPSHOT_INCOMPLETE"
 
 
 def test_positions_filters_account_and_zero(loop):

@@ -108,6 +108,7 @@ class FakeIB:
         self.connect_kwargs: dict = {}
         self.connected = False
         self.errorEvent = FakeEvent()
+        self.wrapper = SimpleNamespace(acctSummary={})
         self._recorders = {name: self._record(name) for name in (*WRITE_CALLS, *WIRE_CALLS)}
         self.client = SimpleNamespace(**self._recorders)
 
@@ -154,11 +155,17 @@ class FakeIB:
         return list(self._positions)
 
     async def accountSummaryAsync(self, account=""):
-        self.calls.append("account_summary")
-        self._emit_during("account_summary")
-        if self._summary == "hang":
-            await _forever()
-        return list(self._summary)
+        # Modelled on the library (ib.py:2232-2242 in 2.1.0): a request goes out
+        # only while ``wrapper.acctSummary`` is empty; after that the cache answers.
+        if not self.wrapper.acctSummary:
+            self.calls.append("account_summary")
+            self._emit_during("account_summary")
+            if self._summary == "hang":
+                await _forever()
+            # Keyed by row index, not (account, tag, currency): a duplicate row stays visible.
+            self.wrapper.acctSummary.update(enumerate(self._summary))
+        rows = list(self.wrapper.acctSummary.values())
+        return [v for v in rows if v.account == account] if account else rows
 
     async def reqContractDetailsAsync(self, contract):
         self.calls.append("probe")

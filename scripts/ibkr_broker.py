@@ -424,6 +424,10 @@ class IbkrBroker:
         and any 1100/1101/1102/1300/2110 seen in between discards the snapshot.
         After a 1100 the gateway answers from its local state with well-formed
         rows, so "no error" is no proof of a fresh book.
+
+        Known limit: the library never cancels the account-summary subscription
+        it opens, so each call adds one to the session. Phase 2 calls this once
+        per session; a later plan that calls it repeatedly must cancel them.
         """
         ib = self._ib
         if ib is None:
@@ -433,6 +437,11 @@ class IbkrBroker:
             raise GatewayUnavailable(opened[0], None, f"{opened[1]}; no snapshot read")
         mark = len(self._link_codes)
         raw = self._request("reqPositions", ib.reqPositionsAsync)
+        # The library asks the gateway only while its summary cache is empty
+        # (ib.py:2232-2235 in 2.1.0) and answers every later call from it. Emptied
+        # here, every call sends the same request as the measured first run did,
+        # and no row of an earlier answer survives into this one.
+        ib.wrapper.acctSummary.clear()
         values = self._request("accountSummary", lambda: ib.accountSummaryAsync(EXPECTED_ACCOUNT))
         self._call(lambda: asyncio.sleep(self._settle), self._settle + self._probe_timeout)
         if not ib.isConnected():
