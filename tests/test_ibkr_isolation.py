@@ -4,6 +4,7 @@ These guards read pyproject.toml, the git index and the CI workflow files only.
 They never read the real .env and never reach the IBKR gateway.
 """
 
+import ast
 import re
 import subprocess
 import tomllib
@@ -50,3 +51,50 @@ def test_ci_workflows_reference_no_ibkr_secret():
     for path in files:
         text = path.read_text(encoding="utf-8")
         assert "IBKR" not in text.upper(), f"{path.name} mentions IBKR"
+
+
+# --- the adapter is the one place that talks to the client library -------------------
+
+CLIENT_LIBRARY = "ib_async"
+ADAPTER = ROOT / "scripts" / "ibkr_broker.py"
+
+
+def _imports(path: Path) -> set[str]:
+    names = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module.split(".")[0])
+    return names
+
+
+@pytest.mark.unit
+def test_only_the_adapter_imports_the_client_library():
+    importers = sorted(
+        path.relative_to(ROOT).as_posix()
+        for package in ("tradingagents", "cli", "scripts")
+        for path in (ROOT / package).rglob("*.py")
+        if CLIENT_LIBRARY in _imports(path)
+    )
+    assert importers == ["scripts/ibkr_broker.py"]
+
+
+@pytest.mark.unit
+def test_adapter_has_at_most_ten_public_methods():
+    tree = ast.parse(ADAPTER.read_text(encoding="utf-8"))
+    (cls,) = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "IbkrBroker"]
+    public = {
+        n.name
+        for n in cls.body
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and not n.name.startswith("_")
+    }
+    assert len(public) <= 10
+    assert public == {"connect", "positions", "health"}
+
+
+@pytest.mark.unit
+def test_adapter_hard_codes_no_order_id():
+    source = ADAPTER.read_text(encoding="utf-8")
+    assert "orderId=" not in source
+    assert ".orderId =" not in source

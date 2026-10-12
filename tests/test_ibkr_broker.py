@@ -6,11 +6,12 @@ real paper gateway listens on this machine.
 """
 
 import logging
+import time
 
 import pytest
 
 from tests import ibkr_fakes
-from tests.ibkr_fakes import FakeIB, make_handles
+from tests.ibkr_fakes import FakeIB, account_value, make_handles, position
 
 pytestmark = pytest.mark.unit
 
@@ -212,3 +213,152 @@ def test_real_connect_is_blocked_in_this_module(loop):
         loop.run_until_complete(
             ib_async.IB().connectAsync("127.0.0.1", 1, clientId=20001, timeout=1)
         )
+
+
+# --- health: liveness rests on a real probe answer --------------------------------------
+
+
+def test_health_ok_with_one_probe_answer(loop):
+    fake = FakeIB(probe="ok")
+    health = _connected(fake, loop).health()
+    assert (health.ok, health.state) == (True, "HEALTHY")
+    assert "probe" in fake.calls
+
+
+def test_health_socket_up_session_dead(loop):
+    fake = FakeIB(probe="hang")
+    adapter = _connected(fake, loop)
+    started = time.monotonic()
+    health = adapter.health()
+    assert time.monotonic() - started < 1.0
+    assert fake.isConnected() is True
+    assert (health.ok, health.state) == (False, "PROBE_TIMEOUT")
+
+
+def test_health_empty_probe_is_unhealthy(loop):
+    health = _connected(FakeIB(probe="empty"), loop).health()
+    assert (health.ok, health.state) == (False, "PROBE_FAILED")
+
+
+def test_health_after_1100_then_1102(loop):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    fake.errorEvent.emit(-1, 1100, "Connectivity between IB and TWS has been lost", None)
+    health = adapter.health()
+    assert (health.ok, health.state) == (False, "CONNECTIVITY_LOST")
+    assert "probe" not in fake.calls
+    fake.errorEvent.emit(-1, 1102, "Connectivity restored, data maintained", None)
+    assert adapter.health().ok is True
+
+
+def test_health_sees_1100_queued_before_the_call(loop):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    loop.call_soon(
+        fake.errorEvent.emit, -1, 1100, "Connectivity between IB and TWS has been lost", None
+    )
+    health = adapter.health()
+    assert health.state == "CONNECTIVITY_LOST"
+    assert "probe" not in fake.calls
+
+
+@pytest.mark.parametrize(("code", "state"), [(2110, "SERVER_LINK_BROKEN"), (1300, "PORT_CHANGED")])
+def test_health_after_open_link_codes(loop, code, state):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    fake.errorEvent.emit(-1, code, "link event", None)
+    health = adapter.health()
+    assert (health.ok, health.state) == (False, state)
+    assert "probe" not in fake.calls
+
+
+def test_health_when_not_connected(loop):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    fake.connected = False
+    assert adapter.health().state == "NOT_CONNECTED"
+    assert broker.IbkrBroker("127.0.0.1", 7497, loop=loop).health().state == "NOT_CONNECTED"
+
+
+# --- positions: fresh every call, filtered, cash is TotalCashValue -------------------
+
+
+def _summary(*extra):
+    return [
+        account_value("TotalCashValue", "1005459.44"),
+        account_value("BuyingPower", "6705922.13"),
+        account_value("AvailableFunds", "1004000.00"),
+        *extra,
+    ]
+
+
+def test_positions_fresh_each_call(loop):
+    fake = FakeIB(positions=[position("DUQ634065", "AAPL", 3)], summary=_summary())
+    adapter = _connected(fake, loop)
+    adapter.positions()
+    adapter.positions()
+    assert fake.calls.count("positions") == 2
+    assert fake.calls.count("account_summary") == 2
+
+
+def test_positions_filters_account_and_zero(loop):
+    fake = FakeIB(
+        positions=[
+            position("DUQ634065", "AAPL", 3, avg_cost=187.5),
+            position("DUQ634065", "MSFT", 0),
+            position("DU0000001", "NVDA", 5),
+        ],
+        summary=_summary(),
+    )
+    snapshot = _connected(fake, loop).positions()
+    assert snapshot.account == "DUQ634065"
+    assert [(p.symbol, p.quantity, p.avg_cost) for p in snapshot.positions] == [
+        ("AAPL", 3.0, 187.5)
+    ]
+    assert snapshot.positions[0].sec_type == "STK"
+    assert snapshot.as_of.tzinfo is not None
+
+
+def test_positions_cash_is_total_cash_value(loop):
+    snapshot = _connected(FakeIB(summary=_summary()), loop).positions()
+    assert snapshot.cash == 1005459.44
+    assert snapshot.cash_currency == "EUR"
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        [account_value("BuyingPower", "6705922.13")],  # TotalCashValue missing
+        _summary(account_value("TotalCashValue", "1.0")),  # TotalCashValue twice
+        [account_value("TotalCashValue", "5.0", account="DU0000001")],  # foreign account only
+    ],
+    ids=["missing", "duplicate", "foreign"],
+)
+def test_positions_incomplete_summary_is_named(loop, summary):
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _connected(FakeIB(summary=summary), loop).positions()
+    assert info.value.state == "SNAPSHOT_INCOMPLETE"
+
+
+def test_positions_request_timeout(loop):
+    fake = FakeIB(positions="hang")
+    adapter = _connected(fake, loop)
+    started = time.monotonic()
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.positions()
+    assert time.monotonic() - started < 1.0
+    assert info.value.state == "REQUEST_TIMEOUT"
+
+
+def test_positions_when_not_connected(loop):
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        broker.IbkrBroker("127.0.0.1", 7497, loop=loop).positions()
+    assert (info.value.state, info.value.code) == ("NOT_CONNECTED", 504)
+
+
+def test_context_manager_disconnects(loop):
+    fake = FakeIB()
+    with _broker(fake, loop) as adapter:
+        assert isinstance(adapter, broker.IbkrBroker)
+    assert "disconnect" in fake.calls
+    assert not loop.is_closed()
