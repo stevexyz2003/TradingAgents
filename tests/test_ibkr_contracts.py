@@ -8,8 +8,10 @@ import dataclasses
 import importlib.util
 import re
 import sys
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 
@@ -208,3 +210,174 @@ def test_rejected_states_membership():
     assert c.CLOSED not in c.REJECTED_STATES
     assert c.OK not in c.REJECTED_STATES
     assert c.SESSION_UNKNOWN in c.REJECTED_STATES
+
+
+# --- session parser (D-23) ---------------------------------------------------------------
+
+NEW_FORMAT = "20261011:CLOSED;20261012:0930-20261012:1600;20261013:0930-20261013:1600"
+OLD_FORMAT = "20090507:0700-1830"
+# Invented fixture (assumption A4): a shortened day is just a shorter window.
+HALF_DAY = "20261127:0930-20261127:1300"
+LEADING_SEMICOLON = ";20261011:1800-20261012:1700;20261012:1800-20261013:1700"
+ZONE = "US/Eastern"
+
+
+@pytest.fixture(scope="module")
+def ny():
+    try:
+        return ZoneInfo(ZONE)
+    except ZoneInfoNotFoundError:
+        pytest.skip("tz database has no US/Eastern")
+
+
+def _utc(ny, *args):
+    return datetime(*args, tzinfo=ny).astimezone(UTC)
+
+
+def test_parse_new_format_with_closed_day(ny):
+    lh = c.parse_liquid_hours("20261011:CLOSED;20261012:0930-20261012:1600", ZONE)
+    assert len(lh.windows) == 1
+    assert lh.closed_dates == frozenset({date(2026, 10, 11)})
+    w = lh.windows[0]
+    assert w.start == datetime(2026, 10, 12, 9, 30, tzinfo=ny)
+    assert w.end == datetime(2026, 10, 12, 16, 0, tzinfo=ny)
+    assert lh.time_zone_id == ZONE
+
+
+def test_parse_leading_semicolon_and_overnight_windows(ny):
+    lh = c.parse_liquid_hours(LEADING_SEMICOLON, ZONE)
+    assert len(lh.windows) == 2
+    assert lh.windows[0].start == datetime(2026, 10, 11, 18, 0, tzinfo=ny)
+    assert lh.windows[0].end == datetime(2026, 10, 12, 17, 0, tzinfo=ny)
+    assert lh.windows[1].end == datetime(2026, 10, 13, 17, 0, tzinfo=ny)
+
+
+def test_parse_old_format_end_takes_the_start_date(ny):
+    lh = c.parse_liquid_hours(OLD_FORMAT, ZONE)
+    assert len(lh.windows) == 1
+    assert lh.windows[0].start == datetime(2009, 5, 7, 7, 0, tzinfo=ny)
+    assert lh.windows[0].end == datetime(2009, 5, 7, 18, 30, tzinfo=ny)
+
+
+def test_parse_empty_string_gives_no_windows():
+    lh = c.parse_liquid_hours("", ZONE)
+    assert lh.windows == () and lh.closed_dates == frozenset()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["20261012:0930", "garbage", "20261012:1600-20261012:0930", "20261012:0930-1600-1700"],
+)
+def test_parse_rejects_malformed_strings(raw):
+    with pytest.raises(c.SessionParseError):
+        c.parse_liquid_hours(raw, ZONE)
+
+
+@pytest.mark.parametrize("zone", ["", "Bad/Zone"])
+def test_parse_rejects_bad_zone(zone):
+    with pytest.raises(c.SessionParseError):
+        c.parse_liquid_hours(NEW_FORMAT, zone)
+
+
+# --- evaluate_session (D-21, D-24) -------------------------------------------------------
+
+
+def test_buffer_constant():
+    assert c.SESSION_BUFFER_MINUTES == 15
+
+
+def test_buffer_boundaries_are_exact(ny):
+    window = c.parse_liquid_hours(NEW_FORMAT, ZONE).windows[0]
+    buf = timedelta(minutes=15)
+
+    def at(moment):
+        return c.evaluate_session(NEW_FORMAT, ZONE, moment.astimezone(UTC))
+
+    assert at(window.start + buf).state == c.OK  # start + 15min
+    early = at(window.start + buf - timedelta(seconds=1))  # start + 15min - 1s
+    assert early.state == c.CLOSED
+    assert early.next_open == window.start + buf
+    assert at(window.end - buf).state == c.OK  # end - 15min
+    assert at(window.end - buf + timedelta(seconds=1)).state == c.CLOSED  # end - 15min + 1s
+
+
+def test_ok_verdict_carries_the_window(ny):
+    verdict = c.evaluate_session(NEW_FORMAT, ZONE, _utc(ny, 2026, 10, 12, 12, 0))
+    assert verdict.state == c.OK
+    assert verdict.window is not None
+
+
+def test_closed_day_is_closed_not_session_unknown(ny):
+    verdict = c.evaluate_session(NEW_FORMAT, ZONE, _utc(ny, 2026, 10, 11, 12, 0))
+    assert verdict.state == c.CLOSED
+    assert verdict.state not in c.REJECTED_STATES
+    monday = c.parse_liquid_hours(NEW_FORMAT, ZONE).windows[0]
+    assert verdict.next_open == monday.start + timedelta(minutes=15)
+
+
+def test_missing_day_entry_is_session_unknown(ny):
+    raw = "20261013:0930-20261013:1600"
+    verdict = c.evaluate_session(raw, ZONE, _utc(ny, 2026, 10, 12, 12, 0))
+    assert verdict.state == c.SESSION_UNKNOWN
+    assert verdict.state in c.REJECTED_STATES
+    assert "2026-10-12" in verdict.detail
+
+
+@pytest.mark.parametrize(("raw", "zone"), [("garbage", ZONE), (NEW_FORMAT, "Bad/Zone")])
+def test_parse_failure_becomes_session_unknown_without_raising(ny, raw, zone):
+    verdict = c.evaluate_session(raw, zone, _utc(ny, 2026, 10, 12, 12, 0))
+    assert verdict.state == c.SESSION_UNKNOWN
+    assert verdict.detail
+
+
+def test_after_midnight_inside_a_window_that_began_yesterday(ny):
+    verdict = c.evaluate_session(LEADING_SEMICOLON, ZONE, _utc(ny, 2026, 10, 12, 1, 0))
+    assert verdict.state == c.OK
+
+
+def test_half_day_is_a_shorter_window_without_special_case(ny):
+    assert c.evaluate_session(HALF_DAY, ZONE, _utc(ny, 2026, 11, 27, 12, 40)).state == c.OK
+    assert c.evaluate_session(HALF_DAY, ZONE, _utc(ny, 2026, 11, 27, 12, 50)).state == c.CLOSED
+
+
+def test_no_later_window_means_no_next_open(ny):
+    raw = "20261012:0930-20261012:1600"
+    verdict = c.evaluate_session(raw, ZONE, _utc(ny, 2026, 10, 12, 17, 0))
+    assert verdict.state == c.CLOSED
+    assert verdict.next_open is None
+
+
+def test_naive_now_is_refused():
+    with pytest.raises(ValueError, match="time zone"):
+        c.evaluate_session(NEW_FORMAT, ZONE, datetime(2026, 10, 12, 12, 0))
+
+
+# --- counter-test against the client library's own parser (SC6) --------------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        NEW_FORMAT,
+        "20261011:CLOSED;20261012:0930-20261012:1600",
+        HALF_DAY,
+        LEADING_SEMICOLON,
+        "20261012:0400-20261012:0930;20261012:0930-20261012:1600;20261013:0400-20261013:0930",
+    ],
+)
+def test_parser_agrees_with_ib_async_on_new_format(raw):
+    ib_async = pytest.importorskip("ib_async")
+    details = ib_async.ContractDetails(liquidHours=raw, timeZoneId=ZONE)
+    theirs = [(s.start, s.end) for s in details.liquidSessions()]
+    ours = [(w.start, w.end) for w in c.parse_liquid_hours(raw, ZONE).windows]
+    assert ours == theirs
+
+
+def test_old_format_is_rejected_by_ib_async_but_parsed_here(ny):
+    ib_async = pytest.importorskip("ib_async")
+    details = ib_async.ContractDetails(liquidHours=OLD_FORMAT, timeZoneId=ZONE)
+    with pytest.raises(ValueError):
+        details.liquidSessions()
+    window = c.parse_liquid_hours(OLD_FORMAT, ZONE).windows[0]
+    assert (window.start.hour, window.start.minute) == (7, 0)
+    assert (window.end.hour, window.end.minute) == (18, 30)
