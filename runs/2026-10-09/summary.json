@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "started_at": "2026-10-12T19:57:09.452172+00:00",
-  "finished_at": "2026-10-12T20:00:01.313892+00:00",
+  "started_at": "2026-10-12T20:03:36.043047+00:00",
+  "finished_at": "2026-10-12T20:06:06.423630+00:00",
   "trade_date": "2026-10-09",
   "provider": "anthropic",
   "deep_think_llm": "claude-sonnet-5-5",
   "quick_think_llm": "claude-haiku-5-5",
   "max_cost_per_run_usd": 1.5,
   "max_total_cost_usd": 1.5,
-  "commit": "6287dff091c2bb47ea1c1a505187ad4ebff35274",
+  "commit": "2622b237b2b1661e0b0c6e979ec2ab636c4ae884",
   "status": "ok",
   "totals": {
     "tickers": 1,
-    "cost_usd": 0.21773,
-    "tokens_in": 139787,
-    "tokens_out": 42082,
+    "cost_usd": 0.1966,
+    "tokens_in": 132345,
+    "tokens_out": 36539,
     "ok": 1,
     "failed": 0,
     "budget_aborted": 0,
@@ -25,14 +25,49 @@
       "ticker": "AAPL",
       "status": "ok",
       "signal": "Hold",
-      "cost_usd": 0.21773,
-      "tokens_in": 139787,
-      "tokens_out": 42082,
-      "duration_s": 170.19065501999998,
+      "cost_usd": 0.1965995,
+      "tokens_in": 132345,
+      "tokens_out": 36539,
+      "duration_s": 148.652486947,
       "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AAPL/complete_report.md",
       "error": null,
       "jev": {
-        "error": "UnicodeEncodeError: 'latin-1' codec can't encode character '\\ufeff' in position 7: ordinal not in range(256)"
+        "model": "jev-1.13.0",
+        "input_tokens": 3975,
+        "cost_usd": 0.00016695,
+        "latency_ms": 154,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "HOLD",
+            "jev": "hold",
+            "confidence": 0.99,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
+            "existing": "Neutral",
+            "jev": "neutral",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          }
+        }
       },
       "rating_source": "engine"
     }
