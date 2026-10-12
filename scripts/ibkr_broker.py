@@ -53,6 +53,14 @@ LINK_CODES = frozenset({1100, 1101, 1102, 1300, 2110})
 #: Client calls that would change the account; blocked before connectAsync.
 _WRITE_CALLS = ("placeOrder", "cancelOrder", "reqGlobalCancel", "exerciseOptions")
 
+#: Outgoing message ids that change the account, blocked on the wire as well:
+#: PLACE_ORDER 3, CANCEL_ORDER 4, REPLACE_FA 19, EXERCISE_OPTIONS 21,
+#: REQ_GLOBAL_CANCEL 58 (the methods at client.py:472, :714, :805, :843, :980 in
+#: 2.1.0). Every
+#: request of the library goes through ``Client.send`` and then ``Client.sendMsg``,
+#: so a write that bypasses the named calls still meets this check.
+_WRITE_MESSAGE_IDS = frozenset({3, 4, 19, 21, 58})
+
 #: Gateway/API code -> named operating state (02-RESEARCH.md Muster 5). 502, 504
 #: and 507 never arrive as events from the library; connect() maps the matching
 #: exceptions onto them.
@@ -175,8 +183,25 @@ def _default_ib_factory() -> IbHandles:
     return IbHandles(IB(), Contract, StartupFetchNONE)
 
 
+def _message_id(field) -> int | None:
+    """The message id of a first protocol field, or None when it is not one."""
+    if isinstance(field, bool):
+        return None
+    try:
+        return int(field)
+    except (TypeError, ValueError):
+        return None
+
+
 def _arm_write_barrier(client) -> None:
-    """Replace the client's write calls with one that refuses, on this instance."""
+    """Refuse every write on this client instance, by call name and on the wire.
+
+    The named write calls are replaced first. Then ``send`` (fields) and
+    ``sendMsg`` (the serialized message, id first) are wrapped, so a write
+    message is refused whatever path produced it: ``replaceFA``, a raw
+    ``send(3, ...)`` or a write call added by a later library version that
+    reuses one of these ids. Reads pass through unchanged.
+    """
     for name in _WRITE_CALLS:
 
         def refuse(*_args, _name=name, **_kwargs):
@@ -185,6 +210,30 @@ def _arm_write_barrier(client) -> None:
             )
 
         setattr(client, name, refuse)
+
+    def refuse_message(msg_id: int):
+        raise ReadOnlyViolation(
+            f"read-only session: message {msg_id} refused before it reached the gateway"
+        )
+
+    original_send = client.send
+    original_send_msg = client.sendMsg
+
+    def guarded_send(*fields, **kwargs):
+        msg_id = _message_id(fields[0]) if fields else None
+        if msg_id in _WRITE_MESSAGE_IDS:
+            refuse_message(msg_id)
+        return original_send(*fields, **kwargs)
+
+    def guarded_send_msg(msg, *args, **kwargs):
+        head = msg.split("\0", 1)[0] if isinstance(msg, str) else None
+        msg_id = _message_id(head) if head else None
+        if msg_id in _WRITE_MESSAGE_IDS:
+            refuse_message(msg_id)
+        return original_send_msg(msg, *args, **kwargs)
+
+    client.send = guarded_send
+    client.sendMsg = guarded_send_msg
 
 
 class IbkrBroker:

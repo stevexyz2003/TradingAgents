@@ -76,6 +76,45 @@ def test_write_barrier_on_the_real_client_object():
         ib.reqGlobalCancel()
 
 
+# Outgoing write messages of the pinned library (client.py, 2.1.0): PLACE_ORDER,
+# CANCEL_ORDER, REPLACE_FA, EXERCISE_OPTIONS, REQ_GLOBAL_CANCEL.
+WRITE_MESSAGE_IDS = (3, 4, 19, 21, 58)
+
+
+@pytest.mark.parametrize("msg_id", WRITE_MESSAGE_IDS)
+def test_write_barrier_refuses_write_messages_on_the_wire(msg_id):
+    # WR-01 negative control: the raw send path bypasses every named write call.
+    # Unguarded, the unconnected client raises ConnectionError, not the refusal.
+    ib_async = pytest.importorskip("ib_async")
+    client = ib_async.IB().client
+    broker._arm_write_barrier(client)
+    with pytest.raises(broker.ReadOnlyViolation, match=f"message {msg_id}"):
+        client.send(msg_id, 1, 42)
+    with pytest.raises(broker.ReadOnlyViolation, match=f"message {msg_id}"):
+        client.sendMsg(f"{msg_id}\0" + "1\0")
+
+
+def test_write_barrier_covers_replace_fa_which_has_no_named_block():
+    ib_async = pytest.importorskip("ib_async")
+    ib = ib_async.IB()
+    broker._arm_write_barrier(ib.client)
+    # IB.replaceFA first asks the unconnected client for a request id, so the
+    # client call is the one to test; it sends message 19 through send().
+    with pytest.raises(broker.ReadOnlyViolation, match="message 19"):
+        ib.client.replaceFA(1, 1, "<xml/>")
+
+
+def test_write_barrier_lets_read_messages_through():
+    ib_async = pytest.importorskip("ib_async")
+    client = ib_async.IB().client
+    broker._arm_write_barrier(client)
+    # reqPositions (61) reaches the library's own send, which refuses: not connected.
+    with pytest.raises(ConnectionError, match="Not connected"):
+        client.send(61, 1)
+    with pytest.raises(ConnectionError, match="Not connected"):
+        client.reqPositions()
+
+
 # --- paper guard -----------------------------------------------------------------------
 
 

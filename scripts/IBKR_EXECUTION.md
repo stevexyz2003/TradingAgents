@@ -21,9 +21,15 @@ reader can check it instead of trusting it.
 **Phase 2 is read-only.** The adapter has no write API at all — no place, no
 preview, no cancel, not even as a stub. On top of that, the client's write
 calls (`placeOrder`, `cancelOrder`, `reqGlobalCancel`, `exerciseOptions`,
-`_WRITE_CALLS` in `scripts/ibkr_broker.py:44`) are replaced by a refusing
-function before the first byte goes to the gateway
-(`scripts/ibkr_broker.py:241`). The client parameter `readonly=True`
+`_WRITE_CALLS` in `scripts/ibkr_broker.py`) are replaced by a refusing
+function before the first byte goes to the gateway (`_arm_write_barrier`).
+Because a list of call names proves nothing about the calls it does not
+name, the same barrier also guards the client's send path, through which
+every request goes: a message with one of the write ids 3 (place order),
+4 (cancel order), 19 (replace FA), 21 (exercise options) or 58 (global
+cancel) is refused there, whichever call produced it (`_WRITE_MESSAGE_IDS`).
+Tests run this against the real client object of the pinned library. The
+client parameter `readonly=True`
 (`scripts/ibkr_broker.py:250`) does **not** block anything: in the pinned
 library version it only skips the order sync at startup. The gateway switch
 "Read-Only API" is **not** a default setting and was off after the phase-1

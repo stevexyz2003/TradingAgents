@@ -16,6 +16,8 @@ _BROKER = Path(__file__).resolve().parents[1] / "scripts" / "ibkr_broker.py"
 
 #: The write calls the adapter must block on the client object.
 WRITE_CALLS = ("placeOrder", "cancelOrder", "reqGlobalCancel", "exerciseOptions")
+#: The client's send path, which the adapter guards on the wire (message ids).
+WIRE_CALLS = ("send", "sendMsg")
 
 
 def load_broker():
@@ -106,7 +108,7 @@ class FakeIB:
         self.connect_kwargs: dict = {}
         self.connected = False
         self.errorEvent = FakeEvent()
-        self._recorders = {name: self._record(name) for name in WRITE_CALLS}
+        self._recorders = {name: self._record(name) for name in (*WRITE_CALLS, *WIRE_CALLS)}
         self.client = SimpleNamespace(**self._recorders)
 
     def _record(self, name):
@@ -120,7 +122,8 @@ class FakeIB:
             host=host, port=port, clientId=clientId, timeout=timeout, readonly=readonly, **kw
         )
         self.barrier_armed_at_connect = all(
-            getattr(self.client, name) is not self._recorders[name] for name in WRITE_CALLS
+            getattr(self.client, name) is not self._recorders[name]
+            for name in (*WRITE_CALLS, *WIRE_CALLS)
         )
         self.calls.append("connect")
         for args in self.emit_on_connect:
