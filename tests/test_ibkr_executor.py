@@ -128,6 +128,15 @@ def _log_text(log):
     return log.read_text(encoding="utf-8")
 
 
+def _own_file_handlers():
+    """File handlers on the root logger, minus the one pytest's logging plugin adds."""
+    return [
+        h
+        for h in logging.getLogger().handlers
+        if isinstance(h, logging.FileHandler) and type(h).__module__ != "_pytest.logging"
+    ]
+
+
 # --- exit codes ---------------------------------------------------------------------
 
 
@@ -259,24 +268,20 @@ class TestLogFile:
         path = tmp_path / "x.log"
         executor.setup_logging(path)
         logging.getLogger("thirdparty.client").error("Fehler Ü-123")
-        file_handlers = [
-            h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)
-        ]
+        file_handlers = _own_file_handlers()
         assert len(file_handlers) == 1
         assert Path(file_handlers[0].baseFilename) == path.resolve()
         executor.close_logging()
         assert "Fehler Ü-123" in path.read_text(encoding="utf-8")
         assert capsys.readouterr().err == ""
-        assert not any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers)
+        assert _own_file_handlers() == []
         path.unlink()  # no Windows file lock left behind
         assert not path.exists()
 
     def test_repeated_setup_keeps_one_file_handler(self, tmp_path):
         executor.setup_logging(tmp_path / "a.log")
         executor.setup_logging(tmp_path / "b.log")
-        file_handlers = [
-            h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)
-        ]
+        file_handlers = _own_file_handlers()
         assert [Path(h.baseFilename).name for h in file_handlers] == ["b.log"]
 
     def test_default_log_file_is_outside_the_repo(self, tmp_path):
