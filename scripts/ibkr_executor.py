@@ -38,9 +38,12 @@ import importlib.util
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 
 from dotenv import dotenv_values
+
+from tradingagents.portfolio import PortfolioContext, Position, load_portfolio
 
 EXIT_OK = 0
 EXIT_CONFIG = 1
@@ -79,6 +82,10 @@ class ConfigError(Exception):
 
 class MissingSettings(Exception):
     """The IBKR settings are missing or unreadable - nothing was done."""
+
+
+class OutputError(Exception):
+    """The portfolio JSON could not be written or did not validate."""
 
 
 def load_broker_module():
@@ -125,9 +132,7 @@ def read_settings(env_file: Path) -> dict[str, str]:
             f"settings file not readable: {env_file} ({type(exc).__name__})"
         ) from exc
     wanted = (*REQUIRED_ENV, TRADING_MODE_ENV)
-    settings = {
-        key: values[key].strip() for key in wanted if isinstance(values.get(key), str)
-    }
+    settings = {key: values[key].strip() for key in wanted if isinstance(values.get(key), str)}
     missing = [key for key in REQUIRED_ENV if not settings.get(key)]
     if missing:
         raise MissingSettings("missing IBKR settings: " + ", ".join(missing))
@@ -211,10 +216,102 @@ def _fail(logger: logging.Logger, code: int, log_line: str, console: str) -> int
 # --- the account command ------------------------------------------------------------
 
 
-def run_account(args, settings, broker_mod, broker_factory, logger) -> int:
-    """Placeholder until the account flow lands."""
-    logger.info("account flow not implemented yet")
-    return EXIT_PRECONDITION
+def snapshot_to_portfolio(snapshot, logger: logging.Logger) -> PortfolioContext:
+    """The broker snapshot as the broker-neutral ``PortfolioContext``.
+
+    ``PortfolioContext`` carries one currency label, the cash currency. An
+    average price in another currency (USD stocks in the EUR account) would sit
+    under the wrong label, so it is dropped until FX conversion lands in phase 4.
+    For non-stock positions the average cost includes the multiplier, so no
+    price is kept there either (allow-list in phase 3).
+    """
+    positions = []
+    for held in snapshot.positions:
+        if held.sec_type == "STK" and held.currency == snapshot.cash_currency:
+            positions.append(
+                Position(ticker=held.symbol, quantity=held.quantity, average_price=held.avg_cost)
+            )
+        elif held.sec_type == "STK":
+            logger.warning(
+                "average price dropped for %s: position currency %s != cash currency %s "
+                "(no FX before phase 4)",
+                held.symbol,
+                held.currency,
+                snapshot.cash_currency,
+            )
+            positions.append(Position(ticker=held.symbol, quantity=held.quantity))
+        else:
+            ticker = held.local_symbol or held.symbol
+            logger.warning(
+                "average price dropped for %s: sec_type %s is not a stock "
+                "(average cost includes the multiplier)",
+                ticker,
+                held.sec_type,
+            )
+            positions.append(Position(ticker=ticker, quantity=held.quantity))
+    return PortfolioContext(
+        cash=snapshot.cash, currency=snapshot.cash_currency, positions=positions
+    )
+
+
+def write_portfolio_atomic(ctx: PortfolioContext, out: Path, *, check=None) -> None:
+    """Write ``out`` through a uniquely named temp file beside it, then move it into place.
+
+    ``check`` (if given) reads the temp file before the move, so a file that
+    does not validate never replaces the previous one. Unlike the cache helper
+    in ``tradingagents/dataflows/files.py`` nothing is swallowed: a
+    ``PermissionError`` is raised like every other error, and the temp file
+    is removed either way.
+    """
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    temp = out.with_name(f"{out.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_text(ctx.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        if check is not None:
+            check(temp)
+        os.replace(temp, out)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def run_account(args, settings, broker_mod, broker_factory, logger, progress=None) -> int:
+    """Connect, check liveness, read the book, then write and cross-check the JSON.
+
+    The JSON is written only on the exit-0 path and only after the session is
+    closed. ``progress["connected"]`` tells the caller whether a session stood.
+    """
+    host, port, _account = settings
+    out = Path(args.out).resolve()
+    progress = {} if progress is None else progress
+    with broker_factory(host, port, logger) as broker:
+        progress["connected"] = True
+        health = broker.health()
+        if not health.ok:
+            line = f'ibkr-state={health.state} code=- detail="{health.detail}"'
+            logger.error(line)
+            print(f"error: {line}", file=sys.stderr)
+            return EXIT_GATEWAY
+        snapshot = broker.positions()
+    logger.info(
+        "ibkr-snapshot account=%s as_of=%s positions=%d cash=%s %s clientId=%s",
+        snapshot.account,
+        snapshot.as_of.isoformat(),
+        len(snapshot.positions),
+        snapshot.cash,
+        snapshot.cash_currency,
+        broker_mod.EXECUTOR_CLIENT_ID,
+    )
+    try:
+        ctx = snapshot_to_portfolio(snapshot, logger)
+        write_portfolio_atomic(ctx, out, check=load_portfolio)
+        load_portfolio(out)  # cross-check of the file in place (criterion 1)
+    except (OSError, ValueError) as exc:
+        raise OutputError(f"{out}: {type(exc).__name__}: {exc}") from exc
+    logger.info("portfolio written: %s", out)
+    print(f"account: {len(ctx.positions)} position(s), cash {ctx.cash} {ctx.currency} -> {out}")
+    return EXIT_OK
 
 
 # --- command line -------------------------------------------------------------------
@@ -275,7 +372,36 @@ def _account(args, broker_factory, logger) -> int:
         def broker_factory(host, port, logger):
             return broker_mod.IbkrBroker(host, port, logger=logger)
 
-    return run_account(args, settings, broker_mod, broker_factory, logger)
+    progress = {"connected": False}
+    try:
+        return run_account(args, settings, broker_mod, broker_factory, logger, progress)
+    except broker_mod.AccountGuardViolation as exc:
+        line = f"ibkr-state=ACCOUNT_GUARD_VIOLATED accounts_seen={exc.accounts_seen}"
+        return _fail(logger, EXIT_ACCOUNT_GUARD, line, line)
+    except broker_mod.GatewayUnavailable as exc:
+        return _fail(logger, EXIT_GATEWAY, str(exc), str(exc))
+    except ImportError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=LIBRARY_MISSING {type(exc).__name__}: {exc}",
+            'the IBKR client library is missing - pip install -e ".[ibkr]"',
+        )
+    except OutputError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=OUTPUT_INVALID {exc}",
+            f"portfolio JSON not written: {exc}",
+        )
+    except Exception as exc:
+        # The traceback goes to the log file only; the console gets one line.
+        logger.exception("ibkr-state=UNEXPECTED %s: %s", type(exc).__name__, exc)
+        print(
+            f"error: unexpected {type(exc).__name__}: {exc} (details in {_log_path()})",
+            file=sys.stderr,
+        )
+        return EXIT_GATEWAY if progress["connected"] else EXIT_CONFIG
 
 
 if __name__ == "__main__":

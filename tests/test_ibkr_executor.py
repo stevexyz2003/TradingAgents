@@ -235,7 +235,6 @@ class TestSettings:
         with pytest.raises(executor.ConfigError, match="DUQ634065"):
             executor.validate_settings(raw, broker.EXPECTED_ACCOUNT)
 
-    @pytest.mark.xfail(strict=True, reason="account flow lands in task 2")
     def test_password_is_never_read_or_logged(self, tmp_path, capsys, loop):
         env = _env_file(tmp_path, IBKR_PASSWORD="s3cr3t-Ü", IBKR_USERNAME="someone")
         settings = executor.read_settings(env)
@@ -490,9 +489,11 @@ class TestAccount:
 
         monkeypatch.setattr(executor, "load_portfolio", refuse)
         fake = ibkr_fakes.FakeIB(**_book())
-        code, _out, log = _run(tmp_path, _fake_factory(fake, loop))
+        code, out, log = _run(tmp_path, _fake_factory(fake, loop))
         assert code == executor.EXIT_CONFIG
         assert "OUTPUT_INVALID" in _log_text(log)
+        assert not out.exists()  # checked as a temp file, never moved into place
+        assert list(out.parent.glob("*.tmp")) == []
         err = capsys.readouterr().err
         assert len(err.strip().splitlines()) == 1
         assert "Traceback" not in err
