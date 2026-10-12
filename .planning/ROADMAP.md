@@ -298,7 +298,7 @@ Plans:
 
 ## Coverage: REQ-ID → Phase
 
-Alle 68 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer Phase zugeordnet. Keine ID fehlt, keine ist doppelt.
+Alle 70 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer Phase zugeordnet. Keine ID fehlt, keine ist doppelt.
 
 | REQ-ID | Kurztitel | Phase |
 |---|---|---|
@@ -370,6 +370,8 @@ Alle 68 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer 
 | REQ-IBKR-66 | Negativ-Kontrolle je Schutzmaßnahme | 5 |
 | REQ-IBKR-67 | Fehlercodes gemessen, nicht angenommen | 2 |
 | REQ-IBKR-68 | Stückzahlen statt geschätzter Größen ohne Kurs | 4 |
+| REQ-IBKR-69 | `tif` explizit setzen und zurücklesen (sonst kommt `whatIf` leer) | 4 |
+| REQ-IBKR-70 | Budgetprüfung über `initMarginChange` in Kontowährung | 4 |
 
 **Gegenprobe:** 68 IDs vergeben (`REQ-IBKR-01` … `REQ-IBKR-68`; -61 … -68 am 2026-10-12 aus dem Sicherungsprinzip `quick/261012-ap2` übernommen), 68 Zeilen in dieser Tabelle, Summe über die Phasenspalte 2 + 12 + 7 + 16 + 15 + 5 + 4 + 7 = **68**. Keine Anforderung ohne Phase, keine Phase ohne Anforderung. REQ-IBKR-62, -66 und -67 stehen bei der Phase, in der sie zuerst nachgewiesen werden, gelten aber in jeder späteren Phase weiter.
 
