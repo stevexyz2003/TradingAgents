@@ -275,3 +275,108 @@ def test_resolver_takes_the_clock_as_a_parameter():
     source = CONTRACTS.read_text(encoding="utf-8")
     for forbidden in ("datetime.now", "time.time(", "date.today"):
         assert forbidden not in source, f"{forbidden} reads the clock inside the resolver"
+
+
+# --- phase 4: the dry run is documented, and the new modules stay pure ---------------------
+
+DECISION = ROOT / "scripts" / "ibkr_decision.py"
+PAPERLOG = ROOT / "scripts" / "ibkr_paperlog.py"
+
+
+def _load_decision():
+    import importlib.util
+
+    import sys
+
+    name = "ibkr_decision_isolation_probe"
+    spec = importlib.util.spec_from_file_location(name, DECISION)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # dataclasses resolves string annotations through sys.modules
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
+@pytest.mark.unit
+def test_handbook_exit_five_is_active():
+    lines = [
+        line
+        for line in _handbook_text().splitlines()
+        if line.startswith("| 5 | `EXIT_REJECTED` |")
+    ]
+    assert len(lines) == 1
+    assert "reserved" not in lines[0]
+
+
+@pytest.mark.unit
+def test_handbook_documents_preview():
+    text = _handbook_text()
+    for needle in (
+        "## preview",
+        "preview AAPL",
+        "IBKR_PAPER_LOG_REMOTE",
+        "IBKR_PAPER_LOG_BRANCH",
+        "skipped-hold",
+        "stale-decision",
+        "weekend_gap",
+        "signal-divergence",
+        "foreign-open-order",
+        "within-tolerance",
+        "long-only-noop",
+        "preview-empty",
+        "over-budget",
+        "halted",
+        "paper-log-unavailable",
+        "calendar-conflict",
+        "preview.json",
+    ):
+        assert needle in text, needle
+
+
+@pytest.mark.unit
+def test_handbook_state_table_matches_decision_module():
+    decision = _load_decision()
+    text = _handbook_text()
+    assert decision.EXIT_BY_STATE, "the state table would check nothing"
+    for state, code in decision.EXIT_BY_STATE.items():
+        assert re.search(rf"^\| `{re.escape(state)}` \| {code} \|", text, re.M), (
+            f"{state}={code} not in the phase-4 state table"
+        )
+
+
+@pytest.mark.unit
+def test_decision_modules_are_library_free():
+    for path in (DECISION, PAPERLOG):
+        top_level = {
+            name.split(".")[0]
+            for node in ast.parse(path.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for name in (
+                [a.name for a in node.names]
+                if isinstance(node, ast.Import)
+                else ([node.module] if node.module and not node.level else [])
+            )
+        }
+        for forbidden in (CLIENT_LIBRARY, "tradingagents", "exchange_calendars", "pandas"):
+            assert forbidden not in top_level, f"{path.name} imports {forbidden} at module level"
+
+
+@pytest.mark.unit
+def test_decision_module_takes_the_clock_as_a_parameter():
+    for path in (DECISION, PAPERLOG):
+        source = path.read_text(encoding="utf-8")
+        for forbidden in ("datetime.now", "time.time(", "date.today"):
+            assert forbidden not in source, f"{forbidden} reads the clock in {path.name}"
+
+
+@pytest.mark.unit
+def test_no_market_data_in_execution_path():
+    # Built from parts so this file never contains the call names as literals.
+    patterns = [("req", name) for name in ("MktData", "Tickers", "HistoricalData")]
+    needles = ["".join(parts) for parts in patterns]
+    for path in (EXECUTOR, ADAPTER, DECISION):
+        source = path.read_text(encoding="utf-8")
+        for needle in needles:
+            assert needle not in source, f"{path.name} contains a market data call: {needle}"
