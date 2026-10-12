@@ -254,7 +254,10 @@ python scripts/ibkr_executor.py account --out "%LOCALAPPDATA%\TradingEngineX\ibk
 `--tickers`, `--max-cost`, `--out` and `--state` are required by the paper run
 (`parse_args` in `scripts/daily_paper_run.py`); their meaning and the cost
 budget are described in `scripts/PAPER_RUN.md`. `--portfolio` is local only;
-the CI run never passes it.
+the CI run never passes it. The paper run picks its LLM provider from the
+environment: without `TRADINGAGENTS_LLM_PROVIDER=anthropic` and the two model
+variables in `.env` it falls back to `openai` instead of the CI's Anthropic
+setup (see "Running it locally" in `scripts/PAPER_RUN.md`).
 
 With `--portfolio` the reports, the archived copies under
 `paper-state/runs/<date>/`, the decision log and the summaries carry cash,

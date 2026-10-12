@@ -132,6 +132,17 @@ python scripts/daily_paper_run.py \
   --state ~/.tradingagents/paper-state
 ```
 
+**Pin the provider locally as well.** The workflow sets
+`TRADINGAGENTS_LLM_PROVIDER=anthropic` and both Claude models (see the
+variables table above); a local shell does not. Without them the library
+default applies - `openai` with its newest models - and the run bills a
+different account: on 2026-10-12 a local run went to OpenAI and failed with
+`429 credit_balance_exhausted` while the CI run on Anthropic was fine. OpenAI
+API credit is separate from a ChatGPT subscription; a plan with quota left
+does not pay for API calls. Put the same five variables the workflow pins
+into your local `.env` (block at the end of `.env.example`); the preflight
+line `provider=… deep=… quick=…` shows which ones took effect.
+
 Add `--preflight` to validate everything without spending anything. Point
 `--state` at the same directory every time or the track record will not build
 up. `--date auto` is the previous weekday; pass `YYYY-MM-DD` for a backfill.
