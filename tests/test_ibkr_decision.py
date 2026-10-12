@@ -283,3 +283,93 @@ def test_budget_and_currency():
     v = _judge(_Preview(), funds=1000.0)
     assert v.state == "preview-ok" and v.reject_reason == ""
     assert _judge(_Preview(warning_text="careful")).state == "preview-ok"
+
+
+# --- freshness / calendar_conflict (plan 04-06) -----------------------------------------
+
+from datetime import date, datetime, timezone  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calendar_stub import WeekdayCalendar  # noqa: E402
+
+
+def _utc(y, m, d, h, mi=0):
+    return datetime(y, m, d, h, mi, tzinfo=timezone.utc)
+
+
+@pytest.fixture(params=["xnys", "stub"])
+def cal(request):
+    if request.param == "xnys":
+        pytest.importorskip("exchange_calendars")
+        return dec.load_xnys_calendar()
+    return WeekdayCalendar(holidays={date(2026, 9, 7)})
+
+
+_FRESHNESS_CASES = [
+    # name, trade_date, now, state, execution_day, in_session_day, gap_days, weekend_gap, closed
+    ("tue_run_mon_decision", date(2026, 10, 5), _utc(2026, 10, 6, 15), "fresh",
+     date(2026, 10, 6), True, 1, False, ()),
+    ("sat_run_decision_on_monday", date(2026, 10, 9), _utc(2026, 10, 12, 15), "fresh",
+     date(2026, 10, 12), True, 3, True, ()),
+    ("wed_missed_thu_catchup", date(2026, 10, 6), _utc(2026, 10, 8, 15), "stale-decision",
+     date(2026, 10, 8), True, None, None, (date(2026, 10, 7),)),
+    ("labor_day_monday_tuesday_run", date(2026, 9, 7), _utc(2026, 9, 8, 15), "fresh",
+     date(2026, 9, 8), True, 1, False, ()),
+    ("weekend_run", date(2026, 10, 9), _utc(2026, 10, 10, 10), "fresh",
+     date(2026, 10, 12), False, 3, True, ()),
+    ("evening_after_close", date(2026, 10, 9), _utc(2026, 10, 12, 23), "stale-decision",
+     date(2026, 10, 13), False, None, None, (date(2026, 10, 12),)),
+    ("same_day_is_future", date(2026, 10, 12), _utc(2026, 10, 12, 15), "future-decision",
+     date(2026, 10, 12), True, None, None, ()),
+]
+
+
+@pytest.mark.parametrize("case", _FRESHNESS_CASES, ids=[c[0] for c in _FRESHNESS_CASES])
+def test_freshness_cases(cal, case):
+    _, trade_date, now, state, exec_day, in_day, gap, weekend, closed = case
+    result = dec.freshness(trade_date, now, cal)
+    assert result.state == state
+    assert result.execution_day == exec_day
+    assert result.in_session_day is in_day
+    assert result.closed_sessions == closed
+    if gap is not None:
+        assert result.gap_days == gap
+        assert result.weekend_gap is weekend
+
+
+def test_freshness_stale_detail_names_the_closed_session(cal):
+    result = dec.freshness(date(2026, 10, 6), _utc(2026, 10, 8, 15), cal)
+    assert "2026-10-07" in result.detail
+
+
+def test_freshness_outside_calendar_range_is_stale_not_a_crash(cal):
+    result = dec.freshness(date(1990, 1, 2), _utc(2026, 10, 12, 15), cal)
+    assert result.state == "stale-decision"
+    assert "outside the calendar range" in result.detail
+
+
+def test_freshness_naive_now_raises(cal):
+    with pytest.raises(ValueError):
+        dec.freshness(date(2026, 10, 9), datetime(2026, 10, 12, 15), cal)
+
+
+_CONFLICT_CASES = [
+    (_utc(2026, 10, 12, 15), True, False),
+    (_utc(2026, 10, 12, 15), False, True),
+    (_utc(2026, 9, 7, 15), True, True),
+    (_utc(2026, 10, 10, 15), False, False),
+    (_utc(2026, 10, 12, 15), None, False),
+    # 02:00 UTC on the 13th is still Oct 12 in New York
+    (_utc(2026, 10, 13, 2), True, False),
+    (_utc(2026, 10, 13, 2), False, True),
+]
+
+
+@pytest.mark.parametrize(("now", "session_day", "expected"), _CONFLICT_CASES)
+def test_calendar_conflict_cases(cal, now, session_day, expected):
+    assert dec.calendar_conflict(now, cal, session_day) is expected
+
+
+def test_calendar_conflict_naive_now_raises(cal):
+    with pytest.raises(ValueError):
+        dec.calendar_conflict(datetime(2026, 10, 12, 15), cal, True)
