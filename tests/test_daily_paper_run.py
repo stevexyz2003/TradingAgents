@@ -18,6 +18,7 @@ import pytest
 
 from tradingagents.budget import BudgetExceededError
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.portfolio import PortfolioContext, Position
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "daily_paper_run.py"
 
@@ -54,9 +55,12 @@ class _FakeGraph:
         self.error = error
         self.spend_tracker = SimpleNamespace(tokens_in=1000, tokens_out=200, cost=cost)
         self.calls = []
+        self.portfolios = []
 
-    def propagate(self, ticker, trade_date, asset_type="stock"):
+    def propagate(self, ticker, trade_date, asset_type="stock", **kwargs):
         self.calls.append((ticker, trade_date))
+        # Sentinel when the kwarg is absent: proves the unchanged CI call shape.
+        self.portfolios.append(kwargs.get("portfolio", "<absent>"))
         if self.error is not None:
             raise self.error
         return {"final_trade_decision": f"**Rating**: {self.signal}"}, self.signal
@@ -400,3 +404,58 @@ class TestMain:
             "--preflight",
         ])
         assert exit_code == runner.EXIT_NO_CREDENTIALS
+
+
+def _portfolio_file(tmp_path: Path, payload) -> Path:
+    path = tmp_path / "portfolio.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+@pytest.mark.unit
+class TestPortfolio:
+    def test_portfolio_is_passed_to_propagate(self, monkeypatch, tmp_path):
+        path = _portfolio_file(tmp_path, {
+            "cash": 1000.0,
+            "currency": "EUR",
+            "positions": [{"ticker": "AAPL", "quantity": 10, "average_price": 150.0}],
+        })
+        graph = _FakeGraph()
+        exit_code = _run_main(monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(path)))
+        assert exit_code == runner.EXIT_OK
+        assert graph.portfolios == [
+            PortfolioContext(
+                cash=1000.0,
+                currency="EUR",
+                positions=[Position(ticker="AAPL", quantity=10, average_price=150.0)],
+            )
+        ]
+        assert graph.portfolios[0].positions[0].ticker == "AAPL"
+
+    def test_without_portfolio_propagate_gets_no_portfolio_kwarg(self, monkeypatch, tmp_path):
+        graph = _FakeGraph()
+        assert _run_main(monkeypatch, tmp_path, graph) == runner.EXIT_OK
+        assert graph.portfolios == ["<absent>"]
+
+    def test_missing_portfolio_file_is_a_config_error(self, monkeypatch, tmp_path, capsys):
+        graph = _FakeGraph()
+        missing = tmp_path / "no-such-portfolio.json"
+        exit_code = _run_main(monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(missing)))
+        assert exit_code == runner.EXIT_CONFIG
+        assert graph.calls == []
+        assert "portfolio" in capsys.readouterr().err
+
+    def test_invalid_portfolio_file_is_a_config_error(self, monkeypatch, tmp_path):
+        path = _portfolio_file(tmp_path, {"positions": [{"quantity": "x"}]})
+        graph = _FakeGraph()
+        exit_code = _run_main(monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(path)))
+        assert exit_code == runner.EXIT_CONFIG
+        assert graph.calls == []
+
+    def test_invalid_portfolio_fails_preflight_too(self, monkeypatch, tmp_path):
+        path = _portfolio_file(tmp_path, {"positions": [{"quantity": "x"}]})
+        graph = _FakeGraph()
+        exit_code = _run_main(
+            monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(path), "--preflight")
+        )
+        assert exit_code == runner.EXIT_CONFIG
