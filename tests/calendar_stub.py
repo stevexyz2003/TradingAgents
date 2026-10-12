@@ -7,28 +7,30 @@ lives only here (test files are not covered by the clock-literal guard, which ch
 
 from __future__ import annotations
 
-import sys
 from datetime import UTC, date, datetime, timedelta
 
 _FIRST = date(2000, 1, 1)
 _LAST = date(2100, 12, 31)
 
 
-def _range_error(message: str) -> Exception:
-    # The error class comes from the loaded domain module, which the test registers
-    # in sys.modules under "ibkr_decision".
-    return sys.modules["ibkr_decision"].CalendarRangeError(message)
-
-
 class WeekdayCalendar:
-    def __init__(self, holidays=frozenset(), close_utc_hour=20, zone_name="America/New_York"):
+    def __init__(
+        self,
+        holidays=frozenset(),
+        close_utc_hour=20,
+        zone_name="America/New_York",
+        range_error: type[Exception] = ValueError,
+    ):
+        # The test passes the CalendarRangeError of the module instance it exercises;
+        # several test files load ibkr_decision separately, so sys.modules is not reliable.
+        self.range_error = range_error
         self.holidays = frozenset(holidays)
         self.close_utc_hour = close_utc_hour
         self.zone_name = zone_name
 
     def _check(self, day: date) -> None:
         if not _FIRST <= day <= _LAST:
-            raise _range_error(f"{day} outside the calendar range")
+            raise self.range_error(f"{day} outside the calendar range")
 
     def is_session(self, day: date) -> bool:
         self._check(day)
@@ -51,5 +53,5 @@ class WeekdayCalendar:
 
     def session_close_utc(self, day: date) -> datetime:
         if not self.is_session(day):
-            raise _range_error(f"{day} is not a session")
+            raise self.range_error(f"{day} is not a session")
         return datetime(day.year, day.month, day.day, self.close_utc_hour, tzinfo=UTC)

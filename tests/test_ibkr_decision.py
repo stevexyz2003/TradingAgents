@@ -302,7 +302,7 @@ def cal(request):
     if request.param == "xnys":
         pytest.importorskip("exchange_calendars")
         return dec.load_xnys_calendar()
-    return WeekdayCalendar(holidays={date(2026, 9, 7)})
+    return WeekdayCalendar(holidays={date(2026, 9, 7)}, range_error=dec.CalendarRangeError)
 
 
 _FRESHNESS_CASES = [
