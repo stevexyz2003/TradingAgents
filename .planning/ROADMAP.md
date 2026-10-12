@@ -42,7 +42,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 | Phase | Anforderungen | Status |
 |---|---|---|
 | 1. Konto-Messung | 2 | abgeschlossen |
-| 2. Verbindung & Kontolesen | 12 | abgeschlossen, 4 UAT-Punkte offen |
+| 2. Verbindung & Kontolesen | 12 | abgeschlossen |
 | 3. Symbol & Handelszeiten | 7 | offen |
 | 4. Entscheidung & Trockenlauf | 16 | offen |
 | 5. Leitplanken | 15 | offen |

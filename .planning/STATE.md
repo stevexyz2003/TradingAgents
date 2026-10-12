@@ -2,51 +2,38 @@
 gsd_state_version: 1.0
 milestone: M2
 milestone_name: IBKR Paper Execution
-status: human_needed
-last_updated: "2026-10-12T14:36:02.000Z"
-last_activity: 2026-10-12 -- Phase 2: Code-Review (9/9 Befunde gefixt) + Verifikation (human_needed, 4 UAT-Punkte offen)
+status: ready_to_plan
+last_updated: 2026-10-12T15:15:01.247Z
+last_activity: 2026-10-12 -- Phase 2 abgeschlossen (Verifikation passed, UAT complete)
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 6
   completed_plans: 6
   percent: 25
+stopped_at: Phase 2 complete (6/6) — ready to discuss Phase 3
 ---
 
 # Project State — TradingEngineX (TradingAgents)
 
-**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 68 Anforderungen, Phasen 1–2 abgeschlossen (Gate G1 zu seit 8f4b6ea), UAT von Phase 2 offen (4 Punkte)
+**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 68 Anforderungen, Phasen 1–2 abgeschlossen (Gate G1 zu seit 8f4b6ea), Phase 3 als Nächstes
 **Vorgänger:** Produktionsreife v0.2.x → v0.2.5 — **abgeschlossen 2026-10-11** (siehe [MILESTONE.md](./MILESTONE.md)); bewusst offen geblieben: P2 #6 Observability (von M2 Phase 8 teilweise mitbedient) und P2 #8 Provider-Ausfall-Policy
 **Branch:** main
 
 ## Current Position
 
-Phase: 2 (Verbindung, Paper-Guard und Kontolesen) — AUSGEFÜHRT + REVIEWED, UAT offen
-Plan: 6 of 6
-**Nächster Schritt: die vier offenen Punkte aus `02-HUMAN-UAT.md` abarbeiten.
-K1 und K7 gehen in einem Lauf (braucht das Paper-Gateway, ca. 0,13 $ LLM); dazu
-REQ-IBKR-67 (Link-Codes 1100/1101/1102/1300/2110 am echten Gateway messen oder
-begründeter Override) und die Gateway-Einstellung „Allow connections from
-localhost only“. Erst danach Phase 3 planen.**
-Alle 6 Pläne in 5 Wellen sind ausgeführt und committet, je mit SUMMARY
-(`.planning/phases/02-verbindung-paper-guard-und-kontolesen/`).
-Der Code-Review (`02-REVIEW.md`, 13 Dateien) fand 9 Befunde; CR-01, CR-02 und
-WR-01..07 sind alle korrigiert (`02-REVIEW-FIX.md`, `status: all_fixed`,
-a1e4283..fdee790 — Arbeit in einem isolierten Worktree, `main` per Fast-Forward
-nachgezogen, kein Lauf erreichte Gateway oder LLM).
-Die Verifikation (`02-VERIFICATION.md`) steht auf `human_needed`: 6 von 8
-Roadmap-Kriterien sind verifiziert, K1 und K7 sind real nur mit dem Code-Stand
-**vor** den Fixes belegt. Seit CR-02 verlangt der Preflight ein frisches `as_of`
-im Portfolio-JSON — genau das fehlt der echten Datei vom 2026-10-12 13:26, die
-Kette muss nach den Fixes also einmal echt laufen.
-Beide Operator-Checkpoints aus der Ausführung sind freigegeben: Read-Only an +
-echter `account`-Lauf gegen DUQ634065 (02-05) und echter Paper-Lauf mit
-`--portfolio` (02-06: AAPL Hold, 0,1307 $, `Cash available: 1.005.459,44 EUR`
-im Report).
+Phase: 3
+Plan: Not started
+**Nächster Schritt: M2 Phase 3 — Symbol-Auflösung, Handelbarkeit und Handelszeiten
+(`/gsd:discuss-phase 3` oder direkt `/gsd:plan-phase 3`).**
+Phase 2 ist abgeschlossen: 6/6 Pläne, Code-Review mit 9/9 behobenen Befunden
+(`02-REVIEW-FIX.md`), Verifikation `passed` (8/8 Kriterien, REQ-IBKR-67 per
+Operator-Override bis Phase 8 K6), UAT `complete` (`02-HUMAN-UAT.md`).
 Wichtigster Recherchebefund bleibt: `readonly=True` sperrt in `ib_async` 2.1.0
-**keine** Orders — die Schreibsperre baut der Adapter selbst auf `ib.client`.
+**keine** Orders, die Schreibsperre baut der Adapter selbst auf `ib.client`
+(Methoden- und Drahtebene).
 
-Last activity: 2026-10-12 -- Phase 2: Code-Review (9/9 Befunde gefixt) + Verifikation (human_needed, 4 UAT-Punkte offen)
+Last activity: 2026-10-12 - **M2 Phase 2 abgeschlossen.** Das Kommando `scripts/ibkr_executor.py account` liest `DUQ634065` read-only (clientId 20001, exakter Paper-Guard, Timeout auf jedem Aufruf) und schreibt ein `PortfolioContext`-JSON mit `as_of`; `daily_paper_run.py --portfolio` lehnt veraltete Dateien ab. Nach den Review-Fixes am echten System belegt (16:34 lokal, `account` Exit 0, danach Paper-Lauf AAPL Hold für 0,13 $ mit Portfolio-Block im Report). 1553 Tests grün (bekannter Windows-Fehlschlag `test_yfinance_keeps_its_cache_out_of_the_users_home`). Nebenbefunde: Das OpenAI-**API**-Guthaben der Org `scharfe-gmbh` ist leer (getrennt vom ChatGPT-Abo), lokale Läufe sind deshalb in `.env` auf Anthropic gepinnt wie das CI (0178678); lokal laufen yfinance und SEC EDGAR wegen des SSL-Problems der Maschine auf Fallback-Quellen; „Allow connections from localhost only“ ist im Gateway gesetzt. Neu in REQUIREMENTS: REQ-IBKR-61..68 aus dem Sicherungsprinzip `261012-ap2`.
 
 Davor: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
 
