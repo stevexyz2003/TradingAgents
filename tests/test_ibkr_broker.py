@@ -10,12 +10,20 @@ import inspect
 import logging
 import re
 import time
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
 
 from tests import ibkr_fakes
-from tests.ibkr_fakes import FakeIB, account_value, make_handles, position
+from tests.ibkr_fakes import (
+    FakeIB,
+    account_value,
+    contract_detail,
+    make_handles,
+    position,
+    stk_contract,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -653,6 +661,129 @@ def test_positions_settles_the_socket_before_it_trusts_the_snapshot(loop):
 def test_positions_when_not_connected(loop):
     with pytest.raises(broker.GatewayUnavailable) as info:
         broker.IbkrBroker("127.0.0.1", 7497, loop=loop).positions()
+    assert (info.value.state, info.value.code) == ("NOT_CONNECTED", 504)
+
+
+# --- contract resolution: search_contract and contract_details ------------------------
+
+
+@dataclass(frozen=True)
+class Spec:
+    symbol: str = "AAPL"
+    sec_type: str = "STK"
+    exchange: str = "SMART"
+    currency: str = "USD"
+    primary_exchange: str = ""
+
+
+def test_search_contract_one_match(loop):
+    fake = FakeIB(qualify={"AAPL": [stk_contract("AAPL", 265598)]})
+    (info,) = _connected(fake, loop).search_contract(Spec())
+    assert isinstance(info, broker.ContractInfo)
+    assert (info.con_id, info.symbol, info.sec_type) == (265598, "AAPL", "STK")
+    assert (info.primary_exchange, info.currency) == ("NASDAQ", "USD")
+    assert (info.local_symbol, info.trading_class) == ("AAPL", "NMS")
+    assert info.valid_exchanges == info.order_types == info.time_zone_id == ""
+    assert info.liquid_hours == info.trading_hours == ""
+
+
+def test_search_contract_no_match(loop):
+    assert _connected(FakeIB(), loop).search_contract(Spec("ZZZZ")) == ()
+
+
+def test_search_contract_many_matches(loop):
+    hits = [stk_contract("ES", 1000 + i) for i in range(21)]
+    result = _connected(FakeIB(qualify={"ES": hits}), loop).search_contract(Spec("ES"))
+    assert len(result) == 21
+    assert {r.con_id for r in result} == {1000 + i for i in range(21)}
+
+
+def test_search_contract_builds_a_fresh_contract_per_call(loop):
+    fake = FakeIB(qualify={"AAPL": [stk_contract("AAPL", 265598)]})
+    adapter = _connected(fake, loop)
+    spec = Spec(primary_exchange="NASDAQ")
+    adapter.search_contract(spec)
+    adapter.search_contract(spec)
+    assert spec == Spec(primary_exchange="NASDAQ")
+    assert len(fake.qualify_calls) == 2
+    for sent, return_all in fake.qualify_calls:
+        assert return_all is True
+        assert sent.conId == 0
+        assert (sent.symbol, sent.secType, sent.exchange) == ("AAPL", "STK", "SMART")
+        assert (sent.currency, sent.primaryExchange) == ("USD", "NASDAQ")
+
+
+def test_contract_details_maps_session_fields(loop):
+    contract = stk_contract("AAPL", 265598)
+    detail = contract_detail(contract, liquid_hours="20261012:0930-1600", long_name="APPLE INC")
+    fake = FakeIB(details={265598: [detail]})
+    (info,) = _connected(fake, loop).contract_details(265598, "SMART")
+    assert info.con_id == 265598
+    assert info.valid_exchanges == "SMART,NASDAQ,ARCA"
+    assert info.order_types == "ACTIVETIM,LMT,MKT,STP"
+    assert info.time_zone_id == "US/Eastern"
+    assert info.liquid_hours == "20261012:0930-1600"
+    assert info.long_name == "APPLE INC"
+    (sent,) = fake.details_calls
+    assert (sent.conId, sent.exchange) == (265598, "SMART")
+
+
+def test_contract_details_unknown_con_id(loop):
+    assert _connected(FakeIB(), loop).contract_details(1, "SMART") == ()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "call"),
+    [
+        ({"qualify": "hang"}, lambda a: a.search_contract(Spec())),
+        ({"details": "hang"}, lambda a: a.contract_details(265598, "SMART")),
+    ],
+    ids=["search", "details"],
+)
+def test_resolution_request_timeout(loop, kwargs, call):
+    adapter = _connected(FakeIB(**kwargs), loop)
+    started = time.monotonic()
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        call(adapter)
+    assert time.monotonic() - started < 1.0
+    assert info.value.state == "REQUEST_TIMEOUT"
+
+
+_READS = [
+    ("qualify", lambda a: a.search_contract(Spec())),
+    ("contract_details", lambda a: a.contract_details(265598, "SMART")),
+]
+
+
+@pytest.mark.parametrize(("where", "call"), _READS, ids=["search", "details"])
+def test_resolution_refuses_to_read_while_a_link_is_open(loop, where, call):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    adapter._on_error(-1, 1100, "lost", None)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        call(adapter)
+    assert info.value.state == "CONNECTIVITY_LOST"
+    assert where not in fake.calls
+
+
+@pytest.mark.parametrize(("where", "call"), _READS, ids=["search", "details"])
+def test_resolution_discards_an_answer_with_a_link_event_inside(loop, where, call):
+    fake = FakeIB(
+        qualify={"AAPL": [stk_contract("AAPL", 265598)]},
+        details={265598: [contract_detail(stk_contract("AAPL", 265598))]},
+        emit_during={where: [(-1, 1100, "lost", None)]},
+    )
+    adapter = _connected(fake, loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        call(adapter)
+    assert (info.value.state, info.value.code) == ("CONNECTIVITY_LOST", 1100)
+
+
+@pytest.mark.parametrize(("where", "call"), _READS, ids=["search", "details"])
+def test_resolution_when_not_connected(loop, where, call):
+    adapter = broker.IbkrBroker("127.0.0.1", 7497, loop=loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        call(adapter)
     assert (info.value.state, info.value.code) == ("NOT_CONNECTED", 504)
 
 

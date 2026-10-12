@@ -125,7 +125,7 @@ def test_adapter_has_at_most_ten_public_methods():
         if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and not n.name.startswith("_")
     }
     assert len(public) <= 10
-    assert public == {"connect", "positions", "health"}
+    assert public == {"connect", "positions", "health", "search_contract", "contract_details"}
 
 
 @pytest.mark.unit
