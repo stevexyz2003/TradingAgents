@@ -275,3 +275,48 @@ reqCompletedOrders(apiOnly=False) -> 0
 
 === ENDE - nichts platziert, Verbindung getrennt ================
 ```
+
+## whatIf-Vorschau und Read-Only-Schalter (Phase 4, D-14) — 2026-10-12
+
+Gemessen am echten Paper-Gateway 10.50.1 (`127.0.0.1:7497`, Konto `DUQ634065`) über
+`IbkrBroker.preview_order` mit einer Wegwerf-Sonde (liegt im Scratchpad, nicht im Repo).
+Vorab liefen die Barrier-Tests grün (`whatif_barrier or place_order_refused or preview`:
+37 passed); die Sperre aus 04-02 (Id 3 nur als STK-whatIf) war damit aktiv.
+
+### Messung 1: Schalter aus
+
+Zustand: „Read-Only API" im Gateway **aus** (Stand 2026-10-11 20:27, Operator-Messung oben).
+
+Aufruf: `preview_order(con_id=265598, symbol="AAPL", sec_type="STK", currency="USD",
+primary_exchange="NASDAQ", action="BUY", quantity=1)`; Dauer 0,79 s.
+
+```text
+state             = OK
+initMarginChange  = 100.86     (Kontowährung EUR)
+maintMarginChange = 91.69
+commission        = 1.000003
+commissionCurrency= USD        (Instrumentwährung)
+effective_tif     = DAY        (gesendet: DAY)
+warningText       = ''         (leer)
+errors            = []
+```
+
+Bewertung:
+
+- **A2 (warningText):** bleibt bei dieser Vorschau leer; kein Warntext trotz geschlossener
+  Börse (Montag, vor Handelsbeginn der Regulärzeit). Kein Fehler, kein Sondercode.
+- **A3 (tif-Echo):** Das Echo liefert `DAY`, gleich dem gesendeten Wert; `TIF_OVERRIDDEN`
+  trat nicht auf. Das Zurücklesen des tif aus dem Echo funktioniert.
+- **A4 (Contract-Felder):** conId 265598, STK, USD, primary NASDAQ reichen dem Gateway für
+  eine vollständige Vorschau; keine Nachfrage, keine Fehlermeldung.
+- **Plausibilität:** Margin pro Stück ≈ 100,9 EUR gegenüber ≈ 99,7 EUR pro Stück in
+  Befund 4 des Marktdaten-Befunds (997,14 EUR für 10 Stück); Kommission 1,000003 USD
+  entspricht dem Mindestwert von 1,00003 USD dort. Die Größenordnung stimmt.
+
+Nachweis „nichts gesendet":
+
+- `open_orders(265598)` vorher: leer; nachher: leer.
+- Positionen vorher: 0; nachher: 0 (unverändert).
+- Sonden-Log (188 Zeilen): keine Treffer für `orderStatus`, `execDetails`,
+  `ReadOnlyViolation`; einzige Previewzeile: `state=OK init_margin=100.86
+  commission=1.000003 tif sent=DAY effective=DAY`.
