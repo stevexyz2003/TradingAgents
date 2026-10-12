@@ -30,6 +30,19 @@ Features from the former `v0.2.5-tex` strand, ported onto upstream v0.6.0.
   build artifact, and commit the decision log to the `paper-log` branch so
   realized return and alpha accumulate across days. Operating manual in
   `scripts/PAPER_RUN.md`.
+- **Opt-in Jev (TypeSafe) fallback and shadow classification**: off by
+  default. With `TRADINGAGENTS_JEV_ENABLED=true` and `JEV_API_KEY` set,
+  `record_decision` sends the decision, research plan, trader proposal and
+  sentiment report (never portfolio/account data) to Jev in one request per
+  ticker. A `REVIEW` rating is replaced only by a Jev tier at confidence
+  >= `jev_min_confidence` (0.9) and marked `final_rating_source="jev"`; the
+  research recommendation, trader action and sentiment band are compared in
+  shadow mode only (`final_state["jev"]`, sidecar `jev_review_<date>.json`,
+  paper-run record). Failures never affect a run. The call is synchronous:
+  `jev_timeout` (5 s) per attempt with at most one retry after 1 s, so a
+  degraded Jev adds at most ~11 s per ticker. Jev cost (~$0.0002-0.0004 per
+  ticker) is not counted by `max_cost_per_run`. `JEV_API_KEY` is deliberately
+  separate from `TYPESAFE_API_KEY`, which turns on upstream post screening.
 
 ### Fixed
 
