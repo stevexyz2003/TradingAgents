@@ -99,6 +99,16 @@ def test_key_comes_only_from_jev_api_key(monkeypatch):
     assert client.get_api_key() == FAKE_KEY
 
 
+@pytest.mark.unit
+def test_key_loses_a_bom_and_surrounding_whitespace(monkeypatch):
+    # Seen in the paper run: a secret piped in from PowerShell began with U+FEFF,
+    # and the request failed encoding the Authorization header.
+    monkeypatch.setenv("JEV_API_KEY", "﻿" + FAKE_KEY + "\r\n")
+    assert client.get_api_key() == FAKE_KEY
+    monkeypatch.setenv("JEV_API_KEY", " ﻿ ")
+    assert client.get_api_key() is None
+
+
 # ------------------------------------------------------------------ transport
 def _http_error(code, body=b'{"error": {"message": "nope"}}'):
     return urllib.error.HTTPError(client.ENDPOINT, code, "err", {}, io.BytesIO(body))

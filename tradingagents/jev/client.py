@@ -35,8 +35,12 @@ class JevError(Exception):
 
 
 def get_api_key() -> str | None:
-    """The Jev key from ``JEV_API_KEY``, or None when unset or empty."""
-    return os.environ.get(ENV_VAR) or None
+    """The Jev key from ``JEV_API_KEY``, or None when unset or empty.
+
+    A byte-order mark or whitespace around it (as a secret piped in from a
+    shell can carry) is stripped: an HTTP header cannot hold a BOM.
+    """
+    return (os.environ.get(ENV_VAR) or "").strip().lstrip("﻿").strip() or None
 
 
 def redact(text, key: str | None = None) -> str:
