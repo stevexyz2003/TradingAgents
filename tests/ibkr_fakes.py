@@ -179,24 +179,30 @@ class FakeIB:
             return []
         return [SimpleNamespace(contract=FakeContract(conId=contract.conId))]
 
-    # Phase 2 reads fresh and never touches orders; any of these is a bug.
+    # Phase 2 reads fresh and never touches orders; any of these is a bug. Each
+    # one is recorded before it raises, so a check over ``calls`` can see it even
+    # when the adapter swallows the AssertionError (REQ-IBKR-66).
+    def _forbidden(self, name, why=""):
+        self.calls.append(name)
+        raise AssertionError(f"phase 2 must not call {name}{why}")
+
     def positions(self):
-        raise AssertionError("phase 2 must not call positions() (library cache)")
+        self._forbidden("positions()", " (library cache)")
 
     def reqAllOpenOrders(self, *a, **k):
-        raise AssertionError("phase 2 must not call reqAllOpenOrders")
+        self._forbidden("reqAllOpenOrders")
 
     def reqCompletedOrders(self, *a, **k):
-        raise AssertionError("phase 2 must not call reqCompletedOrders")
+        self._forbidden("reqCompletedOrders")
 
     def reqExecutions(self, *a, **k):
-        raise AssertionError("phase 2 must not call reqExecutions")
+        self._forbidden("reqExecutions")
 
     def whatIfOrder(self, *a, **k):
-        raise AssertionError("phase 2 must not call whatIfOrder")
+        self._forbidden("whatIfOrder")
 
     def placeOrder(self, *a, **k):
-        raise AssertionError("phase 2 must not call placeOrder")
+        self._forbidden("placeOrder")
 
 
 def make_handles(fake):

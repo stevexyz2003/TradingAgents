@@ -65,6 +65,42 @@ def test_write_barrier_is_armed_before_connect(loop):
     assert not any(call in fake.calls for call in FORBIDDEN_CALLS)
 
 
+def test_forbidden_call_check_sees_an_ib_level_write():
+    # Negative control for the FORBIDDEN_CALLS assertions (WR-05): a write on the
+    # IB object lands in ``calls`` even though the fake raises.
+    fake = FakeIB()
+    for name in ("whatIfOrder", "placeOrder"):
+        with pytest.raises(AssertionError):
+            getattr(fake, name)()
+    assert [call for call in fake.calls if call in FORBIDDEN_CALLS] == [
+        "whatIfOrder",
+        "placeOrder",
+    ]
+
+
+class _WritesDuringConnect(FakeIB):
+    async def connectAsync(self, *args, **kwargs):
+        await super().connectAsync(*args, **kwargs)
+        self.client.placeOrder(1, None, None)
+
+
+def test_forbidden_call_check_sees_a_client_write_without_the_barrier(loop, monkeypatch):
+    # Without the barrier the client recorder runs, and the check over ``calls``
+    # trips: proof that the assertion in the guard tests can fail.
+    monkeypatch.setattr(broker, "_arm_write_barrier", lambda client: None)
+    fake = _WritesDuringConnect()
+    _connected(fake, loop)
+    assert any(call in fake.calls for call in FORBIDDEN_CALLS)
+
+
+def test_client_write_during_connect_is_refused_with_the_barrier(loop):
+    fake = _WritesDuringConnect()
+    with pytest.raises(broker.ReadOnlyViolation):
+        _broker(fake, loop).connect()
+    assert not any(call in fake.calls for call in FORBIDDEN_CALLS)
+    assert "disconnect" in fake.calls
+
+
 def test_write_barrier_on_the_real_client_object():
     ib_async = pytest.importorskip("ib_async")
     ib = ib_async.IB()
@@ -124,8 +160,26 @@ def test_write_barrier_lets_read_messages_through():
         ["DU0000001"],  # foreign account
         ["DUQ634065", "DU0000001"],  # superset: not exactly the paper account
         [],  # empty
+        # Pin the exact list comparison (WR-05): a set comparison, a case fold,
+        # a strip or a prefix match would each let one of these through.
+        ["DUQ634065", "DUQ634065"],
+        ["duq634065"],
+        [" DUQ634065"],
+        ["DUQ634065 "],
+        ["DUQ6340650"],
+        ["DUQ63406"],
     ],
-    ids=["foreign", "superset", "empty"],
+    ids=[
+        "foreign",
+        "superset",
+        "empty",
+        "duplicate",
+        "lower",
+        "lead-space",
+        "trail-space",
+        "longer",
+        "prefix",
+    ],
 )
 def test_guard_rejects_anything_but_the_paper_account(loop, accounts):
     fake = FakeIB(accounts=accounts)
