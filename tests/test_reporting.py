@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.portfolio import PortfolioContext, Position
 from tradingagents.reporting import write_report_tree
 
 
@@ -133,3 +134,25 @@ def test_the_header_names_the_analysts_as_users_select_them(tmp_path):
     page = (tmp_path / "complete_report.html").read_text(encoding="utf-8")
     fields = re.findall(r'<span class="field">([^<]*)</span>', page)
     assert {"market", "sentiment", "news"} <= set(fields) and "social" not in page
+
+
+@pytest.mark.unit
+def test_report_shows_portfolio_block_when_present(tmp_path):
+    book = PortfolioContext(cash=1000.0, currency="EUR",
+                            positions=[Position(ticker="AAPL", quantity=10, average_price=150.0)])
+    state = {**_state(), "portfolio_context": book.render("AAPL")}
+    text = write_report_tree(state, "AAPL", tmp_path).read_text(encoding="utf-8")
+    assert "Portfolio at the analysis date:" in text
+    assert "Current position in AAPL" in text
+    assert "Cash available: 1,000.00 EUR" in text
+    block = text.index("Portfolio at the analysis date:")
+    assert text[:block].endswith("\n\n")  # blank line before the block
+    assert block > text.rindex("- Generated:")  # after the header lines
+    assert block < text.index("## I.")  # before the first section
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("extra", [{}, {"portfolio_context": ""}])
+def test_report_has_no_portfolio_block_without_context(tmp_path, extra):
+    text = write_report_tree({**_state(), **extra}, "AAPL", tmp_path).read_text(encoding="utf-8")
+    assert "Portfolio at the analysis date" not in text
