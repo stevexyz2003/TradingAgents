@@ -92,7 +92,7 @@ def test_log_entries_roundtrip_with_memory_log(tmp_path):
 def test_log_entries_ratings_mirror_rating_module():
     from tradingagents.agents import rating
 
-    assert dec.RATINGS_5 == tuple(rating.RATINGS_5_TIER)
+    assert tuple(rating.RATINGS_5_TIER) == dec.RATINGS_5
     assert dec.REVIEW == rating.RATING_REVIEW
 
 
