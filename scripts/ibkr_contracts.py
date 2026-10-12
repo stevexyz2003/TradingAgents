@@ -504,3 +504,287 @@ def commit_contracts(
                 log.exception("could not record the aborted history lines")
         temp.unlink(missing_ok=True)
         raise
+
+
+# --- resolver ----------------------------------------------------------------------------
+
+
+class AnchorMismatch(Exception):
+    """The anchor ticker did not resolve to the expected contract id (D-13)."""
+
+    def __init__(self, expected: int | None, seen: int | None):
+        self.expected = expected
+        self.seen = seen
+        super().__init__(
+            f"anchor {ANCHOR_TICKER}: expected conId={expected}, got "
+            f"{'nothing' if seen is None else f'conId={seen}'}; nothing may be written"
+        )
+
+
+@dataclass(frozen=True)
+class ResolveResult:
+    ticker: str
+    state: str
+    detail: str
+    identity: Identity | None = None
+    trading_class: str = ""
+    long_name: str = ""
+    window: SessionWindow | None = None
+    next_open: datetime | None = None
+
+    @property
+    def rejected(self) -> bool:
+        return self.state in REJECTED_STATES
+
+
+@dataclass(frozen=True)
+class ResolveOutcome:
+    results: tuple[ResolveResult, ...]
+    contracts: Mapping[str, StoredContract]
+    events: tuple[HistoryEvent, ...]
+
+    @property
+    def rejected(self) -> bool:
+        return any(r.rejected for r in self.results)
+
+
+MODE_RUN = "run"
+MODE_INIT = "init"
+MODE_REBASELINE = "rebaseline"
+
+
+def needs_broker(tickers: Sequence[str]) -> bool:
+    """True when at least one ticker survives the local checks and needs the gateway."""
+    return any(classify(t).state == OK for t in tickers)
+
+
+def _fmt(identity: Identity) -> str:
+    return (
+        f"conId={identity.con_id}/primaryExchange={identity.primary_exchange}"
+        f"/currency={identity.currency}/localSymbol={identity.local_symbol}"
+    )
+
+
+def _candidate_line(cands) -> str:
+    return ", ".join(
+        f"conId={x.con_id}/primaryExchange={x.primary_exchange}/localSymbol={x.local_symbol}"
+        f"/currency={x.currency}/tradingClass={x.trading_class}"
+        for x in cands
+    )
+
+
+def _log_state(logger: logging.Logger, level: int, state: str, detail: str) -> None:
+    logger.log(level, 'ibkr-state=%s code=- detail="%s"', state, detail)
+
+
+def _search_key_diff(spec: ContractSpec, cand) -> tuple[str, ...]:
+    pairs = [
+        ("symbol", spec.symbol, cand.symbol),
+        ("secType", spec.sec_type, cand.sec_type),
+        ("currency", spec.currency, cand.currency),
+    ]
+    if spec.primary_exchange:
+        pairs.append(("primaryExchange", spec.primary_exchange, cand.primary_exchange))
+    return tuple(name for name, want, got in pairs if want != got)
+
+
+def resolve_all(
+    tickers: Sequence[str],
+    *,
+    contracts: Mapping[str, StoredContract] | None,
+    broker,
+    now_utc: datetime,
+    logger: logging.Logger,
+    mode: str = MODE_RUN,
+    rebaseline: str | None = None,
+    anchor_con_id: int | None = None,
+) -> ResolveOutcome:
+    """Run the decision chain for every ticker; no file access, no clock, no library.
+
+    Chain per ticker: table mapping, allow-list, identity (learn or check against the
+    persisted contract), tradability, session. The caller passes ``now_utc`` and the
+    broker (duck-typed: ``search_contract`` and ``contract_details``). Nothing is
+    written here; the outcome carries the contracts and history events to persist
+    after the gateway session ends. Phase 4 calls this function directly (D-30).
+
+    A drift is reported per ticker and never repaired: the stored identity stays
+    untouched unless ``mode == "rebaseline"`` names exactly that ticker (D-16, D-17).
+    """
+    if mode not in (MODE_RUN, MODE_INIT, MODE_REBASELINE):
+        raise ValueError(f"unknown mode {mode!r}")
+    if contracts is None and mode != MODE_INIT:
+        raise ValueError("contracts may only be None in init mode")
+    work: dict[str, StoredContract] = dict(contracts or {})
+    results: list[ResolveResult] = []
+    events: list[HistoryEvent] = []
+    at = now_utc.isoformat()
+
+    for ticker in dict.fromkeys(tickers):
+        verdict = classify(ticker)
+        if verdict.state != OK:
+            _log_state(logger, logging.WARNING, "TICKER_REJECTED", verdict.detail)
+            results.append(ResolveResult(ticker, verdict.state, verdict.detail))
+            continue
+        if broker is None:
+            raise ValueError("a broker is required for tickers that pass the local checks")
+        spec = verdict.spec
+        learn = (
+            mode == MODE_INIT
+            or ticker not in work
+            or (mode == MODE_REBASELINE and ticker == rebaseline)
+        )
+
+        def reject(state, detail, level, log_state=None, ticker=ticker):
+            _log_state(logger, level, log_state or state.upper().replace("-", "_"), detail)
+            results.append(ResolveResult(ticker, state, detail))
+
+        if learn:
+            cands = broker.search_contract(spec)
+            if not cands:
+                reject(NOT_FOUND, f"ticker={ticker} the search returned no contract", logging.ERROR)
+                continue
+            if len(cands) > 1:
+                reject(
+                    AMBIGUOUS,
+                    f"ticker={ticker} candidates=[{_candidate_line(cands)}]",
+                    logging.ERROR,
+                    "AMBIGUOUS_CONTRACT",
+                )
+                continue
+            cand = cands[0]
+            bad = _search_key_diff(spec, cand)
+            if bad:
+                reject(
+                    DRIFT,
+                    f"ticker={ticker} the match differs from the search key in {', '.join(bad)}",
+                    logging.ERROR,
+                    "CONTRACT_DRIFT",
+                )
+                continue
+            found = broker.contract_details(cand.con_id, spec.exchange)
+            if len(found) != 1:
+                reject(
+                    NOT_FOUND,
+                    f"ticker={ticker} conId={cand.con_id} returned {len(found)} detail rows",
+                    logging.ERROR,
+                )
+                continue
+            detail_info = found[0]
+            diff = identity_diff(identity_of(cand), identity_of(detail_info))
+            if diff:
+                reject(
+                    DRIFT,
+                    f"ticker={ticker} search and details disagree in {', '.join(diff)}",
+                    logging.ERROR,
+                    "CONTRACT_DRIFT",
+                )
+                continue
+            identity = identity_of(detail_info)
+            previous = work.get(ticker)
+            if mode == MODE_INIT:
+                kind, reason = "init", "resolve --init"
+            elif mode == MODE_REBASELINE and ticker == rebaseline:
+                kind, reason = "rebaseline", "resolve --rebaseline"
+            else:
+                kind, reason = "learn", "first run in an existing contracts file"
+            old = previous.identity if (kind == "rebaseline" and previous) else None
+            work[ticker] = StoredContract(identity, at)
+            events.append(HistoryEvent(kind, ticker, old, identity, reason, at))
+            if kind == "rebaseline":
+                old_text = _fmt(old) if old else "none"
+                _log_state(
+                    logger,
+                    logging.WARNING,
+                    "CONTRACT_REBASELINED",
+                    f"ticker={ticker} old={old_text} new={_fmt(identity)}",
+                )
+            else:
+                _log_state(
+                    logger,
+                    logging.INFO,
+                    "CONTRACT_LEARNED",
+                    f"ticker={ticker} learned conId={identity.con_id} "
+                    f"primaryExchange={identity.primary_exchange} currency={identity.currency} "
+                    f"localSymbol={identity.local_symbol} tradingClass={detail_info.trading_class} "
+                    f"longName={detail_info.long_name}",
+                )
+        else:
+            stored = work[ticker].identity
+            found = broker.contract_details(stored.con_id, spec.exchange)
+            cands = broker.search_contract(spec)
+            drift_detail = None
+            if len(found) != 1:
+                drift_detail = (
+                    f"ticker={ticker} fields=conId stored={_fmt(stored)} "
+                    "seen=none (persisted conId unknown to the gateway)"
+                )
+            elif not cands:
+                reject(NOT_FOUND, f"ticker={ticker} the search returned no contract", logging.ERROR)
+                continue
+            elif len(cands) > 1:
+                reject(
+                    AMBIGUOUS,
+                    f"ticker={ticker} candidates=[{_candidate_line(cands)}]",
+                    logging.ERROR,
+                    "AMBIGUOUS_CONTRACT",
+                )
+                continue
+            elif cands[0].con_id != stored.con_id:
+                drift_detail = (
+                    f"ticker={ticker} fields=conId stored=conId={stored.con_id} "
+                    f"seen=conId={cands[0].con_id} (symbol search points elsewhere)"
+                )
+            else:
+                diff = identity_diff(stored, identity_of(found[0]))
+                if diff:
+                    drift_detail = (
+                        f"ticker={ticker} fields={','.join(diff)} stored={_fmt(stored)} "
+                        f"seen={_fmt(identity_of(found[0]))}"
+                    )
+            if drift_detail:
+                reject(
+                    DRIFT,
+                    f"{drift_detail}; check, then resolve --rebaseline {ticker}",
+                    logging.ERROR,
+                    "CONTRACT_DRIFT",
+                )
+                continue
+            detail_info = found[0]
+            identity = stored
+            if (
+                detail_info.trading_class != cands[0].trading_class
+                or detail_info.long_name != cands[0].long_name
+            ):
+                logger.info(
+                    "ticker=%s tradingClass=%s longName=%s (informational, not compared)",
+                    ticker,
+                    detail_info.trading_class,
+                    detail_info.long_name,
+                )
+
+        why = check_tradable(detail_info.valid_exchanges, detail_info.order_types)
+        if why:
+            reject(NOT_TRADABLE, f"ticker={ticker} {why}", logging.WARNING)
+            continue
+        session = evaluate_session(detail_info.liquid_hours, detail_info.time_zone_id, now_utc)
+        if session.state == SESSION_UNKNOWN:
+            reject(SESSION_UNKNOWN, f"ticker={ticker} {session.detail}", logging.WARNING)
+            continue
+        results.append(
+            ResolveResult(
+                ticker,
+                session.state,
+                session.detail,
+                identity=identity,
+                trading_class=detail_info.trading_class,
+                long_name=detail_info.long_name,
+                window=session.window,
+                next_open=session.next_open,
+            )
+        )
+
+    if mode == MODE_INIT:
+        anchor = work.get(ANCHOR_TICKER)
+        if anchor is None or anchor.identity.con_id != anchor_con_id:
+            raise AnchorMismatch(anchor_con_id, None if anchor is None else anchor.identity.con_id)
+    return ResolveOutcome(tuple(results), MappingProxyType(work), tuple(events))
