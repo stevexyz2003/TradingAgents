@@ -44,9 +44,11 @@ def _validate_trade_date(trade_date) -> str:
 
 
 # Config keys that do not change what a run writes: where it keeps its files,
-# whether it checkpoints, and how often it retries a provider.
+# whether it checkpoints, and how often it retries a provider. The Jev review
+# runs after the graph has finished, so its settings cannot change a checkpoint.
 _NOT_IN_SIGNATURE = frozenset({
     "results_dir", "data_cache_dir", "memory_log_path", "checkpoint_enabled", "llm_max_retries",
+    "jev_enabled", "jev_min_confidence", "jev_timeout",
 })
 
 
