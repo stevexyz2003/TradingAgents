@@ -6,8 +6,11 @@ real paper gateway listens on this machine.
 """
 
 import asyncio
+import inspect
 import logging
+import re
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -149,6 +152,42 @@ def test_write_barrier_lets_read_messages_through():
         client.send(61, 1)
     with pytest.raises(ConnectionError, match="Not connected"):
         client.reqPositions()
+
+
+def test_write_barrier_lets_contract_details_and_market_data_type_through():
+    # A1: the head ids of reqContractDetails (9) and reqMarketDataType (59) pass.
+    sent = []
+    client = SimpleNamespace(send=lambda *f, **k: sent.append(f), sendMsg=lambda *a, **k: None)
+    broker._arm_write_barrier(client)
+    client.send(9, 8, 0)
+    client.send(59, 1, 3)
+    assert [f[0] for f in sent] == [9, 59]
+
+
+def test_contract_details_and_market_data_type_heads_match_the_installed_library():
+    ib_async = pytest.importorskip("ib_async")
+    for name, head in (("reqContractDetails", 9), ("reqMarketDataType", 59)):
+        source = inspect.getsource(getattr(ib_async.client.Client, name))
+        assert re.search(rf"(?:send\(|\[)\s*{head}", source), name
+        assert head not in broker._WRITE_MESSAGE_IDS
+    assert broker._WRITE_MESSAGE_IDS == frozenset({3, 4, 19, 21, 58})
+
+
+# --- delayed market data type ---------------------------------------------------------
+
+
+def test_market_data_type_is_set_once_after_the_guard(loop):
+    fake = FakeIB()
+    _connected(fake, loop)
+    assert fake.calls.count("reqMarketDataType(3)") == 1
+    assert fake.calls.index("reqMarketDataType(3)") > fake.calls.index("connect")
+
+
+def test_market_data_type_is_not_sent_on_a_guard_violation(loop):
+    fake = FakeIB(accounts=("DU999",))
+    with pytest.raises(broker.AccountGuardViolation):
+        _broker(fake, loop).connect()
+    assert not any(c.startswith("reqMarketDataType") for c in fake.calls)
 
 
 # --- paper guard -----------------------------------------------------------------------
@@ -301,6 +340,8 @@ def test_other_connect_failures_map_to_named_states(loop, refuse, state, code):
         (10015, "TRADING_NOT_ALLOWED"),
         (10089, "MARKET_DATA_NOT_SUBSCRIBED"),
         (10090, "MARKET_DATA_NOT_SUBSCRIBED"),
+        (10167, "MARKET_DATA_DELAYED"),
+        (200, "CONTRACT_NOT_FOUND"),
         (2172, "GATEWAY_VERSION_EXPIRING"),
         (99999, "UNKNOWN"),
     ],
@@ -318,6 +359,30 @@ def test_farm_ok_codes_log_at_info(loop, caplog, code):
     (record,) = caplog.records
     assert record.levelno == logging.INFO
     assert f"ibkr-state=FARM_OK code={code}" in record.getMessage()
+
+
+@pytest.mark.parametrize(
+    ("code", "label"),
+    [
+        (10089, "MARKET_DATA_NOT_SUBSCRIBED"),
+        (10090, "MARKET_DATA_NOT_SUBSCRIBED"),
+        (10167, "MARKET_DATA_DELAYED"),
+    ],
+)
+def test_market_data_codes_log_at_info(loop, caplog, code, label):
+    adapter = _broker(FakeIB(), loop)
+    with caplog.at_level(logging.INFO, logger="ibkr_broker"):
+        adapter._on_error(-1, code, "delayed market data", None)
+    (record,) = caplog.records
+    assert record.levelno == logging.INFO
+    assert f"ibkr-state={label} code={code}" in record.getMessage()
+    assert not adapter.link_lost
+    assert not adapter.server_link_broken
+    assert not adapter.port_changed
+
+
+def test_halt_code_is_not_mapped_before_measurement():
+    assert 154 not in broker.STATE_BY_CODE
 
 
 def test_other_codes_log_at_warning(loop, caplog):

@@ -6,6 +6,7 @@ Windows, so the IBKR test modules also block the client library's connect.
 """
 
 import asyncio
+import copy
 import importlib.util
 import sys
 from dataclasses import dataclass
@@ -61,6 +62,54 @@ class FakeContract:
     secType: str = "STK"
     localSymbol: str = ""
     currency: str = "USD"
+    exchange: str = ""
+    primaryExchange: str = ""
+    tradingClass: str = ""
+
+
+def stk_contract(
+    symbol,
+    con_id,
+    primary_exchange="NASDAQ",
+    currency="USD",
+    local_symbol=None,
+    trading_class="NMS",
+    exchange="SMART",
+    sec_type="STK",
+):
+    """A contract row as the client library reports a qualified match."""
+    return FakeContract(
+        conId=con_id,
+        symbol=symbol,
+        secType=sec_type,
+        localSymbol=symbol if local_symbol is None else local_symbol,
+        currency=currency,
+        exchange=exchange,
+        primaryExchange=primary_exchange,
+        tradingClass=trading_class,
+    )
+
+
+def contract_detail(
+    contract,
+    *,
+    valid_exchanges="SMART,NASDAQ,ARCA",
+    order_types="ACTIVETIM,LMT,MKT,STP",
+    time_zone_id="US/Eastern",
+    liquid_hours="",
+    trading_hours="",
+    long_name="",
+):
+    """A ContractDetails row as the client library reports it."""
+    return SimpleNamespace(
+        contract=contract,
+        longName=long_name,
+        validExchanges=valid_exchanges,
+        orderTypes=order_types,
+        timeZoneId=time_zone_id,
+        liquidHours=liquid_hours,
+        tradingHours=trading_hours,
+    )
 
 
 def position(account, symbol, quantity, avg_cost=100.0, **contract):
@@ -94,6 +143,8 @@ class FakeIB:
         summary=None,
         probe="ok",
         emit_during=None,
+        qualify=None,
+        details=None,
     ):
         self.accounts = list(accounts)
         self.refuse = refuse
@@ -104,6 +155,12 @@ class FakeIB:
         self._positions = [] if positions is None else positions
         self._summary = [account_value("TotalCashValue", "1000.0")] if summary is None else summary
         self.probe = probe
+        #: symbol -> matching FakeContracts (or "hang") for qualifyContractsAsync
+        self.qualify = dict(qualify) if isinstance(qualify, dict) else (qualify or {})
+        #: conId -> ContractDetails rows (or "hang") for reqContractDetailsAsync
+        self.details = dict(details) if isinstance(details, dict) else (details or {})
+        #: (copy of the contract before mutation, returnAll) per qualify input
+        self.qualify_calls: list = []
         self.calls: list[str] = []
         self.connect_kwargs: dict = {}
         self.connected = False
@@ -170,16 +227,52 @@ class FakeIB:
         rows = list(self.wrapper.acctSummary.values())
         return [v for v in rows if v.account == account] if account else rows
 
-    async def reqContractDetailsAsync(self, contract):
-        self.calls.append("probe")
-        self._emit_during("probe")
-        if self.probe == "hang":
-            await _forever()
-        if self.probe == "empty":
-            return []
-        return [SimpleNamespace(contract=FakeContract(conId=contract.conId))]
+    def reqMarketDataType(self, marketDataType):
+        self.calls.append(f"reqMarketDataType({marketDataType})")
 
-    # Phase 2 reads fresh and never touches orders; any of these is a bug. Each
+    async def qualifyContractsAsync(self, *contracts, returnAll=False):
+        # Modelled on the library (2.1.0): one slot per input; None for no match,
+        # the (mutated) input for one match, a list for several (returnAll only).
+        self.calls.append("qualify")
+        for contract in contracts:
+            self.qualify_calls.append((copy.copy(contract), returnAll))
+        self._emit_during("qualify")
+        if self.qualify == "hang":
+            await _forever()
+        slots = []
+        for contract in contracts:
+            hits = [
+                h
+                for h in self.qualify.get(contract.symbol, [])
+                if h.secType == contract.secType
+            ]
+            if not hits:
+                slots.append(None)
+            elif len(hits) == 1:
+                for field, value in vars(hits[0]).items():
+                    setattr(contract, field, value)
+                slots.append(contract)
+            else:
+                slots.append(list(hits) if returnAll else None)
+        return slots
+
+    async def reqContractDetailsAsync(self, contract):
+        if not contract.exchange:
+            self.calls.append("probe")
+            self._emit_during("probe")
+            if self.probe == "hang":
+                await _forever()
+            if self.probe == "empty":
+                return []
+            return [SimpleNamespace(contract=FakeContract(conId=contract.conId))]
+        self.calls.append("contract_details")
+        self.details_calls = [*getattr(self, "details_calls", []), copy.copy(contract)]
+        self._emit_during("contract_details")
+        if self.details == "hang":
+            await _forever()
+        return list(self.details.get(contract.conId, []))
+
+    # Phase 3 resolution only reads; it never touches orders, any of these is a bug. Each
     # one is recorded before it raises, so a check over ``calls`` can see it even
     # when the adapter swallows the AssertionError (REQ-IBKR-66).
     def _forbidden(self, name, why=""):
