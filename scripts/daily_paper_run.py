@@ -367,6 +367,9 @@ def run_ticker(graph, ticker: str, trade_date: str, out_dir: Path, portfolio=Non
         else:
             final_state, signal = graph.propagate(ticker, trade_date)
         record["signal"] = signal
+        if "jev" in final_state:  # opt-in Jev review; absent keeps records unchanged
+            record["jev"] = final_state["jev"]
+            record["rating_source"] = final_state.get("final_rating_source", "engine")
         record["report"] = str(graph.save_reports(final_state, ticker, out_dir / "reports" / ticker))
     except BudgetExceededError as exc:
         record["status"] = "budget_aborted"

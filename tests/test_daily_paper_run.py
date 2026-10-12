@@ -266,6 +266,22 @@ class TestRunTicker:
         assert record["status"] == "failed"
         assert record["error"] == "RuntimeError: vendor down"
 
+    def test_a_jev_review_is_carried_into_the_record(self, tmp_path):
+        jev = {"model": "jev-1.13.0", "questions": {"final_rating": {"applied": True}}}
+
+        class _JevGraph(_FakeGraph):
+            def propagate(self, ticker, trade_date, asset_type="stock", **kwargs):
+                state, signal = super().propagate(ticker, trade_date, asset_type, **kwargs)
+                return {**state, "jev": jev, "final_rating_source": "jev"}, signal
+
+        record = runner.run_ticker(_JevGraph(), "AAPL", "2026-08-20", tmp_path)
+        assert record["jev"] == jev
+        assert record["rating_source"] == "jev"
+
+    def test_without_jev_the_record_has_no_jev_fields(self, tmp_path):
+        record = runner.run_ticker(_FakeGraph(), "AAPL", "2026-08-20", tmp_path)
+        assert "jev" not in record and "rating_source" not in record
+
 
 class TestIndex:
     def test_header_written_once_and_rows_appended(self, tmp_path):
