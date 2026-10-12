@@ -45,10 +45,12 @@ repository. Its state is recorded here whenever it changes.
 | 2026-10-11 20:27 | off | operator | turned off again after the 321 proof (ibkr-konto-befund.md) |
 | 2026-10-12 08:45 | on | operator | before the first real Phase-2 run (D-02); paper user login confirmed |
 
-Open observation (2026-10-12, before the first real run): the gateway process
-listened on `:::7497`, i.e. on all interfaces, not only on `127.0.0.1`. Whether
-"Allow connections from localhost only" is set in the gateway was **not**
-confirmed by the operator; this manual does not claim that it is.
+Localhost only: the gateway process listens on `:::7497`, i.e. on all
+interfaces, not only on `127.0.0.1`. That is expected - the gateway refuses
+remote clients when it accepts the connection, not when it binds. What matters
+is the setting *Configure → Settings → API → Settings → "Allow connections
+from localhost only"*: the operator checked it on 2026-10-12 and it was already
+set. Keep the *Trusted IPs* list empty or at `127.0.0.1`.
 
 Marker: with the switch on, gateway 10.50.1 rejects a write with error **321**
 (state `READ_ONLY_API`), not with the documented 10015
@@ -324,8 +326,9 @@ Findings for later plans:
 * `TotalCashValue` (1005459.44) and `NetLiquidation` (1005888.32) differ by
   428.88 EUR with no position open; probably accrued interest or similar, not
   examined here.
-* The gateway listened on `:::7497` (all interfaces); see the open observation
-  under "Gateway Read-Only switch".
+* The gateway listened on `:::7497` (all interfaces); "Allow connections from
+  localhost only" was confirmed as set on 2026-10-12 (see "Gateway Read-Only
+  switch").
 
 ## See also
 

@@ -1,14 +1,14 @@
 ---
-status: partial
+status: complete
 phase: 02-verbindung-paper-guard-und-kontolesen
 source: [02-VERIFICATION.md]
 started: 2026-10-12T14:30:00Z
-updated: 2026-10-12T14:40:00Z
+updated: 2026-10-12T14:50:00Z
 ---
 
 ## Current Test
 
-[awaiting human testing]
+[alle Tests abgeschlossen]
 
 ## Tests
 
@@ -22,19 +22,19 @@ result: passed — gleiche `&&`-Kette direkt danach, Anthropic aus `.env` (provi
 
 ### 3. REQ-IBKR-67 — Codes 1100/1101/1102/1300/2110 am echten Gateway messen oder per Override akzeptieren
 expected: Entweder eine datierte Messung (z. B. Netzverbindung kurz trennen und den Code im Log ablesen), oder eine begründete Override-Notiz in VERIFICATION.md. Der Schutz aus CR-01 baut auf diesen Codes auf, gemessen sind bisher nur 321, 2104, 2158 und 2107.
-result: [pending]
+result: skipped (Override durch den Operator 2026-10-12) — Begründung im Frontmatter `overrides` von 02-VERIFICATION.md; die Messung folgt mit Phase 8 K6. Fail-closed bleibt: Bei einem unerwarteten Code scheitert die Liveness-Probe trotzdem.
 
 ### 4. Gateway-Einstellung „Allow connections from localhost only“
 expected: Gesetzt, oder bewusst abgelehnt und im Handbuch begründet. Das Gateway lauscht auf `:::7497`, also auf allen Interfaces.
-result: [pending]
+result: passed — Der Operator hat am 2026-10-12 nachgesehen: „Allow connections from localhost only“ war bereits gesetzt. Steht jetzt im Handbuch `scripts/IBKR_EXECUTION.md`.
 
 ## Summary
 
 total: 4
-passed: 2
+passed: 3
 issues: 0
-pending: 2
-skipped: 0
+pending: 0
+skipped: 1
 blocked: 0
 
 ## Gaps

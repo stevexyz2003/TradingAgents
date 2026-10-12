@@ -1,9 +1,15 @@
 ---
 phase: 02-verbindung-paper-guard-und-kontolesen
 verified: 2026-10-12T13:55:00Z
-status: human_needed
-score: 6/8 Roadmap-Kriterien automatisch verifiziert; 2/8 (K1, K7) real belegt nur mit dem Code-Stand vor den Review-Fixes und brauchen einen erneuten echten Lauf
-overrides_applied: 0
+status: passed
+score: 8/8 Roadmap-Kriterien belegt (6 automatisch; K1 und K7 am 2026-10-12 16:34 am echten System mit dem Code nach den Review-Fixes, HEAD 0178678); REQ-IBKR-67 per Override
+overrides_applied: 1
+overrides:
+  - must_have: "REQ-IBKR-67 Fehlercodes gemessen, nicht angenommen (Link-Codes 1100/1101/1102/1300/2110)"
+    reason: "Offiziell dokumentierte IBKR-Codes, von ib_async selbst behandelt; eine Messung erfordert eine absichtliche Störung des Gateways und folgt mit Phase 8 K6 (1100-Fehlerbild). Fail-closed bleibt gewahrt: Ein unerwarteter Code lässt die Liveness-Probe weiter scheitern, ein Snapshot nach Verbindungsabbruch gilt also nicht als gesund."
+    accepted_by: "Operator"
+    accepted_at: "2026-10-12T14:50:00Z"
+re_verification: "2026-10-12T14:50:00Z — alle 4 human_verification-Punkte erledigt, siehe 02-HUMAN-UAT.md"
 human_verification:
   - test: "K1 erneut am echten Gateway, mit dem Code-Stand nach den Fixes (HEAD 54eed3f): `python scripts/ibkr_executor.py account --out \"%LOCALAPPDATA%\\TradingEngineX\\ibkr\\portfolio.json\"`"
     expected: "Exit 0; das JSON enthält `cash`, `currency`, `positions` UND `as_of` (UTC, ISO 8601); `load_portfolio()` liest es; im Log kein `WRITE_REFUSED`, kein `UNEXPECTED`, kein Traceback, kein `placeOrder`/`orderStatus`"
@@ -205,3 +211,12 @@ Offen ist allein der Nachweis am echten System für den **finalen** Code. Die be
 
 _Verifiziert: 2026-10-12T13:55:00Z_
 _Verifier: Claude (gsd-verifier)_
+
+## Nachtrag 2026-10-12: menschliche Prüfpunkte erledigt → `passed`
+
+| Punkt | Ergebnis |
+|---|---|
+| 1. K1 erneut | **bestanden.** 16:34:17 lokal, Exit 0, HEAD `0178678`. `portfolio.json` mit `as_of` 2026-10-12T14:34:17.921620+00:00, 1005459.44 EUR, 0 Positionen; vorher „previous portfolio removed“. Log: `CONNECTED account=DUQ634065 clientId=20001 readonly=True`, 0 Treffer für WRITE_REFUSED/UNEXPECTED/Traceback/placeOrder/ReadOnlyViolation. |
+| 2. K7 erneut | **bestanden.** `&&`-Kette direkt im Anschluss, Provider `anthropic` aus `.env`, Exit 0, AAPL Hold, 0,13 $; `complete_report.md` Z. 10–12 zeigen den Portfolio-Block mit „Cash available: 1,005,459.44 EUR“. |
+| 3. REQ-IBKR-67 Link-Codes | **Override** durch den Operator (siehe Frontmatter `overrides`), Messung folgt mit Phase 8 K6. |
+| 4. Localhost-only | **bestätigt.** Der Operator hat am 2026-10-12 nachgesehen: „Allow connections from localhost only“ war im Gateway bereits gesetzt. Dass `netstat` `:::7497` zeigt, widerspricht dem nicht, weil das Gateway entfernte Verbindungen beim Annehmen abweist und nicht schon beim Binden. |
