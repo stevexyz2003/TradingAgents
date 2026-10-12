@@ -96,9 +96,7 @@ class FakeIB:
         self.refuse = refuse
         self.emit_on_connect = list(emit_on_connect)
         self._positions = [] if positions is None else positions
-        self._summary = (
-            [account_value("TotalCashValue", "1000.0")] if summary is None else summary
-        )
+        self._summary = [account_value("TotalCashValue", "1000.0")] if summary is None else summary
         self.probe = probe
         self.calls: list[str] = []
         self.connect_kwargs: dict = {}
