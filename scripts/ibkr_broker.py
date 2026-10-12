@@ -55,7 +55,7 @@ SNAPSHOT_SETTLE_S = 0.05
 LINK_CODES = frozenset({1100, 1101, 1102, 1300, 2110})
 
 #: Client calls that would change the account; blocked before connectAsync.
-_WRITE_CALLS = ("placeOrder", "cancelOrder", "reqGlobalCancel", "exerciseOptions")
+_WRITE_CALLS = ("cancelOrder", "reqGlobalCancel", "exerciseOptions")
 
 #: Outgoing message ids that change the account, blocked on the wire as well:
 #: PLACE_ORDER 3, CANCEL_ORDER 4, REPLACE_FA 19, EXERCISE_OPTIONS 21,
@@ -63,7 +63,27 @@ _WRITE_CALLS = ("placeOrder", "cancelOrder", "reqGlobalCancel", "exerciseOptions
 #: 2.1.0). Every
 #: request of the library goes through ``Client.send`` and then ``Client.sendMsg``,
 #: so a write that bypasses the named calls still meets this check.
+#: Id 3 passes only as a whatIf preview of a stock; every real order is refused.
 _WRITE_MESSAGE_IDS = frozenset({3, 4, 19, 21, 58})
+
+#: Security types a whatIf preview may name (M2 previews stocks only; any other
+#: shape is refused, fail-closed).
+_WHATIF_SEC_TYPES = frozenset({"STK"})
+
+#: Indices into the PLACE_ORDER field list (contract = ONE field), read from
+#: ib_async==2.1.0 Client.placeOrder for a server version >= 177 and a non-BAG
+#: contract. The real-client test turns a layout change on upgrade into a red test.
+_PO_DELTA_NEUTRAL_TYPE = 53
+_PO_SCALE_PRICE_INCREMENT = 61
+_PO_HEDGE_TYPE = 65
+_PO_DELTA_NEUTRAL_CONTRACT = 70
+_PO_ALGO_STRATEGY = 71
+_PO_WHATIF = 73
+_PO_MIN_FIELDS = _PO_WHATIF + 1
+#: A contract is one field on the field level and 12 on the string level; the
+#: string-level secType sits at offset 2 inside them.
+_CONTRACT_WIDTH = 12
+_UNSET_DOUBLE = 1.7976931348623157e308
 
 #: Gateway/API code -> named operating state (02-RESEARCH.md Muster 5). 502, 504
 #: and 507 never arrive as events from the library; connect() maps the matching
@@ -258,15 +278,114 @@ def _message_id(field) -> int | None:
         return None
 
 
+def _is_empty(value) -> bool:
+    return value is None or (isinstance(value, str) and value == "")
+
+
+def _is_unset_number(value) -> bool:
+    """True for an unset or non-positive number (the scale increment is not in use)."""
+    if _is_empty(value):
+        return True
+    if isinstance(value, bool):
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return number <= 0 or number >= _UNSET_DOUBLE
+
+
+def _whatif_layout(fields) -> bool:
+    """True only for a plain order whose whatIf field is set; unknown layout = False.
+
+    ``fields`` has the field-level shape (index 2 stands for the contract). Values
+    are typed (field level) or strings (string level); both are understood. Every
+    conditional block that would shift the whatIf position (delta neutral, scale,
+    hedge, delta-neutral contract, algo) must be in its empty state, otherwise the
+    position is not known and the order is refused.
+    """
+    try:
+        if len(fields) < _PO_MIN_FIELDS:
+            return False
+        if not _is_empty(fields[_PO_DELTA_NEUTRAL_TYPE]):
+            return False
+        if not _is_unset_number(fields[_PO_SCALE_PRICE_INCREMENT]):
+            return False
+        if not _is_empty(fields[_PO_HEDGE_TYPE]):
+            return False
+        dnc = fields[_PO_DELTA_NEUTRAL_CONTRACT]
+        if not (dnc is False or (isinstance(dnc, str) and dnc == "0")):
+            return False
+        if not _is_empty(fields[_PO_ALGO_STRATEGY]):
+            return False
+        flag = fields[_PO_WHATIF]
+        return flag is True or (isinstance(flag, str) and flag == "1")
+    except (IndexError, TypeError, ValueError):
+        return False
+
+
+def _whatif_in_fields(fields) -> bool:
+    """Field-level check: id 3, a STK contract object and a set whatIf field."""
+    try:
+        if len(fields) < _PO_MIN_FIELDS or _message_id(fields[0]) != 3:
+            return False
+        if getattr(fields[2], "secType", None) not in _WHATIF_SEC_TYPES:
+            return False
+        return _whatif_layout(list(fields))
+    except (IndexError, TypeError, ValueError):
+        return False
+
+
+def _whatif_in_message(msg) -> bool:
+    """String-level check of a serialized message (contract expanded to 12 fields).
+
+    Layout read from ib_async==2.1.0 Client.placeOrder; the real-client test turns
+    a layout change on upgrade into a red test. ``send`` ends every field with a
+    NUL, so the last element after the split is empty.
+    """
+    try:
+        if not isinstance(msg, str):
+            return False
+        parts = msg.split("\0")
+        if parts[0] != "3":
+            return False
+        sec_type = parts[2 + 2]  # id, orderId, then conId, symbol, secType
+        if sec_type not in _WHATIF_SEC_TYPES:
+            return False
+        fields = [*parts[:2], None, *parts[2 + _CONTRACT_WIDTH :]]
+        return _whatif_layout(fields)
+    except (IndexError, TypeError, ValueError):
+        return False
+
+
 def _arm_write_barrier(client) -> None:
     """Refuse every write on this client instance, by call name and on the wire.
 
-    The named write calls are replaced first. Then ``send`` (fields) and
-    ``sendMsg`` (the serialized message, id first) are wrapped, so a write
-    message is refused whatever path produced it: ``replaceFA``, a raw
-    ``send(3, ...)`` or a write call added by a later library version that
-    reuses one of these ids. Reads pass through unchanged.
+    The named write calls are replaced first. ``placeOrder`` and message id 3
+    pass only as a whatIf preview of a stock (D-13); every real order is refused.
+    Then ``send`` (fields) and ``sendMsg`` (the serialized message, id first) are
+    wrapped, so a write message is refused whatever path produced it:
+    ``replaceFA``, a raw ``send(3, ...)`` or a write call added by a later library
+    version that reuses one of these ids. Reads pass through unchanged.
     """
+    original_place = getattr(client, "placeOrder", None)
+
+    def guarded_place(*args, **kwargs):
+        contract = args[1] if len(args) > 1 else kwargs.get("contract")
+        order = args[2] if len(args) > 2 else kwargs.get("order")
+        if (
+            getattr(order, "whatIf", None) is not True
+            or getattr(contract, "secType", None) not in _WHATIF_SEC_TYPES
+        ):
+            raise ReadOnlyViolation(
+                "read-only session: placeOrder without whatIf refused before it reached the gateway"
+            )
+        if original_place is None:
+            raise ReadOnlyViolation("read-only session: no placeOrder to preview with")
+        return original_place(*args, **kwargs)
+
+    client.placeOrder = guarded_place
+
     for name in _WRITE_CALLS:
 
         def refuse(*_args, _name=name, **_kwargs):
@@ -286,14 +405,20 @@ def _arm_write_barrier(client) -> None:
 
     def guarded_send(*fields, **kwargs):
         msg_id = _message_id(fields[0]) if fields else None
-        if msg_id in _WRITE_MESSAGE_IDS:
+        if msg_id == 3:
+            if not _whatif_in_fields(fields):
+                refuse_message(msg_id)
+        elif msg_id in _WRITE_MESSAGE_IDS:
             refuse_message(msg_id)
         return original_send(*fields, **kwargs)
 
     def guarded_send_msg(msg, *args, **kwargs):
         head = msg.split("\0", 1)[0] if isinstance(msg, str) else None
         msg_id = _message_id(head) if head else None
-        if msg_id in _WRITE_MESSAGE_IDS:
+        if msg_id == 3:
+            if not _whatif_in_message(msg):
+                refuse_message(msg_id)
+        elif msg_id in _WRITE_MESSAGE_IDS:
             refuse_message(msg_id)
         return original_send_msg(msg, *args, **kwargs)
 

@@ -125,7 +125,7 @@ def test_write_barrier_on_the_real_client_object():
 
 # Outgoing write messages of the pinned library (client.py, 2.1.0): PLACE_ORDER,
 # CANCEL_ORDER, REPLACE_FA, EXERCISE_OPTIONS, REQ_GLOBAL_CANCEL.
-WRITE_MESSAGE_IDS = (3, 4, 19, 21, 58)
+WRITE_MESSAGE_IDS = (4, 19, 21, 58)
 
 
 @pytest.mark.parametrize("msg_id", WRITE_MESSAGE_IDS)
@@ -139,6 +139,18 @@ def test_write_barrier_refuses_write_messages_on_the_wire(msg_id):
         client.send(msg_id, 1, 42)
     with pytest.raises(broker.ReadOnlyViolation, match=f"message {msg_id}"):
         client.sendMsg(f"{msg_id}\0" + "1\0")
+
+
+def test_place_order_refused_without_whatif_on_the_wire():
+    ib_async = pytest.importorskip("ib_async")
+    client = ib_async.IB().client
+    broker._arm_write_barrier(client)
+    with pytest.raises(broker.ReadOnlyViolation, match="message 3"):
+        client.send(3, 1, 42)
+    with pytest.raises(broker.ReadOnlyViolation, match="message 3"):
+        client.sendMsg("3\0" + "1\0")
+    with pytest.raises(broker.ReadOnlyViolation, match="message 3"):
+        client.send(3)
 
 
 def test_write_barrier_covers_replace_fa_which_has_no_named_block():
@@ -926,3 +938,152 @@ def test_disconnect_lets_connection_lost_run_before_the_loop_closes(monkeypatch,
     adapter.__exit__(None, None, None)
     assert fake.calls[-2:] == ["disconnect", "connection_lost"]
     assert loops.created[0].is_closed()
+
+
+# --- whatIf passes the barrier, a real order does not (D-13) ----------------------------
+
+
+def _fake_client_barrier(loop):
+    fake = FakeIB()
+    _connected(fake, loop)
+    return fake
+
+
+def test_whatif_barrier_place_order_refused_without_whatif(loop):
+    fake = _fake_client_barrier(loop)
+    contract = ibkr_fakes.FakeContract(conId=265598, secType="STK")
+    with pytest.raises(broker.ReadOnlyViolation):
+        fake.client.placeOrder(7, contract, ibkr_fakes.FakeOrder(whatIf=False))
+    assert "placeOrder" not in fake.calls
+    assert "placeOrder(whatIf)" not in fake.calls
+
+
+def test_whatif_barrier_place_order_passes_a_stock_preview(loop):
+    fake = _fake_client_barrier(loop)
+    contract = ibkr_fakes.FakeContract(conId=265598, secType="STK")
+    fake.client.placeOrder(7, contract, ibkr_fakes.FakeOrder(whatIf=True))
+    assert fake.calls.count("placeOrder(whatIf)") == 1
+    assert "placeOrder" not in fake.calls
+
+
+def test_whatif_barrier_place_order_refused_for_a_non_stock_preview(loop):
+    fake = _fake_client_barrier(loop)
+    contract = ibkr_fakes.FakeContract(conId=1, secType="OPT")
+    with pytest.raises(broker.ReadOnlyViolation):
+        fake.client.placeOrder(7, contract, ibkr_fakes.FakeOrder(whatIf=True))
+    assert "placeOrder(whatIf)" not in fake.calls
+
+
+@pytest.mark.parametrize("name", ("cancelOrder", "reqGlobalCancel", "exerciseOptions"))
+def test_whatif_barrier_other_write_calls_stay_refused(loop, name):
+    fake = _fake_client_barrier(loop)
+    with pytest.raises(broker.ReadOnlyViolation):
+        getattr(fake.client, name)()
+
+
+def _wire_client(loop, monkeypatch):
+    """The real Client class with a stub connection that records the bytes sent.
+
+    ``sendMsg`` asks the library for its event loop, which would open a socketpair
+    and trip the network block; the session loop is handed in instead.
+    """
+    ib_async = pytest.importorskip("ib_async")
+    monkeypatch.setattr("ib_async.client.getLoop", lambda: loop)
+    client = ib_async.client.Client(ib_async.IB().wrapper)
+    sent = []
+    client.conn = SimpleNamespace(sendMsg=sent.append)
+    client.connState = client.CONNECTED
+    client._serverVersion = 178
+    return ib_async, client, sent
+
+
+def _stock_and_order(ib_async, what_if):
+    contract = ib_async.Contract(
+        conId=265598, symbol="AAPL", secType="STK", exchange="SMART", currency="USD"
+    )
+    order = ib_async.Order(action="BUY", totalQuantity=2, orderType="MKT", tif="DAY", whatIf=what_if)
+    return contract, order
+
+
+def _recorded_message(loop, monkeypatch, what_if=True):
+    """The serialized message of the real client for a market order, barrier off."""
+    ib_async, client, sent = _wire_client(loop, monkeypatch)
+    contract, order = _stock_and_order(ib_async, what_if)
+    client.placeOrder(1, contract, order)
+    assert len(sent) == 1
+    return sent[0][4:].decode()  # the library prefixes a 4-byte length
+
+
+def test_whatif_barrier_real_client_passes_whatif(loop, monkeypatch):
+    ib_async, client, sent = _wire_client(loop, monkeypatch)
+    broker._arm_write_barrier(client)
+    contract, order = _stock_and_order(ib_async, True)
+    client.placeOrder(1, contract, order)
+    assert len(sent) == 1
+    parts = sent[0][4:].decode().split("\0")
+    assert parts[0] == "3"
+    assert parts[4] == "STK"
+    assert parts[16] == "BUY" and parts[21] == "DAY"
+    assert parts[84] == "1"  # whatIf, after the 12-field contract expansion
+
+
+def test_whatif_barrier_real_client_refuses_real_order(loop, monkeypatch):
+    ib_async, client, sent = _wire_client(loop, monkeypatch)
+    broker._arm_write_barrier(client)
+    contract, order = _stock_and_order(ib_async, False)
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.placeOrder(1, contract, order)
+    assert sent == []
+
+
+def test_whatif_barrier_real_client_refuses_real_order_on_the_field_level(loop, monkeypatch):
+    # Bypass the named call: the field-level wrapper alone must stop it.
+    ib_async, client, sent = _wire_client(loop, monkeypatch)
+    broker._arm_write_barrier(client)
+    contract, order = _stock_and_order(ib_async, False)
+    del client.placeOrder  # back to the class method, which calls the guarded send
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.placeOrder(1, contract, order)
+    assert sent == []
+
+
+def _message_client(sent):
+    client = SimpleNamespace(send=lambda *f, **k: None, sendMsg=lambda m, *a, **k: sent.append(m))
+    broker._arm_write_barrier(client)
+    return client
+
+
+def test_whatif_barrier_message_level_passes_the_recorded_whatif_string(loop, monkeypatch):
+    msg = _recorded_message(loop, monkeypatch, True)
+    sent = []
+    _message_client(sent).sendMsg(msg)
+    assert sent == [msg]
+
+
+def test_whatif_barrier_message_level_refuses_whatif_zero_and_other_sec_types(loop, monkeypatch):
+    parts = _recorded_message(loop, monkeypatch, True).split("\0")
+    assert parts[84] == "1"
+    sent = []
+    client = _message_client(sent)
+    off = list(parts)
+    off[84] = "0"
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.sendMsg("\0".join(off))
+    opt = list(parts)
+    opt[4] = "OPT"
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.sendMsg("\0".join(opt))
+    assert sent == []
+
+
+def test_whatif_barrier_message_level_refuses_a_shifted_layout_and_a_truncated_string(loop, monkeypatch):
+    parts = _recorded_message(loop, monkeypatch, True).split("\0")
+    sent = []
+    client = _message_client(sent)
+    algo = list(parts)
+    algo[82] = "Twap"  # an algo order moves the whatIf field
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.sendMsg("\0".join(algo))
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.sendMsg("3\0" + "1\0")
+    assert sent == []

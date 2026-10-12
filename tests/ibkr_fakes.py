@@ -67,6 +67,16 @@ class FakeContract:
     tradingClass: str = ""
 
 
+@dataclass
+class FakeOrder:
+    action: str = ""
+    totalQuantity: float = 0
+    orderType: str = ""
+    tif: str = ""
+    account: str = ""
+    whatIf: bool = False
+
+
 def stk_contract(
     symbol,
     con_id,
@@ -171,7 +181,12 @@ class FakeIB:
         self.client = SimpleNamespace(**self._recorders)
 
     def _record(self, name):
-        def recorder(*_args, **_kwargs):
+        def recorder(*args, **_kwargs):
+            # A placeOrder that carries whatIf is a preview; it is told apart from a
+            # real order so that "nothing was sent" can be checked exactly (G2).
+            if name == "placeOrder" and len(args) > 2 and getattr(args[2], "whatIf", None) is True:
+                self.calls.append("placeOrder(whatIf)")
+                return
             self.calls.append(name)
 
         return recorder
@@ -273,7 +288,8 @@ class FakeIB:
             await _forever()
         return list(self.details.get(contract.conId, []))
 
-    # Phase 3 resolution only reads; it never touches orders, any of these is a bug. Each
+    # Phase 4 previews through whatIfOrderAsync only; placeOrder/whatIfOrder on IB are
+    # bugs. Phase 3 resolution only reads; it never touches orders, any of these is a bug. Each
     # one is recorded before it raises, so a check over ``calls`` can see it even
     # when the adapter swallows the AssertionError (REQ-IBKR-66).
     def _forbidden(self, name, why=""):
