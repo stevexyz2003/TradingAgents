@@ -43,6 +43,10 @@ def _header(ticker: str, final_state: dict, settings: dict | None) -> str:
             lines.append("- Data vendors: " + ", ".join(f"{k} {v}" for k, v in vendors.items()))
     if final_state.get("memory_note"):
         lines.append(f"- Memory log: {final_state['memory_note']}")
+    # The book the agents saw (PortfolioContext.render), when the run was given one.
+    if final_state.get("portfolio_context"):
+        lines.append("")
+        lines.append(final_state["portfolio_context"])
     return "\n".join(lines) + "\n\n"
 
 
