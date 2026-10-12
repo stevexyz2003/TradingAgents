@@ -32,7 +32,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 
 - [x] **Phase 1: Konto-Messung und Gateway-Grundbetrieb** — messen, was am Konto wirklich gilt, bevor Code darauf baut (Operator-Aufgabe, kein Entwicklungsschritt; completed 2026-10-11)
 - [x] **Phase 2: Verbindung, Paper-Guard und Kontolesen** — ein lokaler Prozess liest `DUQ634065` read-only und füllt `PortfolioContext` (completed 2026-10-12)
-- [ ] **Phase 3: Symbol-Auflösung, Handelbarkeit und Handelszeiten** — vom Roh-Ticker zu genau einem Contract, oder begründet gar nicht
+- [x] **Phase 3: Symbol-Auflösung, Handelbarkeit und Handelszeiten** — vom Roh-Ticker zu genau einem Contract, oder begründet gar nicht (completed 2026-10-12)
 - [ ] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet
 - [ ] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order
 - [ ] **Phase 6: Die erste echte Order** — umschalten, platzieren, im Ledger wiederfinden
@@ -155,7 +155,7 @@ Plans:
 - Keine Marktdaten über den delayed-Default hinaus; kein Limitpreis, keine Preisabfrage im Order-Pfad.
 - Keine Erweiterung der Allow-List über `STK` hinaus — die breitere Liste ist dokumentierter Erweiterungspfad.
 
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 **Wave 1**
@@ -174,7 +174,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 03-06-PLAN.md — Handbuch `resolve`/neuer Ticker, echter Gateway-Lauf, Operator-Abnahme (Wave 4)
+- [x] 03-06-PLAN.md — Handbuch `resolve`/neuer Ticker, echter Gateway-Lauf, Operator-Abnahme (Wave 4)
 
 ---
 
