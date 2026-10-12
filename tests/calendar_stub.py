@@ -8,7 +8,7 @@ lives only here (test files are not covered by the clock-literal guard, which ch
 from __future__ import annotations
 
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 _FIRST = date(2000, 1, 1)
 _LAST = date(2100, 12, 31)
@@ -52,4 +52,4 @@ class WeekdayCalendar:
     def session_close_utc(self, day: date) -> datetime:
         if not self.is_session(day):
             raise _range_error(f"{day} is not a session")
-        return datetime(day.year, day.month, day.day, self.close_utc_hour, tzinfo=timezone.utc)
+        return datetime(day.year, day.month, day.day, self.close_utc_hour, tzinfo=UTC)

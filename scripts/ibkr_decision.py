@@ -16,13 +16,16 @@ that maps a state to a process exit code.
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from types import MappingProxyType
+from typing import Protocol
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
@@ -393,3 +396,175 @@ def judge_preview(
             f"{available_funds:.2f} {account_currency}",
         )
     return verdict(PREVIEW_OK, "within budget")
+
+
+# --- session calendar, freshness in sessions (REQ-IBKR-19, -20; D-05, D-06, D-08) --------
+
+
+class CalendarRangeError(ValueError):
+    """A date lies outside the range the session calendar can answer for."""
+
+
+class SessionCalendar(Protocol):
+    zone_name: str
+
+    def is_session(self, day: date) -> bool: ...
+
+    def sessions_between(self, start: date, end: date) -> tuple[date, ...]:
+        """Sessions from ``start`` to ``end``, both inclusive; empty if ``start > end``."""
+
+    def next_session_after(self, day: date) -> date:
+        """First session strictly after ``day``."""
+
+    def session_close_utc(self, day: date) -> datetime:
+        """Close of the session ``day`` as an aware UTC datetime."""
+
+
+class XnysSessions:
+    """Wraps an ``exchange_calendars`` calendar object behind ``SessionCalendar``.
+
+    ``pandas`` and ``exchange_calendars.errors`` are imported inside the methods so the
+    module stays library-free at import time.
+    """
+
+    def __init__(self, cal: object) -> None:
+        self._cal = cal
+        self.zone_name = str(cal.tz)
+
+    @staticmethod
+    def _ts(day: date):
+        return importlib.import_module("pandas").Timestamp(day.isoformat())
+
+    @staticmethod
+    def _errors() -> tuple[type[BaseException], ...]:
+        errors = importlib.import_module("exchange_calendars.errors")
+        return (
+            errors.DateOutOfBounds,
+            errors.NotSessionError,
+            errors.RequestedSessionOutOfBounds,
+        )
+
+    def is_session(self, day: date) -> bool:
+        try:
+            return bool(self._cal.is_session(self._ts(day)))
+        except self._errors() as exc:
+            raise CalendarRangeError(f"{day} outside the calendar range: {exc}") from exc
+
+    def sessions_between(self, start: date, end: date) -> tuple[date, ...]:
+        if start > end:
+            return ()
+        try:
+            found = self._cal.sessions_in_range(self._ts(start), self._ts(end))
+        except self._errors() as exc:
+            raise CalendarRangeError(f"{start}..{end} outside the calendar range: {exc}") from exc
+        return tuple(ts.date() for ts in found)
+
+    def next_session_after(self, day: date) -> date:
+        try:
+            ts = self._ts(day)
+            if self._cal.is_session(ts):
+                nxt = self._cal.next_session(ts)
+            else:
+                nxt = self._cal.date_to_session(ts, direction="next")
+        except self._errors() as exc:
+            raise CalendarRangeError(f"{day} outside the calendar range: {exc}") from exc
+        return nxt.date()
+
+    def session_close_utc(self, day: date) -> datetime:
+        try:
+            close = self._cal.session_close(self._ts(day))
+        except self._errors() as exc:
+            raise CalendarRangeError(f"{day} outside the calendar range: {exc}") from exc
+        return close.to_pydatetime().astimezone(UTC)
+
+
+def load_xnys_calendar() -> SessionCalendar:
+    """Load the XNYS calendar; ``ImportError`` is passed through (the executor reports it)."""
+    import exchange_calendars
+
+    return XnysSessions(exchange_calendars.get_calendar("XNYS"))
+
+
+def _calendar_today(now_utc: datetime, calendar: SessionCalendar) -> date:
+    if now_utc.tzinfo is None:
+        raise ValueError("now_utc must carry a time zone")
+    return now_utc.astimezone(ZoneInfo(calendar.zone_name)).date()
+
+
+def execution_session(now_utc: datetime, calendar: SessionCalendar) -> tuple[date, bool]:
+    """Return the execution session E and whether it is today's still-open session (D-08).
+
+    E is today if today is a session whose close is not yet reached; otherwise the next
+    session (evening, weekend, holiday), with ``in_session_day=False``.
+    """
+    today = _calendar_today(now_utc, calendar)
+    if calendar.is_session(today) and now_utc < calendar.session_close_utc(today):
+        return today, True
+    return calendar.next_session_after(today), False
+
+
+@dataclass(frozen=True)
+class Freshness:
+    state: str  # "fresh" | "stale-decision" | "future-decision"
+    execution_day: date | None
+    in_session_day: bool | None
+    gap_days: int | None
+    closed_sessions: tuple[date, ...]
+    weekend_gap: bool
+    detail: str
+
+
+def freshness(trade_date: date, now_utc: datetime, calendar: SessionCalendar) -> Freshness:
+    """Count closed sessions strictly between ``trade_date`` and the execution session.
+
+    A closed session in between makes the decision ``stale-decision`` (REQ-IBKR-19). Any
+    calendar gap of more than one day without a closed session is flagged ``weekend_gap``
+    and stays executable (D-06, REQ-IBKR-20).
+
+    ``trade_date`` may itself be a non-session (holiday Monday): the date trap in
+    ``daily_paper_run.previous_weekday``, which knows no holidays, is therefore allowed.
+    "Saturday decision" in SC4 means the decision of the Saturday run, whose
+    ``trade_date`` is the Friday.
+    """
+    if now_utc.tzinfo is None:
+        raise ValueError("now_utc must carry a time zone")
+    try:
+        exec_day, in_session = execution_session(now_utc, calendar)
+        if trade_date >= exec_day:
+            return Freshness(
+                "future-decision", exec_day, in_session, None, (), False,
+                f"trade_date {trade_date} is not before execution session {exec_day}",
+            )
+        closed = calendar.sessions_between(trade_date + timedelta(days=1), exec_day - timedelta(days=1))
+    except CalendarRangeError as exc:
+        return Freshness(
+            STALE_DECISION, None, None, None, (), False,
+            f"trade_date outside the calendar range: {exc}",
+        )
+    if closed:
+        listed = ", ".join(d.isoformat() for d in closed)
+        return Freshness(
+            STALE_DECISION, exec_day, in_session, None, closed, False,
+            f"session(s) {listed} closed between trade_date {trade_date} and execution "
+            f"session {exec_day}; nothing executed (REQ-IBKR-19)",
+        )
+    gap = (exec_day - trade_date).days
+    return Freshness(
+        "fresh", exec_day, in_session, gap, (), gap > 1,
+        f"trade_date {trade_date}, execution session {exec_day}, {gap} calendar day(s)",
+    )
+
+
+def calendar_conflict(
+    now_utc: datetime, calendar: SessionCalendar, session_day: bool | None
+) -> bool:
+    """D-05: liquidHours of the resolved contract decides today; the exchange calendar
+    decides the past. If they disagree about today, the run stops with calendar-conflict.
+    """
+    today = _calendar_today(now_utc, calendar)
+    if session_day is None:
+        return False
+    try:
+        return calendar.is_session(today) != session_day
+    except CalendarRangeError:
+        return True

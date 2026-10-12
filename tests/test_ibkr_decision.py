@@ -287,14 +287,14 @@ def test_budget_and_currency():
 
 # --- freshness / calendar_conflict (plan 04-06) -----------------------------------------
 
-from datetime import date, datetime, timezone  # noqa: E402
+from datetime import UTC, date, datetime  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calendar_stub import WeekdayCalendar  # noqa: E402
 
 
 def _utc(y, m, d, h, mi=0):
-    return datetime(y, m, d, h, mi, tzinfo=timezone.utc)
+    return datetime(y, m, d, h, mi, tzinfo=UTC)
 
 
 @pytest.fixture(params=["xnys", "stub"])
