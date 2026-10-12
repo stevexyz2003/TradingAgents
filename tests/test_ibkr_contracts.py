@@ -567,3 +567,270 @@ def test_persisted_files_carry_no_session_values(tmp_path):
     text = p.read_text(encoding="utf-8") + c.contracts_history_path(p).read_text(encoding="utf-8")
     assert "liquid" not in text.lower()
     assert "tradinghours" not in text.lower()
+
+
+# --- resolver (D-10, D-13, D-15..D-17, D-19, D-21, D-24, D-29, D-31) ---------------------
+
+import logging  # noqa: E402
+
+from tests import ibkr_fakes  # noqa: E402
+
+_ContractInfo = ibkr_fakes.load_broker().ContractInfo
+_NY = ZoneInfo("America/New_York")
+_OPEN_NOW = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)  # 11:00 in New York
+_CLOSED_NOW = datetime(2026, 10, 14, 23, 0, tzinfo=UTC)  # 19:00 in New York
+
+
+def _hours_for(now_utc):
+    """A liquid-hours text for the New York day of ``now_utc`` (built from the injected now)."""
+    day = now_utc.astimezone(_NY).date()
+    nxt = day + timedelta(days=1)
+    return f"{day:%Y%m%d}:0930-{day:%Y%m%d}:1600;{nxt:%Y%m%d}:0930-{nxt:%Y%m%d}:1600"
+
+
+def _info(symbol="AAPL", con_id=265598, *, details=False, now=_OPEN_NOW, **over):
+    base = {
+        "con_id": con_id,
+        "symbol": symbol,
+        "sec_type": "STK",
+        "exchange": "SMART",
+        "primary_exchange": "NASDAQ",
+        "currency": "USD",
+        "local_symbol": symbol,
+        "trading_class": "NMS",
+    }
+    if details:
+        base.update(
+            long_name=f"{symbol} Inc",
+            valid_exchanges="SMART,NASDAQ",
+            order_types="LMT,MKT",
+            time_zone_id="America/New_York",
+            liquid_hours=_hours_for(now),
+            trading_hours=_hours_for(now),
+        )
+    base.update(over)
+    return _ContractInfo(**base)
+
+
+class StubBroker:
+    def __init__(self, search=None, details=None):
+        self.search = search or {}
+        self.details = details or {}
+        self.calls = []
+
+    def search_contract(self, spec):
+        self.calls.append(("search", spec.symbol))
+        return tuple(self.search.get(spec.symbol, ()))
+
+    def contract_details(self, con_id, exchange):
+        self.calls.append(("details", con_id, exchange))
+        return tuple(self.details.get(con_id, ()))
+
+
+def _good_broker(symbols=("AAPL", "MSFT"), now=_OPEN_NOW):
+    ids = {"AAPL": 265598, "MSFT": 272093, "NVDA": 4815747}
+    return StubBroker(
+        {s: (_info(s, ids[s]),) for s in symbols},
+        {ids[s]: (_info(s, ids[s], details=True, now=now),) for s in symbols},
+    )
+
+
+_LOG = logging.getLogger("test.resolve")
+
+
+def _resolve(tickers, **kw):
+    kw.setdefault("contracts", {})
+    kw.setdefault("broker", _good_broker())
+    kw.setdefault("now_utc", _OPEN_NOW)
+    kw.setdefault("logger", _LOG)
+    return c.resolve_all(tickers, **kw)
+
+
+def _by(outcome):
+    return {r.ticker: r for r in outcome.results}
+
+
+def test_needs_broker_false_when_all_rejected_locally():
+    assert c.needs_broker(["XYZQ", "^GSPC", "XAUUSD+"]) is False
+    assert c.needs_broker(["XYZQ", "AAPL"]) is True
+
+
+def test_resolve_all_local_rejections_need_no_broker():
+    out = _resolve(["XYZQ", "^GSPC", "XAUUSD+"], broker=None)
+    states = [r.state for r in out.results]
+    assert states == ["not-mapped", "not-allowed", "not-allowed"]
+    assert out.rejected
+
+
+def test_resolve_learns_single_match(caplog):
+    broker = _good_broker()
+    with caplog.at_level(logging.INFO, logger="test.resolve"):
+        out = _resolve(["AAPL"], broker=broker)
+    r = _by(out)["AAPL"]
+    assert r.state == "ok" and not r.rejected
+    assert r.identity.con_id == 265598
+    assert r.window is not None
+    assert out.contracts["AAPL"].identity.con_id == 265598
+    assert len(out.events) == 1
+    assert out.events[0].event == "learn" and out.events[0].old is None
+    assert "learned conId=265598" in caplog.text
+    assert broker.calls[0][0] == "search"
+    assert broker.calls[1] == ("details", 265598, "SMART")
+
+
+def test_resolve_learn_with_mismatching_search_key_is_drift():
+    broker = StubBroker({"AAPL": (_info("AAPL", primary_exchange="NYSE"),)})
+    out = _resolve(["AAPL"], broker=broker)
+    assert _by(out)["AAPL"].state == "drift"
+    assert "AAPL" not in out.contracts
+    assert out.events == ()
+
+
+def test_resolve_not_found_on_zero_matches():
+    out = _resolve(["AAPL"], broker=StubBroker())
+    assert _by(out)["AAPL"].state == "not-found"
+
+
+def test_resolve_ambiguous_logs_all_candidates_in_one_record(caplog):
+    cands = tuple(_info("AAPL", 1000 + i, local_symbol=f"AAPL{i}") for i in range(3))
+    with caplog.at_level(logging.INFO, logger="test.resolve"):
+        out = _resolve(["AAPL"], broker=StubBroker({"AAPL": cands}))
+    assert _by(out)["AAPL"].state == "ambiguous"
+    recs = [r for r in caplog.records if "ibkr-state=AMBIGUOUS_CONTRACT" in r.getMessage()]
+    assert len(recs) == 1
+    msg = recs[0].getMessage()
+    for i in range(3):
+        assert f"conId={1000 + i}" in msg
+        assert f"localSymbol=AAPL{i}" in msg
+    assert "primaryExchange=NASDAQ" in msg
+
+
+def test_resolve_ambiguous_with_21_candidates_is_not_truncated(caplog):
+    cands = tuple(_info("AAPL", 2000 + i) for i in range(21))
+    with caplog.at_level(logging.INFO, logger="test.resolve"):
+        _resolve(["AAPL"], broker=StubBroker({"AAPL": cands}))
+    recs = [r for r in caplog.records if "ibkr-state=AMBIGUOUS_CONTRACT" in r.getMessage()]
+    assert len(recs) == 1
+    assert recs[0].getMessage().count("conId=") == 21
+
+
+def test_resolve_second_run_checks_by_conid_and_cross_checks_by_search():
+    broker = _good_broker()
+    out = _resolve(["AAPL"], broker=broker, contracts={"AAPL": _stored()})
+    assert _by(out)["AAPL"].state == "ok"
+    assert out.events == ()
+    assert ("details", 265598, "SMART") in broker.calls
+    assert ("search", "AAPL") in broker.calls
+
+
+def test_resolve_manipulated_conid_is_drift_and_others_continue(caplog):
+    broker = _good_broker()
+    broker.details[999999] = (_info("AAPL", 999999, details=True),)
+    stored = {"AAPL": _stored(999999), "MSFT": _stored(272093, "MSFT")}
+    with caplog.at_level(logging.INFO, logger="test.resolve"):
+        out = _resolve(["AAPL", "MSFT"], broker=broker, contracts=stored)
+    by = _by(out)
+    assert by["AAPL"].state == "drift"
+    assert by["MSFT"].state == "ok"
+    assert out.contracts["AAPL"].identity.con_id == 999999
+    assert out.events == ()
+    recs = [r for r in caplog.records if "ibkr-state=CONTRACT_DRIFT" in r.getMessage()]
+    assert len(recs) == 1 and recs[0].levelno == logging.ERROR
+    assert "999999" in recs[0].getMessage() and "265598" in recs[0].getMessage()
+
+
+def test_resolve_same_conid_other_local_symbol_is_drift():
+    broker = _good_broker()
+    broker.details[265598] = (_info("AAPL", details=True, local_symbol="AAPL.X"),)
+    out = _resolve(["AAPL"], broker=broker, contracts={"AAPL": _stored()})
+    r = _by(out)["AAPL"]
+    assert r.state == "drift" and "localSymbol" in r.detail
+
+
+def test_resolve_trading_class_and_long_name_change_is_not_drift():
+    broker = _good_broker()
+    broker.details[265598] = (
+        _info("AAPL", details=True, trading_class="XYZ", long_name="Renamed Corp"),
+    )
+    out = _resolve(["AAPL"], broker=broker, contracts={"AAPL": _stored()})
+    assert _by(out)["AAPL"].state == "ok"
+
+
+def test_resolve_details_without_match_is_drift():
+    broker = StubBroker({"AAPL": (_info("AAPL"),)}, {})
+    out = _resolve(["AAPL"], broker=broker, contracts={"AAPL": _stored()})
+    assert _by(out)["AAPL"].state == "drift"
+
+
+def test_resolve_rebaseline_replaces_identity_with_history(caplog):
+    broker = _good_broker()
+    broker.details[999999] = (_info("AAPL", 999999, details=True),)
+    with caplog.at_level(logging.INFO, logger="test.resolve"):
+        out = _resolve(
+            ["AAPL"],
+            broker=broker,
+            contracts={"AAPL": _stored(999999)},
+            mode="rebaseline",
+            rebaseline="AAPL",
+        )
+    assert _by(out)["AAPL"].state != "drift"
+    assert out.contracts["AAPL"].identity.con_id == 265598
+    (event,) = out.events
+    assert event.event == "rebaseline" and event.old.con_id == 999999
+    recs = [r for r in caplog.records if "CONTRACT_REBASELINED" in r.getMessage()]
+    assert len(recs) == 1 and recs[0].levelno == logging.WARNING
+    assert "999999" in recs[0].getMessage() and "265598" in recs[0].getMessage()
+
+
+def test_resolve_init_learns_and_checks_anchor():
+    out = _resolve(["AAPL", "MSFT"], contracts=None, mode="init", anchor_con_id=265598)
+    assert set(out.contracts) == {"AAPL", "MSFT"}
+    assert [e.event for e in out.events] == ["init", "init"]
+
+
+def test_resolve_init_anchor_mismatch():
+    broker = StubBroker({"AAPL": (_info("AAPL", 111),)}, {111: (_info("AAPL", 111, details=True),)})
+    with pytest.raises(c.AnchorMismatch) as ei:
+        _resolve(["AAPL"], contracts=None, broker=broker, mode="init", anchor_con_id=265598)
+    assert ei.value.expected == 265598 and ei.value.seen == 111
+
+
+def test_resolve_init_anchor_not_found():
+    with pytest.raises(c.AnchorMismatch) as ei:
+        _resolve(["AAPL"], contracts=None, broker=StubBroker(), mode="init", anchor_con_id=265598)
+    assert ei.value.seen is None
+
+
+def test_resolve_not_tradable_value_only():
+    broker = _good_broker()
+    broker.details[265598] = (_info("AAPL", details=True, valid_exchanges="VALUE"),)
+    out = _resolve(["AAPL"], broker=broker)
+    assert _by(out)["AAPL"].state == "not-tradable"
+
+
+def test_resolve_closed_outside_window_is_not_a_rejection():
+    out = _resolve(["AAPL"], broker=_good_broker(now=_CLOSED_NOW), now_utc=_CLOSED_NOW)
+    r = _by(out)["AAPL"]
+    assert r.state == "closed" and not r.rejected
+    assert r.next_open is not None
+
+
+def test_resolve_session_unknown_without_hours_is_rejected():
+    broker = _good_broker()
+    broker.details[265598] = (_info("AAPL", details=True, liquid_hours=""),)
+    out = _resolve(["AAPL"], broker=broker)
+    r = _by(out)["AAPL"]
+    assert r.state == "session-unknown" and r.rejected
+
+
+def test_resolve_deduplicates_tickers_in_order():
+    broker = _good_broker()
+    out = _resolve(["MSFT", "AAPL", "MSFT"], broker=broker)
+    assert [r.ticker for r in out.results] == ["MSFT", "AAPL"]
+    assert sum(1 for call in broker.calls if call == ("search", "MSFT")) == 1
+
+
+def test_resolve_learned_payload_has_no_session_values():
+    out = _resolve(["AAPL"])
+    text = json.dumps(c.contracts_payload(out.contracts)).lower()
+    assert "liquid" not in text and "trading_hours" not in text and "tradinghours" not in text
