@@ -104,7 +104,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - Kein Lesen von `paper-log`, keine Entscheidungsübernahme.
 - **Keine Änderung am CI-Produktivpfad.** Das Portfolio-JSON wird in dieser Phase nur lokal übergeben; die Verdrahtung in den täglichen Lauf braucht den Veröffentlichungsbranch und passiert in Phase 7.
 
-**Plans:** 3/6 plans executed
+**Plans:** 4/6 plans executed
 
 Plans:
 **Wave 1**
@@ -118,7 +118,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-04-PLAN.md — Kommando `scripts/ibkr_executor.py account`: Exit-Codes, `.env`, UTF-8-Log, atomares JSON + Gegenprobe; Handbuch `scripts/IBKR_EXECUTION.md`
+- [x] 02-04-PLAN.md — Kommando `scripts/ibkr_executor.py account`: Exit-Codes, `.env`, UTF-8-Log, atomares JSON + Gegenprobe; Handbuch `scripts/IBKR_EXECUTION.md`
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
