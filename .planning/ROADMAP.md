@@ -33,7 +33,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - [x] **Phase 1: Konto-Messung und Gateway-Grundbetrieb** — messen, was am Konto wirklich gilt, bevor Code darauf baut (Operator-Aufgabe, kein Entwicklungsschritt; completed 2026-10-11)
 - [x] **Phase 2: Verbindung, Paper-Guard und Kontolesen** — ein lokaler Prozess liest `DUQ634065` read-only und füllt `PortfolioContext` (completed 2026-10-12)
 - [x] **Phase 3: Symbol-Auflösung, Handelbarkeit und Handelszeiten** — vom Roh-Ticker zu genau einem Contract, oder begründet gar nicht (completed 2026-10-12)
-- [ ] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet
+- [x] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet (completed 2026-10-12)
 - [ ] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order
 - [ ] **Phase 6: Die erste echte Order** — umschalten, platzieren, im Ledger wiederfinden
 - [ ] **Phase 7: Rückkanal und Soll-Ist-Zusammenführung** — eigener Branch, Join beim Lesen
@@ -203,7 +203,7 @@ Plans:
 - Das Trockenlauf-Protokoll ist **noch nicht** der Ledger, auf den sich Idempotenz stützt: es gibt in dieser Phase keine Write-Ahead-Disziplin und keinen Lock.
 - Kein Push auf irgendeinen Branch, kein Heartbeat.
 
-**Plans:** 8/9 plans executed
+**Plans:** 9/9 plans complete
 
 Plans:
 **Wave 1**
@@ -225,7 +225,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 04-09-PLAN.md — Handbuch, Wächter (Exit 5, REQ-68), Operator-Abnahme des realen Trockenlaufs
+- [x] 04-09-PLAN.md — Handbuch, Wächter (Exit 5, REQ-68), Operator-Abnahme des realen Trockenlaufs
 
 ---
 
