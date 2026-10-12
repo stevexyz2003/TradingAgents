@@ -203,7 +203,29 @@ Plans:
 - Das Trockenlauf-Protokoll ist **noch nicht** der Ledger, auf den sich Idempotenz stützt: es gibt in dieser Phase keine Write-Ahead-Disziplin und keinen Lock.
 - Kein Push auf irgendeinen Branch, kein Heartbeat.
 
-**Plans:** TBD
+**Plans:** 9 plans in 4 Wellen
+
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Fachkern: Zustände, `EXIT_BY_STATE` (D-16), `summary.json`-Vertrag, Vorbedingungen/Divergenz, Zielrechnung, Vorschau-Urteil
+- [ ] 04-02-PLAN.md — Schreibsperre: Nachricht Id 3 nur als STK-`whatIf`, Nachweis mit echter Client-Klasse (D-13)
+- [ ] 04-03-PLAN.md — `exchange_calendars` nach Operator-Freigabe, `block_qty` in `CONTRACT_TABLE`, `session_day` (D-05, D-09, D-10)
+- [ ] 04-04-PLAN.md — `paper-log`-Leser ohne Checkout, eingefrorene Kopie von `71df89d` (D-01..D-04)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-05-PLAN.md — Adapter: `preview_order`, `open_orders`, `conId`, `AvailableFunds`, Codes 154/10349 (D-11..D-15)
+- [ ] 04-06-PLAN.md — Aktualität in XNYS-Sitzungen, `weekend_gap`, Kalender vs. `liquidHours` (SC4, D-05..D-08)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-07-PLAN.md — Subkommando `preview`: vollständiger Trockenlauf bis zum beurteilten `whatIf`, nichts gesendet (SC1–SC8, G2)
+- [ ] 04-08-PLAN.md — Operator-Messung am Gateway: `whatIf` mit Read-Only-Schalter aus/an (D-14)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-09-PLAN.md — Handbuch, Wächter (Exit 5, REQ-68), Operator-Abnahme des realen Trockenlaufs
 
 ---
 

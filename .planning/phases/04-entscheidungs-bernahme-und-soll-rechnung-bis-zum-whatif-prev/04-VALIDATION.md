@@ -39,25 +39,25 @@ created: 2026-10-12
 
 > Task-IDs werden vom Planer ergänzt; die Zeilen sind nach Anforderung/Erfolgskriterium vorbelegt.
 
-| Req / SC | Verhalten | Typ | Automatisierter Befehl | Datei existiert | Status |
-|----------|-----------|-----|------------------------|-----------------|--------|
-| SC1 / REQ-21 | Echter Branchstand (AAPL Hold 10-09, eingefrorene Kopie von `71df89d`) → `skipped-hold`, kein Gateway-Kontakt | unit/E2E-Fake | `pytest tests/test_ibkr_preview.py -k real_branch_hold -x` | ❌ W0 | ⬜ |
-| SC2 / REQ-38, -25 | Buy + flache Position → „BUY 2", `whatIf` MKT/DAY, Log Margin/Kommission/Ablehnungsgrund, nichts gesendet | unit | `pytest tests/test_ibkr_preview.py -k buy_flat -x` | ❌ W0 | ⬜ |
-| SC2 / D-13 | Schreibsperre: nur Id 3 mit `whatIf` passiert; `placeOrder` ohne `whatIf` → `ReadOnlyViolation` (echte `Client`-Klasse) | unit | `pytest tests/test_ibkr_broker.py -k "whatif_barrier or place_order_refused" -x` | ❌ W0 | ⬜ |
-| SC3 / REQ-17 | Divergenz Log vs. Summary → Exit 2, `signal-divergence`, Log-Fassung gelesen | unit | `pytest tests/test_ibkr_decision.py -k divergence -x` | ❌ W0 | ⬜ |
-| SC4 / REQ-19, -20 | Vier Gegenproben in XNYS-Sitzungen mit injizierter Uhr | unit | `pytest tests/test_ibkr_decision.py -k freshness -x` | ❌ W0 | ⬜ |
-| SC5 / REQ-14, -15, -16 | `null`/`REVIEW`/`status!=ok`/`schema_version!=1`/`verify`-Befund → eigener Zustand, kein `whatIf` | unit | `pytest tests/test_ibkr_decision.py tests/test_ibkr_preview.py -k "preconditions or schema or verify" -x` | ❌ W0 | ⬜ |
-| SC6 / REQ-23 | Toleranzband `Ziel − Ist − offen`; fremde offene Order | unit | `pytest tests/test_ibkr_decision.py -k "tolerance or open_order" -x` | ❌ W0 | ⬜ |
-| SC7 / REQ-14, -18 | Vertragstest gegen echten Erzeuger inkl. Negativ-Kontrolle | unit | `pytest tests/test_paper_summary_contract.py -x` | ❌ W0 | ⬜ |
-| SC8 / REQ-24 | Sell ohne Bestand → `long-only-noop`, nie Short | unit | `pytest tests/test_ibkr_decision.py -k long_only -x` | ❌ W0 | ⬜ |
-| REQ-13 | Parser = `TradingMemoryLog`; neuester Eintrag je Ticker | unit | `pytest tests/test_ibkr_decision.py -k log_entries -x` | ❌ W0 | ⬜ |
-| REQ-22 | `block_qty > 0` je handelbarem Eintrag; keine Preisableitung | unit | `pytest tests/test_ibkr_contracts.py -k block_qty -x` | ❌ W0 | ⬜ |
-| REQ-61 | leere/unvollständige Vorschau → `preview-empty` | unit | `pytest tests/test_ibkr_broker.py tests/test_ibkr_preview.py -k preview_empty -x` | ❌ W0 | ⬜ |
-| REQ-37 (Halt) | Fehler 154 am `whatIf` → `halted` | unit | `pytest tests/test_ibkr_broker.py -k halted -x` | ❌ W0 | ⬜ |
-| REQ-68 | kein Marktdatenabruf im Pfad (Fake wirft, AST-Wächter) | unit | `pytest tests/test_ibkr_isolation.py -k no_market_data -x` | ❌ W0 | ⬜ |
-| D-02/D-04 | `paper-log` nicht abrufbar → `paper-log-unavailable`, kein Rückfall | unit | `pytest tests/test_ibkr_paperlog.py -x` | ❌ W0 | ⬜ |
-| G2 | über alle Pfade nie `placeOrder`/`cancelOrder` | unit | `pytest tests/test_ibkr_preview.py -k nothing_sent -x` | ❌ W0 | ⬜ |
-| Wächter | Isolations-/Exit-Tabellen-Wächter angepasst | unit | `pytest tests/test_ibkr_isolation.py -x` | ✅ (anpassen) | ⬜ |
+| Req / SC | Plan/Task | Verhalten | Typ | Automatisierter Befehl | Datei existiert | Status |
+|----------|-----------|-----------|-----|------------------------|-----------------|--------|
+| SC1 / REQ-21 | 04-07 T2, 04-09 T2 | Echter Branchstand (AAPL Hold 10-09, eingefrorene Kopie von `71df89d`) → `skipped-hold`, kein Gateway-Kontakt | unit/E2E-Fake | `pytest tests/test_ibkr_preview.py -k real_branch_hold -x` | ❌ W0 | ⬜ |
+| SC2 / REQ-38, -25 | 04-07 T3 | Buy + flache Position → „BUY 2", `whatIf` MKT/DAY, Log Margin/Kommission/Ablehnungsgrund, nichts gesendet | unit | `pytest tests/test_ibkr_preview.py -k buy_flat -x` | ❌ W0 | ⬜ |
+| SC2 / D-13 | 04-02 T1/T2 | Schreibsperre: nur Id 3 mit `whatIf` passiert; `placeOrder` ohne `whatIf` → `ReadOnlyViolation` (echte `Client`-Klasse) | unit | `pytest tests/test_ibkr_broker.py -k "whatif_barrier or place_order_refused" -x` | ❌ W0 | ⬜ |
+| SC3 / REQ-17 | 04-01 T1, 04-07 T2 | Divergenz Log vs. Summary → Exit 2, `signal-divergence`, Log-Fassung gelesen | unit | `pytest tests/test_ibkr_decision.py -k divergence -x` | ❌ W0 | ⬜ |
+| SC4 / REQ-19, -20 | 04-06 T1 | Vier Gegenproben in XNYS-Sitzungen mit injizierter Uhr | unit | `pytest tests/test_ibkr_decision.py -k freshness -x` | ❌ W0 | ⬜ |
+| SC5 / REQ-14, -15, -16 | 04-01 T1, 04-07 T2 | `null`/`REVIEW`/`status!=ok`/`schema_version!=1`/`verify`-Befund → eigener Zustand, kein `whatIf` | unit | `pytest tests/test_ibkr_decision.py tests/test_ibkr_preview.py -k "preconditions or schema or verify" -x` | ❌ W0 | ⬜ |
+| SC6 / REQ-23 | 04-01 T2, 04-07 T3 | Toleranzband `Ziel − Ist − offen`; fremde offene Order | unit | `pytest tests/test_ibkr_decision.py -k "tolerance or open_order" -x` | ❌ W0 | ⬜ |
+| SC7 / REQ-14, -18 | 04-01 T1 | Vertragstest gegen echten Erzeuger inkl. Negativ-Kontrolle | unit | `pytest tests/test_paper_summary_contract.py -x` | ❌ W0 | ⬜ |
+| SC8 / REQ-24 | 04-01 T2, 04-07 T3 | Sell ohne Bestand → `long-only-noop`, nie Short | unit | `pytest tests/test_ibkr_decision.py -k long_only -x` | ❌ W0 | ⬜ |
+| REQ-13 | 04-01 T1, 04-04 T2 | Parser = `TradingMemoryLog`; neuester Eintrag je Ticker | unit | `pytest tests/test_ibkr_decision.py -k log_entries -x` | ❌ W0 | ⬜ |
+| REQ-22 | 04-03 T3 | `block_qty > 0` je handelbarem Eintrag; keine Preisableitung | unit | `pytest tests/test_ibkr_contracts.py -k block_qty -x` | ❌ W0 | ⬜ |
+| REQ-61 | 04-05 T2, 04-07 T3 | leere/unvollständige Vorschau → `preview-empty` | unit | `pytest tests/test_ibkr_broker.py tests/test_ibkr_preview.py -k preview_empty -x` | ❌ W0 | ⬜ |
+| REQ-37 (Halt) | 04-05 T2 | Fehler 154 am `whatIf` → `halted` | unit | `pytest tests/test_ibkr_broker.py -k halted -x` | ❌ W0 | ⬜ |
+| REQ-68 | 04-09 T1 (+04-05 Fake-Falle) | kein Marktdatenabruf im Pfad (Fake wirft, AST-Wächter) | unit | `pytest tests/test_ibkr_isolation.py -k no_market_data -x` | ❌ W0 | ⬜ |
+| D-02/D-04 | 04-04 T1, 04-07 T2 | `paper-log` nicht abrufbar → `paper-log-unavailable`, kein Rückfall | unit | `pytest tests/test_ibkr_paperlog.py -x` | ❌ W0 | ⬜ |
+| G2 | 04-07 T3 | über alle Pfade nie `placeOrder`/`cancelOrder` | unit | `pytest tests/test_ibkr_preview.py -k nothing_sent -x` | ❌ W0 | ⬜ |
+| Wächter | 04-05, 04-09 T1 | Isolations-/Exit-Tabellen-Wächter angepasst | unit | `pytest tests/test_ibkr_isolation.py -x` | ✅ (anpassen) | ⬜ |
 
 *Status: ⬜ offen · ✅ grün · ❌ rot · ⚠️ instabil*
 

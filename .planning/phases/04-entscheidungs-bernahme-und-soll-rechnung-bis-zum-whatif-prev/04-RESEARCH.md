@@ -437,16 +437,17 @@ def judge_preview(p, available_funds, funds_currency, account_currency):
 | A6 | `exchange_calendars` ist legitim (Alter, Downloads, Quelle geprüft; slopcheck nicht lauffähig) | Package Legitimacy | Supply-Chain; `checkpoint:human-verify` vor Install |
 | A7 | `git fetch <remote> +refs/heads/<branch>` + `FETCH_HEAD` verhält sich wie am echten Repo gemessen auch bei erster Nutzung eines frisch geklonten Remotes | Muster 6 | Für Operator unkritisch |
 
-## Offene Fragen
+## Offene Fragen (RESOLVED)
 
 1. **Exit-Code für `Hold` und weitere „nichts zu tun"-Zustände (Konflikt D-16 vs. Modul-Doku).**
    - Bekannt: D-16 zählt `Hold` unter „Vorbedingungen … bleiben Exit 2". Der Executor-Docstring sagt „0 ok, including nothing to do"; SC1 verlangt `skipped: hold` ohne Exitwert.
    - Unklar: Soll ein täglicher Hold wirklich Exit 2 erzeugen.
    - Empfehlung: D-16 wörtlich umsetzen (Hold = 2), aber `EXIT_BY_STATE` als einzige Tabelle halten und die Frage im ersten Plan als `checkpoint:decision` markieren. `within-tolerance`, `long-only-noop`, `closed` → Exit 0 (SC6/SC8 sprechen von „keine Order"/„Nulloperation").
-2. **Exit-Code für `paper-log-unavailable` (D-02) und `summary-missing`.** CONTEXT nennt „eigenen Zustand und Exit-Code" ohne Wert. Empfehlung: Exit 2 (Vorbedingung nicht erfüllt) für beide; nur Gateway-Fehler bleiben 3.
-3. **D-14 Messung.** Braucht den Operator: Gateway „Read-Only API" an, dann `whatIf` AAPL einmal über eine kleine Sonde. Vorschlag: Sonde `scripts/`-extern (nicht im Repo) mit der neuen Sperre, Ergebnis mit Datum in `.planning/ibkr-konto-befund.md`. Das Gateway lauscht auf `127.0.0.1:7497` (Port offen, 2026-10-12), der Schalter ist laut Befund aus; ich habe bewusst nichts gesendet. Plan: Checkpoint `human-action` am Ende von Welle 1, Fachlogik blockiert nicht darauf.
-4. **Welche Ticker laufen?** `resolve` hat keine Default-Liste. Empfehlung: `preview TICKER...` mit Pflicht-Positionals (Muster wie `resolve`); „Ticker kommt aus der Entscheidung" heißt: Block/Contract werden je Ticker aus Tabelle und Entscheidung gezogen. Ein Ticker ohne Log-Eintrag → `no-decision` (Exit 2).
-5. **SC1 gegen den „echten" Branchstand.** Am 2026-10-12 (Mo) gilt der Fr-Eintrag noch (E = Mo, `weekend_gap` 3 Tage), ab Mi 14.10. wäre er `stale-decision` (Exit 2) vor Hold. Plan: SC1 als Test mit eingefrorener Kopie von Commit `71df89d` und injizierter Uhr 2026-10-12; zusätzlich Operator-Handlauf in HUMAN-UAT am Mo/Di.
+   - RESOLVED: Hold = Exit 2 laut D-16, einzige Tabelle `EXIT_BY_STATE`; kein Checkpoint, da D-16 eindeutig (04-01).
+2. **Exit-Code für `paper-log-unavailable` (D-02) und `summary-missing`.** CONTEXT nennt „eigenen Zustand und Exit-Code" ohne Wert. Empfehlung: Exit 2 (Vorbedingung nicht erfüllt) für beide; nur Gateway-Fehler bleiben 3. RESOLVED: beide Exit 2 (04-01, 04-04).
+3. **D-14 Messung.** Braucht den Operator: Gateway „Read-Only API" an, dann `whatIf` AAPL einmal über eine kleine Sonde. Vorschlag: Sonde `scripts/`-extern (nicht im Repo) mit der neuen Sperre, Ergebnis mit Datum in `.planning/ibkr-konto-befund.md`. Das Gateway lauscht auf `127.0.0.1:7497` (Port offen, 2026-10-12), der Schalter ist laut Befund aus; ich habe bewusst nichts gesendet. Plan: Checkpoint `human-action` am Ende von Welle 1, Fachlogik blockiert nicht darauf. RESOLVED: Operator-Messung Schalter aus/an in 04-08.
+4. **Welche Ticker laufen?** `resolve` hat keine Default-Liste. Empfehlung: `preview TICKER...` mit Pflicht-Positionals (Muster wie `resolve`); „Ticker kommt aus der Entscheidung" heißt: Block/Contract werden je Ticker aus Tabelle und Entscheidung gezogen. Ein Ticker ohne Log-Eintrag → `no-decision` (Exit 2). RESOLVED: Pflicht-Positionals (04-07).
+5. **SC1 gegen den „echten" Branchstand.** Am 2026-10-12 (Mo) gilt der Fr-Eintrag noch (E = Mo, `weekend_gap` 3 Tage), ab Mi 14.10. wäre er `stale-decision` (Exit 2) vor Hold. Plan: SC1 als Test mit eingefrorener Kopie von Commit `71df89d` und injizierter Uhr 2026-10-12; zusätzlich Operator-Handlauf in HUMAN-UAT am Mo/Di. RESOLVED: eingefrorene Kopie + Uhr 2026-10-12 (04-04, 04-07), Handlauf 04-09.
 
 ## Verfügbarkeit der Umgebung
 
