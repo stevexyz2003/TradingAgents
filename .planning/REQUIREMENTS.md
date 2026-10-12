@@ -128,8 +128,10 @@ Jede Anforderung ist **ein prüfbarer Satz**. Wo der Satz allein nicht sagt, wie
 **REQ-IBKR-30** — Der `conId` des aufgelösten Contracts wird **persistiert** und bei jedem Lauf gegen die Erwartung geprüft (`conId`, `primaryExchange`, `currency`, `localSymbol`); ab dem zweiten Lauf wird über `conId` + `exchange` geordert, und ein geänderter `conId` bei gleichem Symbol führt zu keiner Order, sondern zu einer Meldung.
 > Begründung: `conId` + `exchange` ist die offiziell minimale, eindeutige Contract-Form, und IBKR empfiehlt das Persistieren selbst. Ein geänderter `conId` bei gleichem Symbol ist das Alarmsignal für eine Corporate Action. Nebeneffekt: die Pacing-Grenzen der Symbolsuche (`reqMatchingSymbols` ≥ 1 s, max. 16 Treffer, nur Aktien) entfallen nach dem ersten Lauf.
 
-**REQ-IBKR-31** — Die **Handelbarkeit** wird abgefragt, nicht angenommen: eine nicht-leere `ineligibilityReasonList` oder `validExchanges`, das nur noch die Pseudo-Börse `VALUE` enthält, verhindert die Order.
+**REQ-IBKR-31** — Die **Handelbarkeit** wird abgefragt, nicht angenommen: `validExchanges` besteht nicht nur aus der Pseudo-Börse `VALUE` und enthält `SMART`, und `orderTypes` enthält `MKT` und `LMT`; leere Felder gelten als nicht handelbar. Letzte Schicht ist das `whatIf`-Preview (Phase 4).
 > Begründung: `ineligibilityReasonList` ist „List of details why the account cannot trade the given security" — genau das gesuchte Signal; seine offizielle Felddokumentation ist allerdings erkennbar ein Copy-Paste-Fehler, der Inhalt ist deshalb am Konto empirisch anzusehen (REQ-IBKR-01c). `VALUE` ist „a holding exchange used for clients to close positions on a contract that is no longer listed" — man kann schließen, aber nicht eröffnen.
+
+*Geändert 2026-10-12 (Phase 3, D-19): `ineligibilityReasonList` existiert in ib_async 2.1.0 nicht (`.planning/ibkr-konto-befund.md` §4); der frühere Wortlaut war so nicht prüfbar. Bestätigung durch den Operator im Verifikationsbericht der Phase 3.*
 
 ---
 
@@ -155,6 +157,8 @@ Die vier Pflicht-Leitplanken sind markiert: `[L1]` Positionsgröße · `[L2]` Ki
 
 **REQ-IBKR-37** `[L3]` — Eine Order entsteht nur, wenn der Ausführungszeitpunkt in einem `liquidSessions()`-Intervall des **aufgelösten** Contracts liegt; `outsideRth` bleibt in M2 aus, Handelszeiten werden aus `ContractDetails` (`tradingHours`/`liquidHours`/`timeZoneId`) gelesen und nie als Uhrzeit hart kodiert, der Cache dafür lebt höchstens einen Handelstag, und ein `HALTED`-Tick bzw. Fehler **154** verhindert die Order.
 > Begründung: IBKR liefert pro Kalendertag entweder ein konkretes Fenster oder `CLOSED` — Feiertage und Halbtage kommen damit ohne eigenen Kalender mit. `ib_async` parst das bereits zeitzonenbewusst. Der tägliche Gateway-Restart existiert laut IBKR genau zum Neuladen der Contract-Definitionen, deshalb darf der Cache den Restart nicht überleben. Und: Handelszeit ist nicht Handelbarkeit — ein Contract kann mitten in den `liquidHours` angehalten sein.
+
+*Geändert 2026-10-12 (Phase 3, D-20): Verzögerte Marktdaten liefern am Paper-Konto keinen Halted-Tick (Messung bei offener US-Sitzung, `03-RESEARCH.md` §D-20). Phase 3 liefert Sitzungsfenster, Puffer und `session-unknown` und sieht den Zustand `halted` nur in der Ergebnisschnittstelle vor; die Halt-Erkennung über Fehler **154** am `whatIf` übernimmt Phase 4. Bestätigung durch den Operator im Verifikationsbericht der Phase 3.*
 
 **REQ-IBKR-38** — Vor **jeder** echten Order läuft ein `whatIf`-Preview (`IB.whatIfOrder()`); Margin-Impact, Kommission und ein eventuelles `rejectReason` werden protokolliert, und ein gesetztes `rejectReason` verhindert die Order. Das Preview ist nur dann aussagekräftig, wenn **REQ-IBKR-69** eingehalten ist — ohne explizites `tif` kommt es wortlos leer zurück.
 > Begründung: Das ist der stärkste Einzel-Check der Kette — *„the order will undergo a credit check for the expected post-trade margin requirement without executing an order"*. Eine Order auf den falschen Contract fällt hier über Margin, Kommission oder Reject-Grund auf, **bevor** sie gesendet wird.

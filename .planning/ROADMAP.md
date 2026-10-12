@@ -183,6 +183,7 @@ Plans:
 **Ziel:** Aus der Entscheidung auf `paper-log` entsteht eine vollständig geprüfte, von IBKR vorab bewertete Order-Absicht — die der Lauf nachweislich nicht sendet.
 **Depends on:** Phase 3
 **Requirements:** REQ-IBKR-13, -14, -15, -16, -17, -18, -19, -20, -21, -22, -23, -24, -25, -38, -61, -68
+**Übergabe aus Phase 3:** Halt-Teil von REQ-IBKR-37 — Fehler 154 am `whatIf` verhindert die Order-Absicht und wird als eigener Zustand protokolliert (Phase 3 sieht nur den Zustand `halted` in der Ergebnisschnittstelle vor, D-20).
 
 **Success Criteria:**
 
@@ -351,13 +352,13 @@ Alle 70 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer 
 | REQ-IBKR-28 | Allow-List `{STK}`, Unbekanntes wird abgewiesen | 3 |
 | REQ-IBKR-29 | `qualifyContracts(returnAll=True)`, genau ein Treffer | 3 |
 | REQ-IBKR-30 | `conId` persistiert + Identitätsvergleich | 3 |
-| REQ-IBKR-31 | `ineligibilityReasonList` / `validExchanges` / `VALUE` | 3 |
+| REQ-IBKR-31 | `validExchanges` ≠ nur `VALUE`, enthält `SMART`; `orderTypes` ⊇ `MKT`,`LMT` (D-19) | 3 |
 | REQ-IBKR-32 | `[L1]` Harte Obergrenze pro Order, keine Kürzung | 5 |
 | REQ-IBKR-33 | `[L2]` Kill-Switch fail-closed | 5 |
 | REQ-IBKR-34 | `[L2]` Prüfung vor jeder einzelnen Order | 5 |
 | REQ-IBKR-35 | `[L2]` `reqGlobalCancel` als scharfer Arm | 5 |
 | REQ-IBKR-36 | `[L2]` Schalterzustand in jedem Lauf protokolliert | 5 |
-| REQ-IBKR-37 | `[L3]` Sitzungsfenster aus `ContractDetails`, `HALTED`/154 | 3 |
+| REQ-IBKR-37 | `[L3]` Sitzungsfenster aus `ContractDetails`; `HALTED`/154 am `whatIf` in Phase 4 (D-20) | 3 |
 | REQ-IBKR-38 | `whatIf`-Preview vor jeder echten Order | 4 |
 | REQ-IBKR-39 | `[L4]` `decision_key` aus `trade_date` und Ticker, kein SHA | 5 |
 | REQ-IBKR-40 | `[L4]` Ein Versuch pro Schlüssel, erste Fassung gewinnt | 5 |
@@ -397,7 +398,7 @@ Alle 70 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer 
 **Zwei Anforderungen wirken über ihre Phase hinaus** — das ist Absicht und keine Doppelzuordnung:
 
 - **REQ-IBKR-11** (Kontolesen → `PortfolioContext`) wird in Phase 2 erzeugt und lokal nachgewiesen; die Verdrahtung in den täglichen CI-Lauf ist ein Erfolgskriterium von Phase 7, weil sie den Veröffentlichungsbranch braucht.
-- **REQ-IBKR-37** (Sitzungsfenster) entsteht in Phase 3 als Abfrage und wird in Phase 6 Teil der scharfen Prüfkette (REQ-IBKR-45).
+- **REQ-IBKR-37** (Sitzungsfenster) entsteht in Phase 3 als Abfrage und wird in Phase 6 Teil der scharfen Prüfkette (REQ-IBKR-45); der Halt-Teil (Fehler 154) wird in Phase 4 am `whatIf` abgefangen (D-20 der Phase 3).
 
 ---
 
