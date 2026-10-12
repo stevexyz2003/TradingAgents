@@ -61,53 +61,67 @@ Begrenzung „harte Positionsgröße pro Order" ist dann als Stückzahl **und**
 optional als Obergrenze in USD (`Stück × last`) formulierbar, ohne EUR zu
 berühren.
 
-## 4. `whatIf` liefert bei geschlossenem Markt eine **leere Liste**
+## 4. `whatIf` — **GELÖST**: die Order-Voreinstellung verwarf die Anfrage
+
+**Ursache gefunden am 2026-10-12.** Nicht der geschlossene Markt, nicht die
+Bibliothek — die **Order-Voreinstellung des Gateways**:
+
+`LimitOrder(...)` aus `ib_async` setzt kein `tif`. Das Gateway schreibt es dann
+gemäß seiner Voreinstellung auf `DAY` um, meldet das als **10349** — und
+**verwirft dabei die whatIf-Anfrage**. Zurück kommt eine leere Liste statt eines
+`OrderState`, ohne Fehler. Der 10349 lag bei jeder Messung vor und sah wie eine
+Randnotiz aus.
+
+**Die Lösung ist eine Zeile:** `order.tif` explizit setzen.
 
 ```text
-ib.whatIfOrder(AAPL, LimitOrder BUY 10 @ 336.00, whatIf=True)
-typ: list
-repr: []
-(einziger Code: 10349 - Gültigkeitsdauer gemäß Order-Voreinstellungen auf DAY gesetzt)
+whatIf tif='DAY'  -> OrderState   whatIf tif='GTC'  -> OrderState   (identisch)
+    initMarginChange     = 640.64
+    maintMarginChange    = 582.4
+    commission           = 4.0
+    commissionCurrency   = EUR
 ```
+(SAP/IBIS, 10 Stück LMT 180, gemessen bei **offenem** XETRA-Handel 14:48 MESZ.)
 
-Erwartet war ein `OrderState` mit `initMarginChange`, `maintMarginChange`,
-`equityWithLoanChange` und `commission` — in Kontowährung, womit das Preview
-zugleich die fehlende Umrechnung aus Befund 3 geliefert hätte.
+Dass der Markt offen war, widerlegte zugleich die alte Hypothese: Dieselbe
+leere Liste kam auch bei `tradingHours=True` und `liquidHours=True`.
 
-**Stattdessen kam `[]`, ohne Fehlermeldung.** Kein `OrderState`, keine Ablehnung,
-kein Grund.
+### Und damit ist auch die Währungsfrage aus Befund 3 gelöst
 
-**Zwischenmessung 2026-10-12, 09:09 MESZ (03:09 EDT):** `whatIf` liefert
-weiterhin `[]`. Der Markt war aber erneut zu — das Gateway selbst sagt:
+Dieselbe Abfrage auf **AAPL** (USD-Papier, EUR-Konto, US-Pre-Market):
 
 ```text
-naechste tradingSession : Mon 12.10 04:00 - 20:00 US/Eastern   (10:00-02:00 MESZ)
-naechste liquidSession  : Mon 12.10 09:30 - 16:00              (15:30-22:00 MESZ)
-handelbar JETZT: tradingHours=False  liquidHours=False
+AAPL whatIf tif='DAY' -> OrderState
+    initMarginChange     = 997.14      <- Kontowährung EUR
+    maintMarginChange    = 906.49
+    commission           = 1.00003
+    commissionCurrency   = USD         <- Instrumentwährung
 ```
 
-Damit ist „liegt nur am Wochenende" ausgeschlossen, die Frage aber unverändert
-offen. Die aussagekräftigen Zeitpunkte sind **10:00 MESZ** (Pre-Market, dann ist
-`tradingHours` wahr) und **15:30 MESZ** (reguläre Sitzung, `liquidHours` wahr).
-Der Unterschied zählt: Liefert `whatIf` schon im Pre-Market Werte, hängt es an
-`tradingHours`; erst ab 15:30, an der liquiden Sitzung. Der Ausführer fällt nach
-dem 06:30-UTC-Analyselauf genau in dieses Fenster.
+10 × 336 USD ≈ 3360 USD ≈ 3100 EUR; 997 EUR entspricht rund 32 % Initial Margin.
+**Margin kommt in Kontowährung, Kommission in Instrumentwährung.**
 
-**Nicht abschließend geklärt:** Beide bisherigen Messungen lagen außerhalb der
-Handelszeiten. Ob das Preview zu Handelszeiten Werte liefert, ist **zu
-Handelszeiten erneut zu messen** — frühestens Montag nach 09:30 US/Eastern
-(15:30 MESZ). Dies hier ist ein Befund, keine Diagnose.
+Für Phase 4 heißt das: Das Preview liefert die Umrechnung **implizit**. Ob eine
+Order ins EUR-Budget passt, ist über `initMarginChange` prüfbar, ohne dass der
+Ausführer je einen EUR/USD-Kurs braucht — der über Marktdaten ohnehin nicht zu
+bekommen ist (Befund 2). Kein Marktdaten-Abo nötig.
 
-**Was unabhängig vom Grund für Phase 4 gilt:** Gate G2 steht und fällt mit dem
-Preview. Der Ausführer darf eine leere Antwort **niemals** als Freigabe lesen.
-„Kein `OrderState`" muss denselben Weg nehmen wie „Preview abgelehnt": keine
-Order, benannter Zustand, Exit-Code. Sonst entsteht genau das, wogegen G2 gebaut
-wurde — eine Order, die ein nicht stattgefundenes Preview passiert hat.
+### Anforderungen, die daraus folgen
+
+1. **`tif` wird bei jeder Order explizit gesetzt** — sonst greift die
+   Voreinstellung des Gateways und die Preview-Anfrage verschwindet
+   wortlos. Der tatsächlich gesetzte Wert wird aus dem Ergebnis zurückgelesen.
+2. **Gate G2 prüft auf einen `OrderState` mit Margin-Feldern**, nicht auf
+   „kein Fehler". Eine leere Liste ist eine Ablehnung (siehe
+   Sicherungsprinzip S-01).
+3. **Budgetprüfung über `initMarginChange`** in Kontowährung statt über eine
+   eigene Währungsrechnung.
+4. **10349 ist kein harmloser Hinweis**, sondern der Marker dieses Problems —
+   er gehört in die Liste der behandelten Codes.
 
 ## Offene Punkte
 
-1. `whatIf` zu Handelszeiten erneut messen (Befund 4).
-2. Entscheiden, ob verzögerte Kurse für das Limit-Verfahren genügen oder ob ein
+1. Entscheiden, ob verzögerte Kurse für das Limit-Verfahren genügen oder ob ein
    Marktdaten-Abo nötig wird — Letzteres ist eine Kostenentscheidung des
    Operators, keine technische.
 3. Nach der ersten USD-Position prüfen, ob `ExchangeRate` dann im Kontobericht
