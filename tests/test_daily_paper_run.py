@@ -10,7 +10,7 @@ import importlib.util
 import json
 import os
 import re
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -412,6 +412,14 @@ def _portfolio_file(tmp_path: Path, payload) -> Path:
     return path
 
 
+def _as_of(age: timedelta = timedelta(0)) -> str:
+    return (datetime.now(UTC) - age).isoformat()
+
+
+def _book(**extra):
+    return {"cash": 1000.0, "currency": "EUR", "positions": [], "as_of": _as_of(), **extra}
+
+
 @pytest.mark.unit
 class TestPortfolio:
     def test_portfolio_is_passed_to_propagate(self, monkeypatch, tmp_path):
@@ -419,6 +427,7 @@ class TestPortfolio:
             "cash": 1000.0,
             "currency": "EUR",
             "positions": [{"ticker": "AAPL", "quantity": 10, "average_price": 150.0}],
+            "as_of": _as_of(timedelta(minutes=2)),
         })
         graph = _FakeGraph()
         exit_code = _run_main(monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(path)))
@@ -459,3 +468,59 @@ class TestPortfolio:
             monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(path), "--preflight")
         )
         assert exit_code == runner.EXIT_CONFIG
+
+    # --- CR-02: a portfolio needs a positive proof that it is fresh ---------------------
+
+    @pytest.mark.parametrize(
+        ("payload", "reason"),
+        [
+            ({"cash": 1000.0, "currency": "EUR", "positions": []}, "no as_of"),
+            (_book(as_of=None), "no as_of"),
+            (_book(as_of="yesterday"), "not an ISO timestamp"),
+            (_book(as_of="2026-10-12T08:00:00"), "no time zone"),
+            (_book(as_of=_as_of(timedelta(hours=26))), "older than"),
+            (_book(as_of=_as_of(timedelta(minutes=61))), "older than"),
+            (_book(as_of=_as_of(-timedelta(hours=1))), "in the future"),
+        ],
+        ids=["missing", "null", "garbage", "naive", "yesterday", "just-stale", "future"],
+    )
+    def test_portfolio_without_fresh_as_of_is_refused(
+        self, monkeypatch, tmp_path, capsys, payload, reason
+    ):
+        path = _portfolio_file(tmp_path, payload)
+        graph = _FakeGraph()
+        exit_code = _run_main(monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(path)))
+        assert exit_code == runner.EXIT_CONFIG
+        assert graph.calls == []
+        err = capsys.readouterr().err
+        assert reason in err
+        assert str(path.resolve()) in err
+
+    def test_stale_portfolio_fails_preflight_too(self, monkeypatch, tmp_path):
+        path = _portfolio_file(tmp_path, _book(as_of=_as_of(timedelta(days=7))))
+        exit_code = _run_main(
+            monkeypatch,
+            tmp_path,
+            _FakeGraph(),
+            extra_args=("--portfolio", str(path), "--preflight"),
+        )
+        assert exit_code == runner.EXIT_CONFIG
+
+    def test_max_age_flag_widens_the_window(self, monkeypatch, tmp_path):
+        path = _portfolio_file(tmp_path, _book(as_of=_as_of(timedelta(hours=3))))
+        graph = _FakeGraph()
+        args = ("--portfolio", str(path), "--portfolio-max-age-minutes", "240")
+        assert _run_main(monkeypatch, tmp_path, graph, extra_args=args) == runner.EXIT_OK
+        assert graph.portfolios[0].cash == 1000.0
+
+    def test_max_age_must_be_positive(self, monkeypatch, tmp_path):
+        path = _portfolio_file(tmp_path, _book())
+        args = ("--portfolio", str(path), "--portfolio-max-age-minutes", "0")
+        assert _run_main(monkeypatch, tmp_path, _FakeGraph(), extra_args=args) == runner.EXIT_CONFIG
+
+    def test_fresh_portfolio_is_accepted_and_its_age_printed(self, monkeypatch, tmp_path, capsys):
+        path = _portfolio_file(tmp_path, _book(as_of=_as_of(timedelta(minutes=5))))
+        graph = _FakeGraph()
+        exit_code = _run_main(monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(path)))
+        assert exit_code == runner.EXIT_OK
+        assert "as_of" in capsys.readouterr().out

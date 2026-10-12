@@ -28,11 +28,13 @@ import traceback
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from tradingagents.budget import BudgetConfigError, BudgetExceededError, ensure_rates_configured
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients.api_key_env import get_api_key_env
-from tradingagents.portfolio import load_portfolio
+from tradingagents.portfolio import PortfolioContext
 
 EXIT_OK = 0
 EXIT_CONFIG = 1
@@ -42,6 +44,15 @@ EXIT_NO_CREDENTIALS = 20
 
 #: Bumped when the shape of summary.json changes in a non-additive way.
 SUMMARY_SCHEMA_VERSION = 1
+
+#: Top-level key of a --portfolio file that dates the snapshot (UTC, ISO 8601),
+#: written by scripts/ibkr_executor.py account (its AS_OF_KEY).
+PORTFOLIO_AS_OF_KEY = "as_of"
+#: Oldest snapshot a run accepts unless --portfolio-max-age-minutes says otherwise.
+#: The handbook chains the snapshot and the run with &&, so minutes lie between them.
+DEFAULT_PORTFOLIO_MAX_AGE = timedelta(minutes=60)
+#: Clock skew tolerated before an ``as_of`` counts as being in the future.
+PORTFOLIO_CLOCK_SKEW = timedelta(minutes=5)
 
 #: Azure needs all four; the key alone is not enough to reach a deployment.
 AZURE_REQUIRED_ENV = (
@@ -121,6 +132,48 @@ def resolve_trade_date(value: str | None, *, now: datetime | None = None) -> str
     except ValueError as exc:
         raise ConfigError(f"--date must be YYYY-MM-DD or 'auto', got {value!r}") from exc
     return value
+
+
+def load_fresh_portfolio(
+    path: Path, *, max_age: timedelta, now: datetime | None = None
+) -> PortfolioContext:
+    """A --portfolio file with a positive proof that it is fresh (CR-02).
+
+    The schema alone proves nothing: yesterday's book validates as well as
+    today's. The file must carry ``as_of`` (an ISO 8601 timestamp with a time
+    zone) no older than ``max_age`` and not in the future, or the run stops
+    before it starts. The file is read once, so the book and its date come
+    from the same content. Unknown keys such as ``as_of`` are ignored by
+    ``PortfolioContext``, so the book itself is what ``load_portfolio()`` reads.
+    """
+    now = now or datetime.now(UTC)
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        portfolio = PortfolioContext.model_validate(data)
+    except (OSError, json.JSONDecodeError, ValidationError) as exc:
+        raise ConfigError(f"portfolio file {path} is not usable: {exc}") from exc
+    raw = data.get(PORTFOLIO_AS_OF_KEY)
+    if not isinstance(raw, str):
+        raise ConfigError(
+            f"portfolio file {path} has no as_of timestamp, so nothing shows it is "
+            "fresh - write it with scripts/ibkr_executor.py account right before the run"
+        )
+    try:
+        as_of = datetime.fromisoformat(raw)
+    except ValueError:
+        raise ConfigError(f"portfolio file {path}: as_of {raw!r} is not an ISO timestamp") from None
+    if as_of.tzinfo is None:
+        raise ConfigError(f"portfolio file {path}: as_of {raw!r} has no time zone")
+    age = now - as_of
+    if age < -PORTFOLIO_CLOCK_SKEW:
+        raise ConfigError(f"portfolio file {path}: as_of {raw} is in the future")
+    if age > max_age:
+        raise ConfigError(
+            f"portfolio file {path}: as_of {raw} is older than "
+            f"{max_age.total_seconds() / 60:g} minutes - refresh it with "
+            "scripts/ibkr_executor.py account"
+        )
+    return portfolio
 
 
 def load_rates(path: Path) -> dict[str, dict[str, float]]:
@@ -366,8 +419,14 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--portfolio",
         type=Path,
         default=None,
-        help="Local PortfolioContext JSON (e.g. from scripts/ibkr_executor.py account). "
-        "Optional; the CI run never passes it.",
+        help="Local PortfolioContext JSON from scripts/ibkr_executor.py account; it must "
+        "carry a fresh as_of timestamp. Optional; the CI run never passes it.",
+    )
+    parser.add_argument(
+        "--portfolio-max-age-minutes",
+        type=float,
+        default=DEFAULT_PORTFOLIO_MAX_AGE.total_seconds() / 60,
+        help="Oldest --portfolio snapshot (by its as_of) the run accepts, in minutes.",
     )
     parser.add_argument("--out", type=Path, required=True, help="Per-run output directory.")
     parser.add_argument(
@@ -390,10 +449,12 @@ def main(argv=None) -> int:
         rates = load_rates(args.rates)
         portfolio = None
         if args.portfolio is not None:
-            try:
-                portfolio = load_portfolio(args.portfolio.resolve())
-            except ValueError as exc:
-                raise ConfigError(str(exc)) from exc
+            if not args.portfolio_max_age_minutes > 0:
+                raise ConfigError("--portfolio-max-age-minutes must be greater than 0.")
+            portfolio = load_fresh_portfolio(
+                args.portfolio.resolve(),
+                max_age=timedelta(minutes=args.portfolio_max_age_minutes),
+            )
         if args.max_cost <= 0:
             raise ConfigError("--max-cost must be greater than 0.")
         max_total = args.max_total_cost
@@ -424,7 +485,8 @@ def main(argv=None) -> int:
     if portfolio is not None:
         print(
             f"portfolio: {args.portfolio.resolve()} ({len(portfolio.positions)} position(s), "
-            f"cash {portfolio.cash} {portfolio.currency})"
+            f"cash {portfolio.cash} {portfolio.currency}, as_of checked against "
+            f"{args.portfolio_max_age_minutes:g} min)"
         )
     if args.preflight:
         if absent:

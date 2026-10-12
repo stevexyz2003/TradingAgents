@@ -5,7 +5,9 @@ Operational tooling, not part of the ``tradingagents`` library. Phase 2 reads
 only: the ``account`` command connects through the adapter in
 ``scripts/ibkr_broker.py``, checks the paper-account guard and the session's
 liveness, reads positions and cash, and writes them as a ``PortfolioContext``
-JSON that ``scripts/daily_paper_run.py --portfolio`` accepts.
+JSON, dated by an ``as_of`` key, that ``scripts/daily_paper_run.py --portfolio``
+accepts while it is fresh. Every run first removes the ``--out`` file of an
+earlier run, so a failed run leaves no book behind.
 
 Operating manual: ``scripts/IBKR_EXECUTION.md``.
 
@@ -35,10 +37,12 @@ Code 3 means "gateway" here, unlike EXIT_RUN_FAILED (3) in the paper run.
 
 import argparse
 import importlib.util
+import json
 import logging
 import os
 import sys
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -62,6 +66,10 @@ REQUIRED_ENV = ("IBKR_HOST", "IBKR_PORT", "IBKR_ACCOUNT_ID")
 #: Optional; when set it must say paper.
 TRADING_MODE_ENV = "IBKR_TRADING_MODE"
 EXPECTED_TRADING_MODE = "paper"
+
+#: Top-level key of the portfolio JSON that dates the snapshot (UTC, ISO 8601).
+#: Same literal as ``PORTFOLIO_AS_OF_KEY`` in daily_paper_run.py; a test keeps them in step.
+AS_OF_KEY = "as_of"
 
 #: The repository's .env, by a fixed path so the current directory does not matter.
 DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
@@ -254,7 +262,24 @@ def snapshot_to_portfolio(snapshot, logger: logging.Logger) -> PortfolioContext:
     )
 
 
-def write_portfolio_atomic(ctx: PortfolioContext, out: Path, *, check=None) -> None:
+def portfolio_json(ctx: PortfolioContext, as_of: datetime) -> str:
+    """The file content: the ``PortfolioContext`` fields plus ``as_of`` (UTC, ISO 8601).
+
+    ``as_of`` is an extra top-level key. ``PortfolioContext`` ignores unknown
+    keys, so ``load_portfolio()`` reads the file unchanged and the book's
+    fingerprint does not move; ``daily_paper_run.py --portfolio`` reads the key
+    as its proof that the book is fresh (CR-02).
+    """
+    if as_of.tzinfo is None:
+        raise ValueError("as_of must carry a time zone")
+    data = ctx.model_dump(mode="json")
+    data[AS_OF_KEY] = as_of.astimezone(UTC).isoformat()
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def write_portfolio_atomic(
+    ctx: PortfolioContext, out: Path, *, as_of: datetime, check=None
+) -> None:
     """Write ``out`` through a uniquely named temp file beside it, then move it into place.
 
     ``check`` (if given) reads the temp file before the move, so a file that
@@ -267,7 +292,7 @@ def write_portfolio_atomic(ctx: PortfolioContext, out: Path, *, check=None) -> N
     out.parent.mkdir(parents=True, exist_ok=True)
     temp = out.with_name(f"{out.name}.{uuid.uuid4().hex}.tmp")
     try:
-        temp.write_text(ctx.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        temp.write_text(portfolio_json(ctx, as_of), encoding="utf-8")
         if check is not None:
             check(temp)
         os.replace(temp, out)
@@ -280,7 +305,8 @@ def run_account(args, settings, broker_mod, broker_factory, logger, progress=Non
     """Connect, check liveness, read the book, then write and cross-check the JSON.
 
     The JSON is written only on the exit-0 path and only after the session is
-    closed. ``progress["connected"]`` tells the caller whether a session stood.
+    closed; the caller has already removed any earlier file, so a failed run
+    leaves none. ``progress["connected"]`` tells the caller whether a session stood.
     """
     host, port, _account = settings
     out = Path(args.out).resolve()
@@ -305,7 +331,7 @@ def run_account(args, settings, broker_mod, broker_factory, logger, progress=Non
     )
     try:
         ctx = snapshot_to_portfolio(snapshot, logger)
-        write_portfolio_atomic(ctx, out, check=load_portfolio)
+        write_portfolio_atomic(ctx, out, as_of=snapshot.as_of, check=load_portfolio)
         load_portfolio(out)  # cross-check of the file in place (criterion 1)
     except (OSError, ValueError) as exc:
         raise OutputError(f"{out}: {type(exc).__name__}: {exc}") from exc
@@ -357,7 +383,31 @@ def main(argv: list[str] | None = None, *, broker_factory=None) -> int:
         close_logging()
 
 
+def _discard_previous(out: Path, logger: logging.Logger) -> None:
+    """Remove the file of an earlier run before anything else happens (CR-02).
+
+    A failed run must leave no book behind: the paper run reads whatever file
+    is there, and an old one would pass every schema check.
+    """
+    try:
+        out.unlink()
+    except FileNotFoundError:
+        return
+    logger.info("previous portfolio removed: %s", out)
+
+
 def _account(args, broker_factory, logger) -> int:
+    out = Path(args.out).resolve()
+    try:
+        _discard_previous(out, logger)
+    except OSError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=OUTPUT_INVALID previous file not removable: {out} "
+            f"({type(exc).__name__}: {exc})",
+            f"previous portfolio JSON not removable: {out} ({type(exc).__name__})",
+        )
     try:
         raw = read_settings(args.env_file)
     except MissingSettings as exc:

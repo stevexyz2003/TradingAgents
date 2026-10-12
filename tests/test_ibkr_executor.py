@@ -379,13 +379,30 @@ class TestAccount:
         assert ctx.positions[0].average_price is None
         assert "FUT" in (tmp_path / "x.log").read_text(encoding="utf-8")
 
-    def test_account_json_contains_only_schema_fields(self, tmp_path, loop):
+    def test_account_json_contains_schema_fields_and_as_of(self, tmp_path, loop):
         fake = ibkr_fakes.FakeIB(**_book())
+        before = datetime.now(UTC)
         code, out, log = _run(tmp_path, _fake_factory(fake, loop))
         assert code == executor.EXIT_OK
         data = json.loads(out.read_text(encoding="utf-8"))
-        assert set(data) <= {"cash", "currency", "positions"}
-        assert "as_of=" in _log_text(log)
+        assert set(data) == {"cash", "currency", "positions", "as_of"}
+        as_of = datetime.fromisoformat(data["as_of"])
+        assert as_of.tzinfo is not None
+        assert before <= as_of <= datetime.now(UTC)
+        assert f"as_of={data['as_of']}" in _log_text(log)
+
+    def test_written_file_passes_the_paper_runs_freshness_check(self, tmp_path, loop):
+        spec = importlib.util.spec_from_file_location(
+            "daily_paper_run", _SCRIPT.with_name("daily_paper_run.py")
+        )
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        assert executor.AS_OF_KEY == runner.PORTFOLIO_AS_OF_KEY
+        code, out, _log = _run(tmp_path, _fake_factory(ibkr_fakes.FakeIB(**_book()), loop))
+        assert code == executor.EXIT_OK
+        ctx = runner.load_fresh_portfolio(out, max_age=runner.DEFAULT_PORTFOLIO_MAX_AGE)
+        assert ctx == load_portfolio(out)
+        assert ctx.cash == 1005459.44
 
     @pytest.mark.parametrize(
         "accounts",
@@ -489,14 +506,40 @@ class TestAccount:
         assert "disconnect" in fake.calls
         assert not out.exists()
 
-    def test_existing_out_file_survives_a_failed_run(self, tmp_path, loop):
+    @pytest.mark.parametrize(
+        ("fake_kwargs", "env_values", "expected"),
+        [
+            ({"accounts": ["DU0000001"]}, {}, "EXIT_ACCOUNT_GUARD"),
+            ({"refuse": ConnectionRefusedError()}, {}, "EXIT_GATEWAY"),
+            ({"probe": "hang"}, {}, "EXIT_GATEWAY"),
+            ({}, {"IBKR_PORT": None}, "EXIT_NO_CREDENTIALS"),
+            ({}, {"IBKR_TRADING_MODE": "live"}, "EXIT_CONFIG"),
+        ],
+        ids=["guard", "unreachable", "unhealthy", "no-settings", "bad-config"],
+    )
+    def test_a_failed_run_leaves_no_portfolio_file(
+        self, tmp_path, loop, fake_kwargs, env_values, expected
+    ):
+        # CR-02: a stale book from an earlier run must not survive a failed one,
+        # or the paper run would analyze against it without noticing.
         out = tmp_path / "out" / "portfolio.json"
         out.parent.mkdir(parents=True)
-        out.write_text("X", encoding="utf-8")
-        fake = ibkr_fakes.FakeIB(accounts=["DU0000001"], **_book())
-        code, _out, _log = _run(tmp_path, _fake_factory(fake, loop), out=out)
-        assert code == executor.EXIT_ACCOUNT_GUARD
-        assert out.read_text(encoding="utf-8") == "X"
+        out.write_text('{"cash": 1.0, "currency": "EUR", "positions": []}', encoding="utf-8")
+        fake = ibkr_fakes.FakeIB(**{**_book(), **fake_kwargs})
+        env = _env_file(tmp_path, **env_values)
+        code, _out, log = _run(tmp_path, _fake_factory(fake, loop), env_file=env, out=out)
+        assert code == getattr(executor, expected)
+        assert not out.exists()
+        assert "previous portfolio removed" in _log_text(log)
+
+    def test_unremovable_previous_file_exits_1_before_connecting(self, tmp_path):
+        out = tmp_path / "out" / "portfolio.json"
+        out.mkdir(parents=True)  # a directory cannot be unlinked as a file
+        factory = _RecordingFactory()
+        code, _out, log = _run(tmp_path, factory, out=out)
+        assert code == executor.EXIT_CONFIG
+        assert factory.calls == []
+        assert "OUTPUT_INVALID" in _log_text(log)
 
     def test_failed_cross_check_exits_1(self, tmp_path, capsys, loop, monkeypatch):
         def refuse(path):

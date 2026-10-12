@@ -194,8 +194,14 @@ same rule voids a probe answer that arrived together with a link event.
    multiplier).
 6. Disconnect, then write the JSON atomically: temp file beside the target,
    validated by `load_portfolio()`, moved into place with `os.replace`
-   (`write_portfolio_atomic`, `scripts/ibkr_executor.py:257`). A failed run
-   leaves an existing file untouched.
+   (`write_portfolio_atomic` in `scripts/ibkr_executor.py`). The file carries
+   the snapshot time as an extra top-level key `as_of` (UTC, ISO 8601;
+   `portfolio_json`). `PortfolioContext` ignores unknown keys, so
+   `load_portfolio()` reads the book unchanged and its fingerprint does not
+   move. **A failed run leaves no file:** before anything else, even before
+   the settings are read, the executor removes the `--out` file of an earlier
+   run (`_discard_previous`; log line `previous portfolio removed`). A file
+   that cannot be removed ends the run with exit 1 before any connection.
 7. Cross-check: `load_portfolio()` on the file in place
    (`scripts/ibkr_executor.py:309`).
 
@@ -221,14 +227,25 @@ python scripts/ibkr_executor.py account --out "%LOCALAPPDATA%\TradingEngineX\ibk
 :: the log goes to %LOCALAPPDATA%\TradingEngineX\ibkr\logs\ibkr_executor.log by default
 python scripts/ibkr_executor.py account --out "%LOCALAPPDATA%\TradingEngineX\ibkr\portfolio.json" --log-file "%LOCALAPPDATA%\TradingEngineX\ibkr\logs\ibkr_executor.log"
 
-:: then the local paper run with that book (see scripts/PAPER_RUN.md)
-python scripts/daily_paper_run.py --tickers AAPL --max-cost 0.50 --out results\paper-local --state paper-state --portfolio "%LOCALAPPDATA%\TradingEngineX\ibkr\portfolio.json"
+:: snapshot and local paper run in one line: && runs the paper run only on exit 0
+python scripts/ibkr_executor.py account --out "%LOCALAPPDATA%\TradingEngineX\ibkr\portfolio.json" && python scripts/daily_paper_run.py --tickers AAPL --max-cost 0.50 --out results\paper-local --state paper-state --portfolio "%LOCALAPPDATA%\TradingEngineX\ibkr\portfolio.json"
 ```
 
 `--tickers`, `--max-cost`, `--out` and `--state` are required by the paper run
-(`scripts/daily_paper_run.py:342-374`); their meaning and the cost budget are
-described in `scripts/PAPER_RUN.md`. `--portfolio` is local only; the CI run
-never passes it.
+(`parse_args` in `scripts/daily_paper_run.py`); their meaning and the cost
+budget are described in `scripts/PAPER_RUN.md`. `--portfolio` is local only;
+the CI run never passes it.
+
+Never run the paper run on its own against an older book. Two barriers keep a
+stale book out, either one enough by itself:
+
+* the executor removes the old file at the start of every run, so after a
+  failed snapshot there is no file and the paper run stops with exit 1;
+* `daily_paper_run.py --portfolio` accepts a file only with an `as_of` that
+  has a time zone, is not more than 5 minutes in the future and not older
+  than `--portfolio-max-age-minutes` (default 60; `load_fresh_portfolio`).
+  A file without `as_of` — hand-written, or from before this rule — is
+  refused, also under `--preflight`.
 
 ## First real run
 
