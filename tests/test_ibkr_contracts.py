@@ -541,6 +541,30 @@ def test_atomic_replace_failure_keeps_old_file_and_logs_aborted(tmp_path, monkey
     assert "PermissionError" in rows[-1]["reason"]
 
 
+def test_commit_with_expected_bytes_aborts_on_concurrent_change(tmp_path):
+    p = tmp_path / "contracts.json"
+    c.commit_contracts(p, {"AAPL": _stored()}, [_event()])
+    before = p.read_bytes()
+    p.write_text("changed", encoding="utf-8")
+    with pytest.raises(c.ContractsCommitError, match="changed while resolve was running"):
+        c.commit_contracts(
+            p,
+            {"AAPL": _stored(2)},
+            [_event("learn", con_id=2)],
+            expected_bytes=before,
+        )
+    assert not list(tmp_path.glob("*.lock"))
+
+
+def test_commit_lock_file_aborts(tmp_path):
+    p = tmp_path / "contracts.json"
+    lock = p.with_name(f"{p.name}.lock")
+    lock.write_text("held", encoding="utf-8")
+    with pytest.raises(c.ContractsCommitError, match="another resolve commit"):
+        c.commit_contracts(p, {"AAPL": _stored()}, [_event()], expected_bytes=None)
+    assert lock.read_text(encoding="utf-8") == "held"
+
+
 def test_write_json_atomic_check_failure_leaves_target(tmp_path):
     p = tmp_path / "out.json"
     p.write_text("old", encoding="utf-8")
@@ -552,6 +576,18 @@ def test_write_json_atomic_check_failure_leaves_target(tmp_path):
         c.write_json_atomic(p, {"a": 1}, check=bad)
     assert p.read_text(encoding="utf-8") == "old"
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_write_json_atomic_fsyncs_temp_before_replace(tmp_path, monkeypatch):
+    p = tmp_path / "out.json"
+    calls = []
+
+    def fsync(fd):
+        calls.append(fd)
+
+    monkeypatch.setattr(c.os, "fsync", fsync)
+    c.write_json_atomic(p, {"a": 1})
+    assert calls
 
 
 def test_commit_without_events_writes_no_history_and_makes_dir(tmp_path):
@@ -686,6 +722,40 @@ def test_resolve_learn_with_mismatching_search_key_is_drift():
     assert out.events == ()
 
 
+def test_resolve_learn_with_mismatching_details_identity_is_drift():
+    broker = _good_broker()
+    broker.details[265598] = (_info("AAPL", details=True, local_symbol="AAPL.X"),)
+    out = _resolve(["AAPL"], broker=broker)
+    r = _by(out)["AAPL"]
+    assert r.state == "drift"
+    assert "search and details disagree" in r.detail
+    assert out.events == ()
+
+
+def test_resolve_learn_with_multiple_detail_rows_is_not_found():
+    broker = StubBroker(
+        {"AAPL": (_info("AAPL"),)},
+        {265598: (_info("AAPL", details=True), _info("AAPL", details=True))},
+    )
+    out = _resolve(["AAPL"], broker=broker)
+    r = _by(out)["AAPL"]
+    assert r.state == "not-found"
+    assert "returned 2 detail rows" in r.detail
+    assert out.events == ()
+
+
+def test_resolve_learn_with_incomplete_identity_is_not_found():
+    broker = StubBroker(
+        {"AAPL": (_info("AAPL", local_symbol=""),)},
+        {265598: (_info("AAPL", details=True, local_symbol=""),)},
+    )
+    out = _resolve(["AAPL"], broker=broker)
+    r = _by(out)["AAPL"]
+    assert r.state == "not-found"
+    assert "incomplete identity" in r.detail
+    assert out.events == ()
+
+
 def test_resolve_not_found_on_zero_matches():
     out = _resolve(["AAPL"], broker=StubBroker())
     assert _by(out)["AAPL"].state == "not-found"
@@ -756,10 +826,30 @@ def test_resolve_trading_class_and_long_name_change_is_not_drift():
     assert _by(out)["AAPL"].state == "ok"
 
 
+def test_resolve_logs_trading_class_and_long_name_on_every_ok(caplog):
+    broker = _good_broker()
+    broker.details[265598] = (_info("AAPL", details=True, long_name="Apple Inc"),)
+    with caplog.at_level(logging.INFO, logger="test.resolve"):
+        out = _resolve(["AAPL"], broker=broker, contracts={"AAPL": _stored()})
+    assert _by(out)["AAPL"].state == "ok"
+    assert "tradingClass=NMS longName=Apple Inc" in caplog.text
+
+
 def test_resolve_details_without_match_is_drift():
     broker = StubBroker({"AAPL": (_info("AAPL"),)}, {})
     out = _resolve(["AAPL"], broker=broker, contracts={"AAPL": _stored()})
     assert _by(out)["AAPL"].state == "drift"
+
+
+def test_resolve_multiple_detail_rows_for_stored_conid_names_the_count():
+    broker = StubBroker(
+        {"AAPL": (_info("AAPL"),)},
+        {265598: (_info("AAPL", details=True), _info("AAPL", details=True))},
+    )
+    out = _resolve(["AAPL"], broker=broker, contracts={"AAPL": _stored()})
+    r = _by(out)["AAPL"]
+    assert r.state == "drift"
+    assert "seen=2 detail rows for one conId" in r.detail
 
 
 def test_resolve_rebaseline_replaces_identity_with_history(caplog):

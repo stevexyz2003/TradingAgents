@@ -445,7 +445,10 @@ def write_json_atomic(path: Path, payload: dict, check=None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = _temp_for(path)
     try:
-        temp.write_text(_dump(payload), encoding="utf-8")
+        with open(temp, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(_dump(payload))
+            fh.flush()
+            os.fsync(fh.fileno())
         if check is not None:
             check(temp)
         os.replace(temp, path)
@@ -473,8 +476,31 @@ def _append_history(history: Path, lines: Sequence[str]) -> None:
         os.fsync(fh.fileno())
 
 
+def _snapshot_bytes(path: Path) -> bytes | None:
+    try:
+        return Path(path).read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _lock_path(path: Path) -> Path:
+    path = Path(path)
+    return path.with_name(f"{path.name}.lock")
+
+
+class ContractsCommitError(ContractsFileError):
+    """A contracts commit could not be completed safely."""
+
+
+_EXPECTED_UNSET = object()
+
+
 def commit_contracts(
-    path: Path, contracts: Mapping[str, StoredContract], events: Sequence[HistoryEvent]
+    path: Path,
+    contracts: Mapping[str, StoredContract],
+    events: Sequence[HistoryEvent],
+    *,
+    expected_bytes: bytes | None | object = _EXPECTED_UNSET,
 ) -> None:
     """Persist the table. History is fsynced BEFORE the replace (D-18).
 
@@ -484,10 +510,23 @@ def commit_contracts(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     history = contracts_history_path(path)
+    lock = _lock_path(path)
     temp = _temp_for(path)
     wrote_history = False
+    lock_fd = None
     try:
-        temp.write_text(_dump(contracts_payload(contracts)), encoding="utf-8")
+        try:
+            lock_fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError as exc:
+            raise ContractsCommitError(f"{lock}: another resolve commit is active") from exc
+        if expected_bytes is not _EXPECTED_UNSET:
+            actual = _snapshot_bytes(path)
+            if actual != expected_bytes:
+                raise ContractsCommitError(f"{path}: changed while resolve was running; aborting")
+        with open(temp, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(_dump(contracts_payload(contracts)))
+            fh.flush()
+            os.fsync(fh.fileno())
         load_contracts_file(temp)
         if events:
             _append_history(history, [_history_line(e) for e in events])
@@ -504,6 +543,10 @@ def commit_contracts(
                 log.exception("could not record the aborted history lines")
         temp.unlink(missing_ok=True)
         raise
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+            lock.unlink(missing_ok=True)
 
 
 # --- resolver ----------------------------------------------------------------------------
@@ -562,6 +605,15 @@ def _fmt(identity: Identity) -> str:
     return (
         f"conId={identity.con_id}/primaryExchange={identity.primary_exchange}"
         f"/currency={identity.currency}/localSymbol={identity.local_symbol}"
+    )
+
+
+def _identity_complete(identity: Identity) -> bool:
+    return (
+        identity.con_id > 0
+        and bool(identity.primary_exchange)
+        and bool(identity.currency)
+        and bool(identity.local_symbol)
     )
 
 
@@ -680,6 +732,13 @@ def resolve_all(
                 )
                 continue
             identity = identity_of(detail_info)
+            if not _identity_complete(identity):
+                reject(
+                    NOT_FOUND,
+                    f"ticker={ticker} incomplete identity from contract details",
+                    logging.ERROR,
+                )
+                continue
             previous = work.get(ticker)
             if mode == MODE_INIT:
                 kind, reason = "init", "resolve --init"
@@ -714,10 +773,16 @@ def resolve_all(
             cands = broker.search_contract(spec)
             drift_detail = None
             if len(found) != 1:
-                drift_detail = (
-                    f"ticker={ticker} fields=conId stored={_fmt(stored)} "
-                    "seen=none (persisted conId unknown to the gateway)"
-                )
+                if not found:
+                    drift_detail = (
+                        f"ticker={ticker} fields=conId stored={_fmt(stored)} "
+                        "seen=none (persisted conId unknown to the gateway)"
+                    )
+                else:
+                    drift_detail = (
+                        f"ticker={ticker} fields=conId stored={_fmt(stored)} "
+                        f"seen={len(found)} detail rows for one conId"
+                    )
             elif not cands:
                 reject(NOT_FOUND, f"ticker={ticker} the search returned no contract", logging.ERROR)
                 continue
@@ -751,16 +816,12 @@ def resolve_all(
                 continue
             detail_info = found[0]
             identity = stored
-            if (
-                detail_info.trading_class != cands[0].trading_class
-                or detail_info.long_name != cands[0].long_name
-            ):
-                logger.info(
-                    "ticker=%s tradingClass=%s longName=%s (informational, not compared)",
-                    ticker,
-                    detail_info.trading_class,
-                    detail_info.long_name,
-                )
+            logger.info(
+                "ticker=%s tradingClass=%s longName=%s (informational, not compared)",
+                ticker,
+                detail_info.trading_class,
+                detail_info.long_name,
+            )
 
         why = check_tradable(detail_info.valid_exchanges, detail_info.order_types)
         if why:

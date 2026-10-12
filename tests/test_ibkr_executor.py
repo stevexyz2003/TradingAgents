@@ -585,7 +585,7 @@ class TestAccount:
         code, _out, log = _run(tmp_path, _fake_factory(fake, loop), env_file=env, out=out)
         assert code == getattr(executor, expected)
         assert not out.exists()
-        assert "previous portfolio removed" in _log_text(log)
+        assert "previous output removed" in _log_text(log)
 
     def test_unremovable_previous_file_exits_1_before_connecting(self, tmp_path):
         out = tmp_path / "out" / "portfolio.json"

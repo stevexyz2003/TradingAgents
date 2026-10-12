@@ -222,6 +222,19 @@ class TestScaffold:
         assert "resolve --init" in text
         assert not path.exists()
 
+    def test_missing_contracts_file_with_history_does_not_suggest_init(self, tmp_path, capsys):
+        path = tmp_path / "ibkr" / "contracts.json"
+        path.parent.mkdir(parents=True)
+        contracts_mod.contracts_history_path(path).write_text('{"event":"init"}\n', encoding="utf-8")
+        factory = _RecordingFactory()
+        code, _path, log = _run(tmp_path, factory, ["AAPL"], contracts=path)
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+        err = capsys.readouterr().err
+        assert "restore contracts.json manually" in err
+        assert "resolve --init" not in err
+        assert "CONTRACTS_MISSING" in _log_text(log)
+
     @pytest.mark.parametrize(
         "content",
         ["not json at all", '{"schema_version": 2, "contracts": {}}'],
@@ -248,6 +261,18 @@ class TestScaffold:
         assert "CONTRACTS_EXIST" in _log_text(log)
         assert "--rebaseline" in capsys.readouterr().err
         assert path.read_bytes() == before
+
+    def test_init_refuses_history_without_contracts_file(self, tmp_path, capsys):
+        path = tmp_path / "ibkr" / "contracts.json"
+        path.parent.mkdir(parents=True)
+        history = contracts_mod.contracts_history_path(path)
+        history.write_text('{"event":"init"}\n', encoding="utf-8")
+        factory = _RecordingFactory()
+        code, _c, log = _run(tmp_path, factory, ["AAPL"], contracts=path, extra=["--init"])
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+        assert "CONTRACTS_HISTORY_EXISTS" in _log_text(log)
+        assert "restore contracts.json manually" in capsys.readouterr().err
 
     def test_rebaseline_without_an_entry_is_exit_2(self, tmp_path):
         path = _contracts_file(tmp_path, {"MSFT": _identity("MSFT")})
@@ -487,6 +512,20 @@ class TestOutputAndPersistence:
         assert code == executor.EXIT_CONFIG
         assert "OUTPUT_INVALID" in _log_text(log)
         assert "Traceback" not in capsys.readouterr().err
+
+    def test_commit_validation_failure_is_exit_1_without_traceback(
+        self, tmp_path, loop, monkeypatch, capsys
+    ):
+        fake = _fake_for(("AAPL",))
+
+        def boom(*_a, **_k):
+            raise contracts_mod.ContractsFileError("bad contracts")
+
+        monkeypatch.setattr(contracts_mod, "commit_contracts", boom)
+        code, _p, log = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], extra=["--init"])
+        assert code == executor.EXIT_CONFIG
+        assert "OUTPUT_INVALID" in _log_text(log)
+        assert "unexpected" not in capsys.readouterr().err
 
 
 class TestGatewayFailures:

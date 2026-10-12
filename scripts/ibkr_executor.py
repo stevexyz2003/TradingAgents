@@ -435,17 +435,41 @@ def run_resolve(
                 f"ibkr-state=CONTRACTS_EXIST {contracts_path} exists; --init never overwrites",
                 f"{contracts_path} exists; check it, then use resolve --rebaseline TICKER",
             )
-        contracts = None
-    else:
-        mode = contracts_mod.MODE_REBASELINE if args.rebaseline else contracts_mod.MODE_RUN
-        try:
-            contracts = contracts_mod.load_contracts_file(contracts_path)
-        except contracts_mod.ContractsFileMissing:
+        history = contracts_mod.contracts_history_path(contracts_path)
+        if history.exists() and history.stat().st_size > 0:
             return _fail(
                 logger,
                 EXIT_PRECONDITION,
-                f"ibkr-state=CONTRACTS_MISSING {contracts_path}; create it with resolve --init",
-                f"{contracts_path} not found; create it with: resolve --init AAPL MSFT NVDA",
+                f"ibkr-state=CONTRACTS_HISTORY_EXISTS {history}; --init would reset identity",
+                f"{contracts_path} is missing but {history} exists; restore contracts.json manually",
+            )
+        contracts = None
+        contracts_before = None
+    else:
+        mode = contracts_mod.MODE_REBASELINE if args.rebaseline else contracts_mod.MODE_RUN
+        try:
+            contracts_before = contracts_path.read_bytes()
+            contracts = contracts_mod.load_contracts_file(contracts_path)
+        except (FileNotFoundError, contracts_mod.ContractsFileMissing):
+            history = contracts_mod.contracts_history_path(contracts_path)
+            hint = (
+                f"{contracts_path} not found; {history} exists, restore contracts.json manually"
+                if history.exists() and history.stat().st_size > 0
+                else f"{contracts_path} not found; create it with: resolve --init AAPL MSFT NVDA"
+            )
+            return _fail(
+                logger,
+                EXIT_PRECONDITION,
+                f"ibkr-state=CONTRACTS_MISSING {hint}",
+                hint,
+            )
+        except OSError as exc:
+            return _fail(
+                logger,
+                EXIT_CONFIG,
+                f"ibkr-state=CONTRACTS_INVALID {contracts_path}: unreadable "
+                f"({type(exc).__name__})",
+                f"contracts file: {contracts_path}: unreadable ({type(exc).__name__})",
             )
         except contracts_mod.ContractsFileError as exc:
             return _fail(
@@ -496,8 +520,13 @@ def run_resolve(
     # The gateway session is closed here; only now does anything reach the disk.
     if outcome.events:
         try:
-            contracts_mod.commit_contracts(contracts_path, outcome.contracts, outcome.events)
-        except OSError as exc:
+            contracts_mod.commit_contracts(
+                contracts_path,
+                outcome.contracts,
+                outcome.events,
+                expected_bytes=contracts_before,
+            )
+        except (OSError, contracts_mod.ContractsFileError) as exc:
             raise OutputError(f"{contracts_path}: {type(exc).__name__}: {exc}") from exc
         for event in outcome.events:
             logger.info(
@@ -522,11 +551,13 @@ def run_resolve(
         state = "RESOLVED" if not result.rejected else "RESOLVE_REJECTED"
         logger.log(
             logging.WARNING if result.rejected else logging.INFO,
-            "ibkr-state=%s ticker=%s state=%s detail=%r",
+            "ibkr-state=%s ticker=%s state=%s detail=%r tradingClass=%s longName=%s",
             state,
             result.ticker,
             result.state,
             result.detail,
+            result.trading_class,
+            result.long_name,
         )
 
     if args.out is not None:
@@ -652,7 +683,7 @@ def _discard_previous(out: Path, logger: logging.Logger) -> None:
         out.unlink()
     except FileNotFoundError:
         return
-    logger.info("previous portfolio removed: %s", out)
+    logger.info("previous output removed: %s", out)
 
 
 def _guarded(logger, broker_mod, progress, run, output_what: str) -> int:
