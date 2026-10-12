@@ -132,6 +132,19 @@ def position(account, symbol, quantity, avg_cost=100.0, **contract):
     )
 
 
+def open_trade(
+    con_id, status="Submitted", action="BUY", quantity=1, order_type="LMT", client_id=0
+):
+    """A Trade row of reqAllOpenOrdersAsync as the client library reports it."""
+    return SimpleNamespace(
+        contract=FakeContract(conId=con_id),
+        order=SimpleNamespace(
+            action=action, totalQuantity=quantity, orderType=order_type, clientId=client_id
+        ),
+        orderStatus=SimpleNamespace(status=status),
+    )
+
+
 def account_value(tag, value, currency="EUR", account="DUQ634065"):
     """An account summary row as the client library reports it."""
     return SimpleNamespace(account=account, tag=tag, value=value, currency=currency, modelCode="")
@@ -155,6 +168,7 @@ class FakeIB:
         emit_during=None,
         qualify=None,
         details=None,
+        open_orders=None,
     ):
         self.accounts = list(accounts)
         self.refuse = refuse
@@ -164,7 +178,13 @@ class FakeIB:
         #: while that request is in flight; the answer still comes back well formed.
         self.emit_during = dict(emit_during or {})
         self._positions = [] if positions is None else positions
-        self._summary = [account_value("TotalCashValue", "1000.0")] if summary is None else summary
+        self._summary = (
+            [account_value("TotalCashValue", "1000.0"), account_value("AvailableFunds", "1000.0")]
+            if summary is None
+            else summary
+        )
+        #: Trades (or "hang") for reqAllOpenOrdersAsync
+        self.open_orders = [] if open_orders is None else open_orders
         self.probe = probe
         #: symbol -> matching FakeContracts (or "hang") for qualifyContractsAsync
         self.qualify = dict(qualify) if isinstance(qualify, dict) else (qualify or {})
@@ -288,6 +308,13 @@ class FakeIB:
             await _forever()
         return list(self.details.get(contract.conId, []))
 
+    async def reqAllOpenOrdersAsync(self):
+        self.calls.append("open_orders")
+        self._emit_during("open_orders")
+        if self.open_orders == "hang":
+            await _forever()
+        return list(self.open_orders)
+
     # Phase 4 previews through whatIfOrderAsync only; placeOrder/whatIfOrder on IB are
     # bugs. Phase 3 resolution only reads; it never touches orders, any of these is a bug. Each
     # one is recorded before it raises, so a check over ``calls`` can see it even
@@ -313,6 +340,12 @@ class FakeIB:
 
     def placeOrder(self, *a, **k):
         self._forbidden("placeOrder")
+
+    def reqMktData(self, *a, **k):
+        self._forbidden("reqMktData", " (REQ-IBKR-68: no market data)")
+
+    def reqTickers(self, *a, **k):
+        self._forbidden("reqTickers", " (REQ-IBKR-68: no market data)")
 
 
 def make_handles(fake):

@@ -85,6 +85,10 @@ _PO_MIN_FIELDS = _PO_WHATIF + 1
 _CONTRACT_WIDTH = 12
 _UNSET_DOUBLE = 1.7976931348623157e308
 
+#: Order states that are over; mirrors OrderStatus.DoneStates of ib_async 2.1.0
+#: (the adapter imports the library only inside ``_default_ib_factory``).
+_DONE_ORDER_STATUSES = frozenset({"Filled", "Cancelled", "ApiCancelled", "Inactive"})
+
 #: Gateway/API code -> named operating state (02-RESEARCH.md Muster 5). 502, 504
 #: and 507 never arrive as events from the library; connect() maps the matching
 #: exceptions onto them.
@@ -186,6 +190,19 @@ class BrokerPosition:
     currency: str
     quantity: float
     avg_cost: float
+    con_id: int = 0
+
+
+@dataclass(frozen=True)
+class OpenOrder:
+    """One open order of the account, broker-neutral; phase 4 never sends, so each is foreign."""
+
+    con_id: int
+    action: str
+    quantity: float
+    order_type: str
+    status: str
+    client_id: int
 
 
 @dataclass(frozen=True)
@@ -250,6 +267,8 @@ class AccountSnapshot:
     positions: tuple[BrokerPosition, ...]
     cash: float
     cash_currency: str
+    available_funds: float
+    available_funds_currency: str
     as_of: datetime
 
 
@@ -633,7 +652,9 @@ class IbkrBroker:
         Never the library's cached positions, never a file. Rows of other accounts
         and zero-quantity rows are dropped. Cash is the one ``TotalCashValue`` row
         of the paper account (conservative, without margin; assumption A3), not
-        the margin-levered buying power.
+        the margin-levered buying power. AvailableFunds is the budget yardstick
+        for the whatIf preview (D-15, REQ-IBKR-70); compared in account currency,
+        no exchange rate.
 
         Fail-closed over the whole read window: no read starts while a link flag
         is open, the loop settles for ``settle`` seconds after the last answer,
@@ -681,6 +702,7 @@ class IbkrBroker:
                 currency=p.contract.currency,
                 quantity=float(p.position),
                 avg_cost=float(p.avgCost),
+                con_id=int(p.contract.conId),
             )
             for p in raw
             if p.account == EXPECTED_ACCOUNT and p.position != 0
@@ -694,14 +716,25 @@ class IbkrBroker:
                 f"expected one TotalCashValue row for {EXPECTED_ACCOUNT}, got {len(cash_rows)}",
             )
         cash = cash_rows[0]
+        funds_rows = [v for v in mine if v.tag == "AvailableFunds"]
+        if len(funds_rows) != 1:
+            raise GatewayUnavailable(
+                SNAPSHOT_INCOMPLETE,
+                None,
+                f"expected one AvailableFunds row for {EXPECTED_ACCOUNT}, got {len(funds_rows)}",
+            )
+        funds = funds_rows[0]
+        self._log.info("ibkr-account AvailableFunds=%s %s", funds.value, funds.currency)
         for v in mine:
-            if v.tag in ("AvailableFunds", "NetLiquidation"):
+            if v.tag == "NetLiquidation":
                 self._log.info("ibkr-account %s=%s %s (log only)", v.tag, v.value, v.currency)
         return AccountSnapshot(
             account=EXPECTED_ACCOUNT,
             positions=held,
             cash=float(cash.value),
             cash_currency=cash.currency,
+            available_funds=float(funds.value),
+            available_funds_currency=funds.currency,
             as_of=datetime.now(UTC),
         )
 
@@ -751,6 +784,28 @@ class IbkrBroker:
 
         rows = self._read("reqContractDetails", ask)
         return tuple(_info_from_contract(d.contract, d) for d in rows)
+
+    def open_orders(self, con_id: int) -> tuple[OpenOrder, ...]:
+        """Every open order of the account on ``con_id``, whoever placed it (D-12).
+
+        Reads all open orders of the account, including orders of other clients
+        and TWS (``reqAllOpenOrdersAsync``, a read message). Finished orders are
+        dropped. Phase 4 never sends, so each order found is foreign.
+        """
+        trades = self._read("reqAllOpenOrders", lambda: self._ib.reqAllOpenOrdersAsync())
+        return tuple(
+            OpenOrder(
+                con_id=int(t.contract.conId),
+                action=_text(t.order, "action"),
+                quantity=float(t.order.totalQuantity),
+                order_type=_text(t.order, "orderType"),
+                status=_text(t.orderStatus, "status"),
+                client_id=int(t.order.clientId),
+            )
+            for t in trades
+            if int(t.contract.conId) == con_id
+            and t.orderStatus.status not in _DONE_ORDER_STATUSES
+        )
 
     def _read(self, name: str, make_awaitable):
         """One fail-closed read: timeout, no open link before, no link event during."""

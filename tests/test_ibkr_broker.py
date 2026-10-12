@@ -524,7 +524,10 @@ def test_positions_fresh_each_call(loop):
     fake = FakeIB(positions=[position("DUQ634065", "AAPL", 3)], summary=_summary())
     adapter = _connected(fake, loop)
     first = adapter.positions()
-    fake._summary = [account_value("TotalCashValue", "4242.0")]
+    fake._summary = [
+        account_value("TotalCashValue", "4242.0"),
+        account_value("AvailableFunds", "4000.0"),
+    ]
     second = adapter.positions()
     assert fake.calls.count("positions") == 2
     assert fake.calls.count("account_summary") == 2

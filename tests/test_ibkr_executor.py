@@ -309,7 +309,10 @@ def _book():
             ibkr_fakes.position(ACCOUNT, "AAPL", 3, 250.5),
             ibkr_fakes.position(ACCOUNT, "MSFT", 0, 10.0),
         ],
-        "summary": [ibkr_fakes.account_value("TotalCashValue", "1005459.44", "EUR")],
+        "summary": [
+            ibkr_fakes.account_value("TotalCashValue", "1005459.44", "EUR"),
+            ibkr_fakes.account_value("AvailableFunds", "1004000.00", "EUR"),
+        ],
     }
 
 
@@ -319,6 +322,8 @@ def _snapshot(*positions):
         positions=positions,
         cash=1000.0,
         cash_currency="EUR",
+        available_funds=1000.0,
+        available_funds_currency="EUR",
         as_of=datetime.now(UTC),
     )
 
