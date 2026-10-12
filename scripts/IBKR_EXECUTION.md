@@ -188,8 +188,14 @@ same rule voids a probe answer that arrived together with a link event.
 ## Startup sequence
 
 1. Write barrier on the client (`scripts/ibkr_broker.py:241`).
-2. Connect with `readonly=True`, clientId 20001 and no startup fetch; timeouts
-   10 s connect, 10 s per request, 5 s probe (`scripts/ibkr_broker.py:37-41`).
+2. Connect with `readonly=True`, clientId 20001 and no startup fetch. The
+   client library waits up to `CONNECT_TIMEOUT_S` (10 s) in each of its
+   connect steps (TCP connect, API start, startup positions); the adapter
+   ends the whole connect after `CONNECT_TIMEOUT_S + CONNECT_GRACE_S`
+   (10 s + 5 s = **15 s**), and the `CONNECT_TIMEOUT` line names that bound.
+   Then 10 s per request and 5 s for the probe (constants at the top of
+   `scripts/ibkr_broker.py`). A test with a peer that never answers ends in
+   `CONNECT_TIMEOUT`, not in a hang.
 3. Paper guard: `managedAccounts()` must be exactly `["DUQ634065"]` — a foreign
    account, a superset or an empty list disconnects and ends with exit 8
    (`scripts/ibkr_broker.py:294`).

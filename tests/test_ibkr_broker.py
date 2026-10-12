@@ -187,6 +187,27 @@ def test_timeout_without_326_maps_to_connect_timeout(loop):
     assert str(info.value).startswith("ibkr-state=CONNECT_TIMEOUT code=- ")
 
 
+def test_hanging_connect_ends_at_the_outer_bound(loop):
+    # WR-04 / REQ-IBKR-62: a peer that never answers, and a library that ignores
+    # its own timeout, still end in the named state, bounded by timeout + grace.
+    fake = FakeIB(refuse="hang")
+    adapter = broker.IbkrBroker(
+        "127.0.0.1", 7497, ib_factory=make_handles(fake), loop=loop, connect_grace=0.05, **FAST
+    )
+    started = time.monotonic()
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.connect()
+    assert time.monotonic() - started < 1.0
+    assert (info.value.state, info.value.code) == ("CONNECT_TIMEOUT", None)
+    assert "within 0.1s" in info.value.detail
+    assert "disconnect" in fake.calls
+
+
+def test_connect_grace_is_a_named_constant():
+    assert broker.CONNECT_GRACE_S == 5.0
+    assert broker.CONNECT_TIMEOUT_S + broker.CONNECT_GRACE_S == 15.0
+
+
 @pytest.mark.parametrize(
     ("refuse", "state", "code"),
     [

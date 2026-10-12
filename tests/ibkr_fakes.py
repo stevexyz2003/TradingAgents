@@ -129,6 +129,9 @@ class FakeIB:
         self.calls.append("connect")
         for args in self.emit_on_connect:
             self.errorEvent.emit(*args)
+        if self.refuse == "hang":
+            # A peer that accepts the socket and never answers; ignores ``timeout``.
+            await _forever()
         if self.refuse is not None:
             raise self.refuse
         self.connected = True

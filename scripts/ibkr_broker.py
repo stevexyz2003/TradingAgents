@@ -33,8 +33,12 @@ EXECUTOR_CLIENT_ID = 20001
 #: AAPL on SMART; its contract details are the liveness probe (ibkr-konto-befund.md).
 PROBE_CON_ID = 265598
 
-#: Seconds the handshake may take before the session counts as unreachable.
+#: Seconds the client library may wait in each of its connect steps (TCP connect,
+#: API start, startup positions: client.py:216, :227 and ib.py:2077 in 2.1.0).
 CONNECT_TIMEOUT_S = 10.0
+#: Seconds on top of ``CONNECT_TIMEOUT_S`` before the adapter's own bound ends the
+#: whole connect. The real limit is the sum, and that is what the log names.
+CONNECT_GRACE_S = 5.0
 #: Seconds any read request may take; the library's own default waits forever.
 REQUEST_TIMEOUT_S = 10.0
 #: Seconds the liveness probe may take.
@@ -253,6 +257,7 @@ class IbkrBroker:
         loop: asyncio.AbstractEventLoop | None = None,
         logger: logging.Logger | None = None,
         connect_timeout: float = CONNECT_TIMEOUT_S,
+        connect_grace: float = CONNECT_GRACE_S,
         request_timeout: float = REQUEST_TIMEOUT_S,
         probe_timeout: float = PROBE_TIMEOUT_S,
         settle: float = SNAPSHOT_SETTLE_S,
@@ -265,6 +270,7 @@ class IbkrBroker:
         self._owns_loop = False
         self._log = logger or logging.getLogger("ibkr_broker")
         self._connect_timeout = connect_timeout
+        self._connect_grace = connect_grace
         self._request_timeout = request_timeout
         self._probe_timeout = probe_timeout
         self._settle = settle
@@ -303,6 +309,7 @@ class IbkrBroker:
         # D-01: the barrier stands before a single byte flows.
         _arm_write_barrier(ib.client)
         host, port, timeout = self._host, self._port, self._connect_timeout
+        bound = timeout + self._connect_grace
         try:
             self._call(
                 lambda: ib.connectAsync(
@@ -313,7 +320,7 @@ class IbkrBroker:
                     readonly=True,
                     fetchFields=handles.fetch_none,
                 ),
-                timeout + 5,
+                bound,
             )
         except TimeoutError as exc:  # before OSError: TimeoutError is one
             self._disconnect()
@@ -322,7 +329,10 @@ class IbkrBroker:
                     "CLIENT_ID_IN_USE", 326, f"clientId {self._client_id} already in use"
                 ) from exc
             raise GatewayUnavailable(
-                CONNECT_TIMEOUT, None, f"no handshake from {host}:{port} within {timeout}s"
+                CONNECT_TIMEOUT,
+                None,
+                f"no handshake from {host}:{port} within {bound:g}s "
+                f"(library steps up to {timeout:g}s each, adapter bound {bound:g}s)",
             ) from exc
         except ConnectionRefusedError as exc:
             self._disconnect()
