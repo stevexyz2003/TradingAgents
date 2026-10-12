@@ -109,7 +109,7 @@ Identical to the table in the docstring of `scripts/ibkr_executor.py`; a test
 |---|---|---|
 | 0 | `EXIT_OK` | ok, including "nothing to do" |
 | 1 | `EXIT_CONFIG` | configuration error - nothing was done |
-| 2 | `EXIT_PRECONDITION` | precondition not met (reserved for later phases) |
+| 2 | `EXIT_PRECONDITION` | precondition not met: a ticker was rejected by resolve, contracts.json is missing, or --init found an existing file |
 | 3 | `EXIT_GATEWAY` | gateway/session not reachable |
 | 4 | `EXIT_KILL_SWITCH` | kill switch active or release missing (reserved for later phases) |
 | 5 | `EXIT_REJECTED` | order rejected (reserved for later phases) |
@@ -117,6 +117,12 @@ Identical to the table in the docstring of `scripts/ibkr_executor.py`; a test
 | 7 | `EXIT_LOCKED` | lock not acquired (second instance), clean exit (reserved for later phases) |
 | 8 | `EXIT_ACCOUNT_GUARD` | account guard violated (managedAccounts != ["DUQ634065"]) |
 | 20 | `EXIT_NO_CREDENTIALS` | IBKR settings missing or unreadable - same meaning as `EXIT_NO_CREDENTIALS` in `daily_paper_run.py` |
+
+Exit 2 is active since phase 3 (`resolve`): a rejected ticker (any result
+other than `ok` or `closed`), a missing `contracts.json` and `--init` on an
+existing file all end with 2. A broken `contracts.json` or a wrong
+`schema_version` is exit 1 (configuration, nothing was done). A `closed`
+session is exit 0: the contract is fine, the market is just not open.
 
 Code 3 means "gateway" here, unlike `EXIT_RUN_FAILED` (3) in the paper run.
 Exit 3 also covers a write the barrier refused (state `WRITE_REFUSED`, its
@@ -159,9 +165,21 @@ ibkr-state=<STATE> code=<code> detail="..."
 | 2110 | `SERVER_LINK_BROKEN` |
 | 321 | `READ_ONLY_API` (measured marker of the read-only switch) |
 | 10015 | `TRADING_NOT_ALLOWED` |
-| 10089, 10090 | `MARKET_DATA_NOT_SUBSCRIBED` |
+| 10089, 10090 | `MARKET_DATA_NOT_SUBSCRIBED` (INFO: expected, not an error) |
+| 10167 | `MARKET_DATA_DELAYED` (INFO: expected, measured for delayed stock quotes) |
+| 200 | `CONTRACT_NOT_FOUND` |
 | 2172 | `GATEWAY_VERSION_EXPIRING` |
 | any other | `UNKNOWN` |
+
+10089, 10090 and 10167 are logged at INFO: the paper account has no market
+data subscription and works on delayed data, so they are expected. Code 154
+(halt) is deliberately not mapped; it is measured in phase 4 on the `whatIf`
+preview.
+
+Executor and resolver states without a gateway code (phase 3):
+`AMBIGUOUS_CONTRACT`, `CONTRACT_DRIFT`, `CONTRACT_LEARNED`,
+`CONTRACT_REBASELINED`, `CONTRACTS_MISSING`, `CONTRACTS_INVALID`,
+`CONTRACTS_EXIST`, `ANCHOR_MISMATCH`, `MARKET_DATA_TYPE`.
 
 Source: `STATE_BY_CODE`, `scripts/ibkr_broker.py:49`; INFO codes at `:75`.
 502, 504 and 507 never arrive as events from the client library; the adapter
@@ -240,7 +258,99 @@ unresolvable. Measured negative proof: the pinned version together with
 `tzdata>=2026.1` ends in pip's `ResolutionImpossible`
 (`.planning/phases/02-verbindung-paper-guard-und-kontolesen/02-01-SUMMARY.md`).
 
+## resolve
+
+`resolve TICKER...` answers, per ticker, one question: may the executor trade
+this symbol, and is its market open right now? It only reads; the write
+barrier and the paper guard are unchanged. The ticker arguments are required
+(no default list, D-27). The gateway is contacted only when at least one
+ticker passes the local checks; a run of rejected tickers never connects.
+
+Check chain per ticker: mapping (`CONTRACT_TABLE` in
+`scripts/ibkr_contracts.py`) -> allow-list (`STK` only) -> resolution and
+identity against `contracts.json` -> tradability -> session.
+
+| State | Meaning |
+|---|---|
+| `ok` | resolved, identity as stored, tradable, session open (outside the buffer) |
+| `closed` | contract fine, session not open; the console line names the next window; exit 0 |
+| `not-mapped` | the ticker is not in `CONTRACT_TABLE` (this also stops `^GSPC`, `XAUUSD+` and the like) |
+| `not-allowed` | the security type is not on the allow-list |
+| `ambiguous` | the gateway returned more than one contract for the search key |
+| `not-found` | the gateway knows no such contract (code 200) |
+| `drift` | `conId`, `primaryExchange`, `currency` or `localSymbol` differs from `contracts.json` |
+| `not-tradable` | the contract lacks a required order type or the SMART route |
+| `session-unknown` | the session could not be derived from the contract data; treated as rejected |
+| `halted` | never set in phase 3: "unknown" is not "not halted"; measured in phase 4 |
+
+Session rule: a ticker is `ok` only inside a liquid-hours window, with a
+15-minute buffer after the open and before the close
+(`SESSION_BUFFER_MINUTES`). The window comes from the contract data of the
+gateway; no clock time is coded and nothing about the session is cached on
+disk.
+
+Console: one line per ticker (`resolve: <TICKER> <state> ...`), details in the
+log. `--out PATH` writes the results as JSON, atomically (temp file, then
+`os.replace`); a previous file at that path is removed at the start of the run.
+
+Options: `--init` (create `contracts.json`), `--rebaseline TICKER` (accept a
+changed contract), `--contracts PATH` (override the store path), `--out PATH`,
+`--log-file PATH`, `--env-file PATH`.
+
+### contracts.json and its history
+
+Default path: `%LOCALAPPDATA%\TradingEngineX\ibkr\contracts.json` (without
+`LOCALAPPDATA`: `~/.tradingenginex/ibkr/contracts.json`); `--contracts`
+overrides it. Schema: `schema_version` 1 and a `contracts` object with, per
+ticker, `conId`, `primaryExchange`, `currency`, `localSymbol`, `learned_at`.
+There is no session field.
+
+Next to it, `contracts-history.jsonl` is append-only: one line per change,
+event `init`, `learn` or `rebaseline` (an `-aborted` suffix marks an
+unfinished write).
+
+* First build: `resolve --init AAPL MSFT NVDA`. AAPL is the anchor: its
+  learned `conId` must equal `PROBE_CON_ID` 265598, otherwise the run ends
+  with `ANCHOR_MISMATCH` (exit 2) and writes nothing. `--init` never
+  overwrites an existing file (exit 2).
+* A new ticker in an existing file is learned on its first successful
+  `resolve <TICKER>` (event `learn`); known tickers are checked by `conId` and
+  exchange.
+* A differing identity is `drift`: nothing is changed. After checking the
+  change by hand, `resolve AAPL --rebaseline AAPL` accepts it (event
+  `rebaseline`, old and new values in the history).
+* Files are written only after the gateway session is closed.
+
+## New ticker
+
+1. Add the ticker to `CONTRACT_TABLE` in `scripts/ibkr_contracts.py`: a search
+   key only, no identity.
+2. Commit.
+3. Run `resolve <TICKER>` exactly once against the gateway. The result must be
+   exactly one match (not `ambiguous`, not `not-found`).
+4. Put the console output into the commit message or the PR.
+
+This is a convention, not a technical gate. Non-STK classes stay blocked by the
+allow-list; to open one, extend the allow-list, do not rebuild the table (D-04).
+
 ## Commands
+
+```
+:: first build of contracts.json, anchor AAPL (Windows cmd)
+python scripts/ibkr_executor.py resolve --init AAPL MSFT NVDA
+
+:: normal check of known tickers
+python scripts/ibkr_executor.py resolve AAPL MSFT NVDA
+
+:: same, with the results as JSON
+python scripts/ibkr_executor.py resolve AAPL MSFT NVDA --out "%LOCALAPPDATA%\TradingEngineX\ibkr\resolve.json"
+
+:: blocked tickers are rejected locally, exit 2, no gateway connection
+python scripts/ibkr_executor.py resolve XYZQ ^^GSPC XAUUSD+
+
+:: accept a changed contract, only after checking the drift
+python scripts/ibkr_executor.py resolve AAPL --rebaseline AAPL
+```
 
 ```
 :: read the paper account into a portfolio JSON (Windows cmd)

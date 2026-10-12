@@ -182,6 +182,39 @@ def test_handbook_exit_table_matches_executor():
         assert re.search(rf"^\| {value} \| `{name}` \|", text, re.M), f"{name}={value} not in table"
 
 
+@pytest.mark.unit
+def test_handbook_documents_resolve():
+    text = _handbook_text()
+    for needle in (
+        "resolve --init",
+        "--rebaseline",
+        "contracts.json",
+        "contracts-history.jsonl",
+        "## New ticker",
+        "session-unknown",
+        "not-allowed",
+    ):
+        assert needle in text, needle
+
+
+@pytest.mark.unit
+def test_handbook_exit_two_is_active():
+    lines = [
+        line
+        for line in _handbook_text().splitlines()
+        if line.startswith("| 2 | `EXIT_PRECONDITION` |")
+    ]
+    assert len(lines) == 1
+    assert "reserved" not in lines[0]
+
+
+@pytest.mark.unit
+def test_handbook_lists_delayed_market_data_code():
+    text = _handbook_text()
+    assert "10167" in text
+    assert "MARKET_DATA_DELAYED" in text
+
+
 # --- the resolver stays pure: no library, no vendor normalizer, no clock, no trading hours --
 
 CONTRACTS = ROOT / "scripts" / "ibkr_contracts.py"
