@@ -77,8 +77,24 @@ zugleich die fehlende Umrechnung aus Befund 3 geliefert hätte.
 **Stattdessen kam `[]`, ohne Fehlermeldung.** Kein `OrderState`, keine Ablehnung,
 kein Grund.
 
-**Nicht abschließend geklärt:** Die Messung lief am Sonntagabend bei
-geschlossenem Markt. Ob das Preview zu Handelszeiten Werte liefert, ist **zu
+**Zwischenmessung 2026-10-12, 09:09 MESZ (03:09 EDT):** `whatIf` liefert
+weiterhin `[]`. Der Markt war aber erneut zu — das Gateway selbst sagt:
+
+```text
+naechste tradingSession : Mon 12.10 04:00 - 20:00 US/Eastern   (10:00-02:00 MESZ)
+naechste liquidSession  : Mon 12.10 09:30 - 16:00              (15:30-22:00 MESZ)
+handelbar JETZT: tradingHours=False  liquidHours=False
+```
+
+Damit ist „liegt nur am Wochenende" ausgeschlossen, die Frage aber unverändert
+offen. Die aussagekräftigen Zeitpunkte sind **10:00 MESZ** (Pre-Market, dann ist
+`tradingHours` wahr) und **15:30 MESZ** (reguläre Sitzung, `liquidHours` wahr).
+Der Unterschied zählt: Liefert `whatIf` schon im Pre-Market Werte, hängt es an
+`tradingHours`; erst ab 15:30, an der liquiden Sitzung. Der Ausführer fällt nach
+dem 06:30-UTC-Analyselauf genau in dieses Fenster.
+
+**Nicht abschließend geklärt:** Beide bisherigen Messungen lagen außerhalb der
+Handelszeiten. Ob das Preview zu Handelszeiten Werte liefert, ist **zu
 Handelszeiten erneut zu messen** — frühestens Montag nach 09:30 US/Eastern
 (15:30 MESZ). Dies hier ist ein Befund, keine Diagnose.
 
