@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: M2
 milestone_name: IBKR Paper Execution
 status: ready_to_execute
-last_updated: "2026-10-11T19:12:07.597Z"
-last_activity: 2026-10-11 -- Phase 2 planning complete
+last_updated: "2026-10-12T05:51:13.910Z"
+last_activity: 2026-10-12 -- Phase 2 execution started
 progress:
   total_phases: 8
   completed_phases: 0
@@ -21,6 +21,8 @@ progress:
 
 ## Current Position
 
+Phase: 2 (Verbindung, Paper-Guard und Kontolesen) — EXECUTING
+Plan: 1 of 6
 **Nächster Schritt: M2 Phase 2 ausführen — `/gsd:execute-phase 2`.**
 6 Pläne in 5 Wellen (`.planning/phases/02-verbindung-paper-guard-und-kontolesen/`),
 Plan-Checker bestanden nach einer Revisionsrunde. Drei Pläne halten an
@@ -30,7 +32,7 @@ Paper-Lauf mit `--portfolio` (02-06, kostet LLM). Wichtigster Recherchebefund:
 `readonly=True` sperrt in `ib_async` 2.1.0 **keine** Orders — die Schreibsperre
 baut der Adapter selbst auf `ib.client`.
 
-Last activity: 2026-10-11 - **M2 Phase 2 geplant** (6 Pläne, 5 Wellen; Research + Validation 5876373). Entscheidungen D-01..D-10 vom Orchestrator gesetzt (kein CONTEXT.md): eigene Schreibsperre statt `readonly=True`-Vertrauen, Read-Only-Checkpoint direkt vor der ersten echten Verbindung, Kriterium 6 auf den messbaren Negativnachweis (`ib_async==2.1.0` + `tzdata>=2026.1` unauflösbar) umzuformulieren, `--portfolio` nur in unserem `daily_paper_run.py` plus additiver Block in `reporting._header`, Extra `ibkr` ohne CI-Job, `clientId` 20001. Checker-Runde 1: 2 Blocker (u. a. `netstat`-LISTEN-Grep scheitert auf deutschem Windows an `ABHÖREN`) + 5 Warnungen, alle behoben; Runde 2 bestanden.
+Last activity: 2026-10-12 -- Phase 2 execution started
 
 Davor: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
 

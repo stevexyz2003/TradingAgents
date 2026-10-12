@@ -104,12 +104,12 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - Kein Lesen von `paper-log`, keine Entscheidungsübernahme.
 - **Keine Änderung am CI-Produktivpfad.** Das Portfolio-JSON wird in dieser Phase nur lokal übergeben; die Verdrahtung in den täglichen Lauf braucht den Veröffentlichungsbranch und passiert in Phase 7.
 
-**Plans:** 6 plans
+**Plans:** 1/6 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Extra `ibkr` mit Pin + Kommentar, Kriterium 6 umformuliert, CI-/`.env`-Wächter, Paket-Freigabe, `.venv` aufgefrischt, Pin-Deckel gemessen
+- [x] 02-01-PLAN.md — Extra `ibkr` mit Pin + Kommentar, Kriterium 6 umformuliert, CI-/`.env`-Wächter, Paket-Freigabe, `.venv` aufgefrischt, Pin-Deckel gemessen
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
