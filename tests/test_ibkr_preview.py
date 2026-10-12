@@ -11,7 +11,7 @@ injected collaborators.
 import importlib.util
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -649,3 +649,437 @@ class TestFreshness:
         rows = _rows(out)
         assert rows["AAPL"]["state"] == "skipped-hold"
         assert rows["MSFT"]["state"] == "signal-divergence"
+
+
+# --- the gateway chain: resolution, position, open orders, target, whatIf, verdict ----
+
+BUY_TEXT_HALT = "Order rejected - instrument is halted"
+
+
+def _identity(ticker, con_id=None):
+    return contracts_mod.Identity(
+        CON_IDS[ticker] if con_id is None else con_id, "NASDAQ", "USD", ticker
+    )
+
+
+def _contracts_file(tmp_path, entries):
+    """A valid contracts file; ``entries`` maps ticker to an Identity."""
+    path = tmp_path / "ibkr" / "contracts.json"
+    table = {
+        t: contracts_mod.StoredContract(i, "2026-10-01T00:00:00+00:00") for t, i in entries.items()
+    }
+    contracts_mod.commit_contracts(path, table, ())
+    return path
+
+
+def _funds(available="100000", funds_currency="EUR", cash_currency="EUR"):
+    return [
+        ibkr_fakes.account_value("TotalCashValue", "100000", currency=cash_currency),
+        ibkr_fakes.account_value("AvailableFunds", available, currency=funds_currency),
+    ]
+
+
+def _fake_for(tickers=("AAPL",), *, liquid_hours=OPEN_HOURS, funds=None, **kwargs):
+    contracts = {t: ibkr_fakes.stk_contract(t, CON_IDS[t]) for t in tickers}
+    kwargs.setdefault("whatif", ibkr_fakes.order_state(init="997.14"))
+    return ibkr_fakes.FakeIB(
+        qualify={t: [c] for t, c in contracts.items()},
+        details={
+            CON_IDS[t]: [ibkr_fakes.contract_detail(c, liquid_hours=liquid_hours)]
+            for t, c in contracts.items()
+        },
+        summary=_funds() if funds is None else funds,
+        **kwargs,
+    )
+
+
+def _aapl_position(quantity, con_id=None):
+    return ibkr_fakes.position(
+        "DUQ634065", "AAPL", quantity, conId=CON_IDS["AAPL"] if con_id is None else con_id
+    )
+
+
+def _gateway_run(
+    tmp_path,
+    loop,
+    fake,
+    *,
+    rating="Buy",
+    tickers=("AAPL",),
+    paper=None,
+    clock=OPEN_NOW,
+    calendar=None,
+    entries=None,
+    factory=None,
+):
+    """Run ``preview`` against a fake gateway with a stored contract for each ticker."""
+    paper = _buy_paper(tmp_path, rating) if paper is None else paper
+    contracts = _contracts_file(
+        tmp_path, {t: _identity(t) for t in tickers} if entries is None else entries
+    )
+    code, out, log, _c = _run_preview(
+        tmp_path,
+        _fake_factory(fake, loop) if factory is None else factory,
+        list(tickers),
+        paper_log=paper,
+        clock=clock,
+        calendar=calendar,
+        contracts=contracts,
+    )
+    return code, out, log, contracts
+
+
+def _assert_nothing_sent(fake, previews):
+    """G2: only whatIf previews reached the client; no real order, no cancel, no market data."""
+    for name in ("placeOrder", "cancelOrder", "whatIfOrder", "reqMktData", "reqTickers"):
+        assert name not in fake.calls
+    assert fake.calls.count("placeOrder(whatIf)") == previews
+
+
+class TestBuyFlat:
+    def test_buy_flat_previews_two_blocks(self, tmp_path, loop, capsys):
+        fake = _fake_for()
+        code, out, log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        assert "preview: AAPL preview-ok BUY 2" in capsys.readouterr().out
+        data = _payload(out)
+        assert data["sent"] is False
+        row = _rows(out)["AAPL"]
+        assert row["state"] == "preview-ok"
+        assert row["intent"] == {"side": "BUY", "quantity": 2, "order_type": "MKT", "tif_sent": "DAY"}
+        preview = row["preview"]
+        assert preview["init_margin_change"] == 997.14
+        assert preview["commission"] == 1.00003
+        assert preview["commission_currency"] == "USD"
+        assert preview["reject_reason"] == ""
+        assert preview["effective_tif"] == "DAY"
+        assert preview["tif_sent"] == "DAY"
+        assert row["budget"] == {"available_funds": 100000.0, "currency": "EUR"}
+        assert row["position"]["held"] == 0
+        order = fake.whatif_calls[0][1]
+        assert (order.action, order.totalQuantity, order.orderType, order.tif) == (
+            "BUY",
+            2,
+            "MKT",
+            "DAY",
+        )
+        assert f"sha={SHA}" in _log_text(log)
+        _assert_nothing_sent(fake, 1)
+
+    def test_the_contracts_file_stays_byte_equal(self, tmp_path, loop):
+        fake = _fake_for()
+        paper = _buy_paper(tmp_path)
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        before = path.read_bytes()
+        code, _out, _log, _c = _run_preview(
+            tmp_path,
+            _fake_factory(fake, loop),
+            ["AAPL"],
+            paper_log=paper,
+            contracts=path,
+        )
+        assert code == executor.EXIT_OK
+        assert path.read_bytes() == before
+        assert not contracts_mod.contracts_history_path(path).exists()
+
+
+def _case_buy_flat():
+    return "Buy", {}, 1
+
+
+def _case_within_tolerance():
+    return "Overweight", {"positions": [_aapl_position(1)]}, 0
+
+
+def _case_foreign_open_order():
+    return "Buy", {"open_orders": [ibkr_fakes.open_trade(CON_IDS["AAPL"])]}, 0
+
+
+def _case_over_budget():
+    return "Buy", {"funds": _funds(available="500")}, 1
+
+
+def _case_halted():
+    text = BUY_TEXT_HALT
+    return "Buy", {"whatif": [], "emit_during": {"whatif": [(17, 154, text, None)]}}, 1
+
+
+def _case_preview_empty():
+    return "Buy", {"whatif": []}, 1
+
+
+class TestNothingIsSent:
+    @pytest.mark.parametrize(
+        "case",
+        [
+            _case_buy_flat,
+            _case_within_tolerance,
+            _case_foreign_open_order,
+            _case_over_budget,
+            _case_halted,
+            _case_preview_empty,
+        ],
+        ids=lambda f: f.__name__.removeprefix("_case_"),
+    )
+    def test_nothing_sent(self, tmp_path, loop, case):
+        rating, kwargs, previews = case()
+        fake = _fake_for(**kwargs)
+        _gateway_run(tmp_path, loop, fake, rating=rating)
+        _assert_nothing_sent(fake, previews)
+        assert "reqMktData" not in fake.calls
+
+
+class TestTargetCalculation:
+    def test_within_tolerance_needs_no_preview(self, tmp_path, loop, capsys):
+        fake = _fake_for(positions=[_aapl_position(1)])
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake, rating="Overweight")
+        assert code == executor.EXIT_OK
+        assert _rows(out)["AAPL"]["state"] == "within-tolerance"
+        assert "whatif" not in fake.calls
+
+    def test_a_foreign_open_order_stops_the_ticker(self, tmp_path, loop):
+        fake = _fake_for(open_orders=[ibkr_fakes.open_trade(CON_IDS["AAPL"])])
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_PRECONDITION
+        row = _rows(out)["AAPL"]
+        assert row["state"] == "foreign-open-order"
+        assert len(row["open_orders"]) == 1
+        assert "whatif" not in fake.calls
+
+    def test_long_only_noop_for_a_sell_without_holding(self, tmp_path, loop):
+        fake = _fake_for()
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake, rating="Sell")
+        assert code == executor.EXIT_OK
+        assert _rows(out)["AAPL"]["state"] == "long-only-noop"
+        assert "whatif" not in fake.calls
+
+    def test_a_sell_with_holding_previews_a_sale(self, tmp_path, loop, capsys):
+        fake = _fake_for(positions=[_aapl_position(2)])
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake, rating="Sell")
+        assert code == executor.EXIT_OK
+        assert "preview: AAPL preview-ok SELL 2" in capsys.readouterr().out
+        order = fake.whatif_calls[0][1]
+        assert (order.action, order.totalQuantity) == ("SELL", 2)
+        assert _rows(out)["AAPL"]["intent"]["side"] == "SELL"
+
+    def test_a_fractional_position_is_its_own_state(self, tmp_path, loop):
+        fake = _fake_for(positions=[_aapl_position(1.5)])
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_PRECONDITION
+        assert _rows(out)["AAPL"]["state"] == "fractional-position"
+
+    def test_a_position_on_another_conid_is_reported_not_netted(self, tmp_path, loop):
+        fake = _fake_for(positions=[_aapl_position(5, con_id=999)])
+        code, out, log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        row = _rows(out)["AAPL"]
+        assert row["intent"]["quantity"] == 2
+        assert row["position"]["held"] == 0
+        assert row["position"]["other_conid"] == [{"con_id": 999, "quantity": 5.0}]
+        assert "ibkr-state=POSITION_OTHER_CONID" in _log_text(log)
+
+
+class TestBudgetAndVerdict:
+    def test_over_budget_is_exit_5(self, tmp_path, loop):
+        fake = _fake_for(funds=_funds(available="500"))
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        assert _rows(out)["AAPL"]["state"] == "over-budget"
+
+    def test_funds_in_another_currency_are_a_mismatch(self, tmp_path, loop):
+        fake = _fake_for(funds=_funds(funds_currency="USD", cash_currency="EUR"))
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        assert _rows(out)["AAPL"]["state"] == "currency-mismatch"
+
+    def test_an_empty_preview_is_exit_5(self, tmp_path, loop):
+        fake = _fake_for(whatif=[])
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        assert _rows(out)["AAPL"]["state"] == "preview-empty"
+
+    def test_code_154_is_halted(self, tmp_path, loop):
+        fake = _fake_for(whatif=[], emit_during={"whatif": [(17, 154, BUY_TEXT_HALT, None)]})
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        assert _rows(out)["AAPL"]["state"] == "halted"
+
+    def test_code_10349_is_tif_overridden(self, tmp_path, loop):
+        fake = _fake_for(whatif=[], emit_during={"whatif": [(17, 10349, "TIF set to DAY", None)]})
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        assert _rows(out)["AAPL"]["state"] == "tif-overridden"
+
+    def test_a_missing_tif_echo_is_unconfirmed(self, tmp_path, loop):
+        fake = _fake_for(whatif_echo_tif=None)
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        assert _rows(out)["AAPL"]["state"] == "tif-unconfirmed"
+
+    def test_a_request_error_is_a_rejection_with_its_text(self, tmp_path, loop):
+        text = "Order rejected - reason: insufficient permissions"
+        fake = _fake_for(whatif=[], emit_during={"whatif": [(17, 201, text, None)]})
+        code, out, log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        row = _rows(out)["AAPL"]
+        assert row["state"] == "preview-rejected"
+        assert text in row["preview"]["reject_reason"]
+        assert f"rejectReason={text!r}" in _log_text(log) or text in _log_text(log)
+
+
+class TestSessionAndCalendar:
+    def test_a_closed_market_still_previews(self, tmp_path, loop, capsys):
+        fake = _fake_for(liquid_hours=CLOSED_HOURS)
+        clock = datetime(2026, 10, 10, 10, 0, tzinfo=UTC)
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake, clock=clock)
+        assert code == executor.EXIT_OK
+        row = _rows(out)["AAPL"]
+        assert row["session"]["closed"] is True
+        assert row["state"] == "preview-ok"
+        assert "market closed" in capsys.readouterr().out
+        assert fake.calls.count("placeOrder(whatIf)") == 1
+
+    def test_an_open_market_is_not_marked_closed(self, tmp_path, loop):
+        fake = _fake_for()
+        _code, out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert _rows(out)["AAPL"]["session"]["closed"] is False
+
+    def test_calendar_and_liquid_hours_disagree(self, tmp_path, loop):
+        fake = _fake_for()
+        calendar = _stub_calendar(holidays={date(2026, 10, 12)})
+        code, out, _log, _c = _gateway_run(tmp_path, loop, fake, calendar=calendar)
+        assert code == executor.EXIT_PRECONDITION
+        assert _rows(out)["AAPL"]["state"] == "calendar-conflict"
+        assert "whatif" not in fake.calls
+
+
+class TestContracts:
+    def test_a_ticker_without_a_stored_contract_is_not_resolved_yet(self, tmp_path):
+        paper = _buy_paper(tmp_path, ticker="MSFT")
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        before = path.read_bytes()
+        factory = _RecordingFactory()
+        code, out, _log, _c = _run_preview(
+            tmp_path, factory, ["MSFT"], paper_log=paper, contracts=path
+        )
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+        assert _rows(out)["MSFT"]["state"] == "not-resolved-yet"
+        assert path.read_bytes() == before
+        assert not contracts_mod.contracts_history_path(path).exists()
+
+    def test_a_missing_contracts_file_is_a_run_state(self, tmp_path):
+        paper = _buy_paper(tmp_path)
+        factory = _RecordingFactory()
+        code, out, log, contracts = _run_preview(tmp_path, factory, ["AAPL"], paper_log=paper)
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+        assert _payload(out)["run_state"] == "CONTRACTS_MISSING"
+        assert "ibkr-state=CONTRACTS_MISSING" in _log_text(log)
+        assert "resolve --init" in _log_text(log)
+        assert not contracts.exists()
+
+    def test_an_invalid_contracts_file_is_exit_1(self, tmp_path):
+        paper = _buy_paper(tmp_path)
+        path = tmp_path / "ibkr" / "contracts.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("not json at all", encoding="utf-8")
+        factory = _RecordingFactory()
+        code, _out, log, _c = _run_preview(
+            tmp_path, factory, ["AAPL"], paper_log=paper, contracts=path
+        )
+        assert code == executor.EXIT_CONFIG
+        assert factory.calls == []
+        assert path.read_text(encoding="utf-8") == "not json at all"
+        assert "CONFIG_INVALID" in _log_text(log)
+
+    def test_a_resolve_rejection_keeps_its_phase_3_state(self, tmp_path, loop):
+        fake = _fake_for()
+        wrong = _identity("AAPL", con_id=111)
+        code, out, _log, contracts = _gateway_run(
+            tmp_path, loop, fake, entries={"AAPL": wrong}
+        )
+        before = contracts.read_bytes()
+        assert code == executor.EXIT_PRECONDITION
+        row = _rows(out)["AAPL"]
+        assert row["state"] == "drift"
+        assert row["exit"] == executor.EXIT_PRECONDITION
+        assert "whatif" not in fake.calls
+        assert contracts.read_bytes() == before
+
+
+class TestSeveralTickers:
+    def test_the_heaviest_exit_wins(self, tmp_path, loop):
+        paper = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy"), ("2026-10-09", "MSFT", "Hold")],
+            {
+                "2026-10-09": _summary(
+                    "2026-10-09", ("AAPL", "ok", "Buy"), ("MSFT", "ok", "Hold")
+                )
+            },
+        )
+        fake = _fake_for(funds=_funds(available="500"))
+        code, out, _log, _c = _gateway_run(
+            tmp_path,
+            loop,
+            fake,
+            tickers=("AAPL", "MSFT"),
+            paper=paper,
+            entries={"AAPL": _identity("AAPL"), "MSFT": _identity("MSFT")},
+        )
+        assert code == executor.EXIT_REJECTED
+        rows = _rows(out)
+        assert rows["AAPL"]["state"] == "over-budget"
+        assert rows["MSFT"]["state"] == "skipped-hold"
+        _assert_nothing_sent(fake, 1)
+
+    def test_every_ticker_is_processed(self, tmp_path, loop):
+        paper = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy"), ("2026-10-09", "MSFT", "Buy")],
+            {
+                "2026-10-09": _summary(
+                    "2026-10-09", ("AAPL", "ok", "Buy"), ("MSFT", "ok", "Buy")
+                )
+            },
+        )
+        fake = _fake_for(tickers=("AAPL", "MSFT"))
+        code, out, _log, _c = _gateway_run(
+            tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=paper
+        )
+        assert code == executor.EXIT_OK
+        assert {r["state"] for r in _payload(out)["rows"]} == {"preview-ok"}
+        assert fake.calls.count("placeOrder(whatIf)") == 2
+        assert fake.calls.count("connect") == 1
+
+
+class TestBarrierAndGateway:
+    def test_a_read_only_violation_is_never_swallowed(self, tmp_path, loop):
+        fake = _fake_for()
+
+        def factory(host, port, logger):
+            adapter = _fake_factory(fake, loop)(host, port, logger)
+
+            def refuse(**_kwargs):
+                raise broker.ReadOnlyViolation("order refused by the barrier")
+
+            adapter.preview_order = refuse
+            return adapter
+
+        code, _out, log, _c = _gateway_run(tmp_path, loop, fake, factory=factory)
+        assert code == executor.EXIT_GATEWAY
+        assert "WRITE_REFUSED" in _log_text(log)
+
+    def test_an_unreachable_gateway_is_exit_3(self, tmp_path, loop):
+        fake = _fake_for()
+        fake.refuse = ConnectionRefusedError("refused")
+        code, _out, _log, _c = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_GATEWAY
+        assert "whatif" not in fake.calls
+
+    def test_the_executor_knows_no_write_call(self):
+        source = _SCRIPT.read_text(encoding="utf-8")
+        for name in ("placeOrder", "cancelOrder", "reqMktData", "reqTickers"):
+            assert name not in source
+        assert source.count("commit_contracts") == 1
