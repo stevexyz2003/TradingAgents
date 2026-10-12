@@ -2,37 +2,51 @@
 gsd_state_version: 1.0
 milestone: M2
 milestone_name: IBKR Paper Execution
-status: ready_to_execute
-last_updated: "2026-10-12T05:51:13.910Z"
-last_activity: 2026-10-12 -- Phase 2 execution started
+status: human_needed
+last_updated: "2026-10-12T14:36:02.000Z"
+last_activity: 2026-10-12 -- Phase 2: Code-Review (9/9 Befunde gefixt) + Verifikation (human_needed, 4 UAT-Punkte offen)
 progress:
   total_phases: 8
-  completed_phases: 0
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 0
-  percent: 0
+  completed_plans: 6
+  percent: 25
 ---
 
 # Project State — TradingEngineX (TradingAgents)
 
-**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 68 Anforderungen, Phase 1 abgeschlossen (Gate G1 zu seit 8f4b6ea), Phase 2 geplant
+**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 68 Anforderungen, Phasen 1–2 abgeschlossen (Gate G1 zu seit 8f4b6ea), UAT von Phase 2 offen (4 Punkte)
 **Vorgänger:** Produktionsreife v0.2.x → v0.2.5 — **abgeschlossen 2026-10-11** (siehe [MILESTONE.md](./MILESTONE.md)); bewusst offen geblieben: P2 #6 Observability (von M2 Phase 8 teilweise mitbedient) und P2 #8 Provider-Ausfall-Policy
 **Branch:** main
 
 ## Current Position
 
-Phase: 2 (Verbindung, Paper-Guard und Kontolesen) — EXECUTING
-Plan: 1 of 6
-**Nächster Schritt: M2 Phase 2 ausführen — `/gsd:execute-phase 2`.**
-6 Pläne in 5 Wellen (`.planning/phases/02-verbindung-paper-guard-und-kontolesen/`),
-Plan-Checker bestanden nach einer Revisionsrunde. Drei Pläne halten an
-Operator-Checkpoints: Paket-Freigabe `ib_async`/`tzdata` (02-01), Gateway-Read-Only
-wieder an oder begründet abgelehnt + echter `account`-Lauf (02-05), echter
-Paper-Lauf mit `--portfolio` (02-06, kostet LLM). Wichtigster Recherchebefund:
-`readonly=True` sperrt in `ib_async` 2.1.0 **keine** Orders — die Schreibsperre
-baut der Adapter selbst auf `ib.client`.
+Phase: 2 (Verbindung, Paper-Guard und Kontolesen) — AUSGEFÜHRT + REVIEWED, UAT offen
+Plan: 6 of 6
+**Nächster Schritt: die vier offenen Punkte aus `02-HUMAN-UAT.md` abarbeiten.
+K1 und K7 gehen in einem Lauf (braucht das Paper-Gateway, ca. 0,13 $ LLM); dazu
+REQ-IBKR-67 (Link-Codes 1100/1101/1102/1300/2110 am echten Gateway messen oder
+begründeter Override) und die Gateway-Einstellung „Allow connections from
+localhost only“. Erst danach Phase 3 planen.**
+Alle 6 Pläne in 5 Wellen sind ausgeführt und committet, je mit SUMMARY
+(`.planning/phases/02-verbindung-paper-guard-und-kontolesen/`).
+Der Code-Review (`02-REVIEW.md`, 13 Dateien) fand 9 Befunde; CR-01, CR-02 und
+WR-01..07 sind alle korrigiert (`02-REVIEW-FIX.md`, `status: all_fixed`,
+a1e4283..fdee790 — Arbeit in einem isolierten Worktree, `main` per Fast-Forward
+nachgezogen, kein Lauf erreichte Gateway oder LLM).
+Die Verifikation (`02-VERIFICATION.md`) steht auf `human_needed`: 6 von 8
+Roadmap-Kriterien sind verifiziert, K1 und K7 sind real nur mit dem Code-Stand
+**vor** den Fixes belegt. Seit CR-02 verlangt der Preflight ein frisches `as_of`
+im Portfolio-JSON — genau das fehlt der echten Datei vom 2026-10-12 13:26, die
+Kette muss nach den Fixes also einmal echt laufen.
+Beide Operator-Checkpoints aus der Ausführung sind freigegeben: Read-Only an +
+echter `account`-Lauf gegen DUQ634065 (02-05) und echter Paper-Lauf mit
+`--portfolio` (02-06: AAPL Hold, 0,1307 $, `Cash available: 1.005.459,44 EUR`
+im Report).
+Wichtigster Recherchebefund bleibt: `readonly=True` sperrt in `ib_async` 2.1.0
+**keine** Orders — die Schreibsperre baut der Adapter selbst auf `ib.client`.
 
-Last activity: 2026-10-12 -- Phase 2 execution started
+Last activity: 2026-10-12 -- Phase 2: Code-Review (9/9 Befunde gefixt) + Verifikation (human_needed, 4 UAT-Punkte offen)
 
 Davor: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
 

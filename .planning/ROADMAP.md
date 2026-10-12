@@ -30,7 +30,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 
 ## Phasen
 
-- [ ] **Phase 1: Konto-Messung und Gateway-Grundbetrieb** — messen, was am Konto wirklich gilt, bevor Code darauf baut (Operator-Aufgabe, kein Entwicklungsschritt)
+- [x] **Phase 1: Konto-Messung und Gateway-Grundbetrieb** — messen, was am Konto wirklich gilt, bevor Code darauf baut (Operator-Aufgabe, kein Entwicklungsschritt; completed 2026-10-11)
 - [x] **Phase 2: Verbindung, Paper-Guard und Kontolesen** — ein lokaler Prozess liest `DUQ634065` read-only und füllt `PortfolioContext` (completed 2026-10-12)
 - [ ] **Phase 3: Symbol-Auflösung, Handelbarkeit und Handelszeiten** — vom Roh-Ticker zu genau einem Contract, oder begründet gar nicht
 - [ ] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet
@@ -41,8 +41,8 @@ Vier Regeln haben den Zuschnitt bestimmt:
 
 | Phase | Anforderungen | Status |
 |---|---|---|
-| 1. Konto-Messung | 2 | offen |
-| 2. Verbindung & Kontolesen | 12 | offen |
+| 1. Konto-Messung | 2 | abgeschlossen |
+| 2. Verbindung & Kontolesen | 12 | abgeschlossen, 4 UAT-Punkte offen |
 | 3. Symbol & Handelszeiten | 7 | offen |
 | 4. Entscheidung & Trockenlauf | 16 | offen |
 | 5. Leitplanken | 15 | offen |
@@ -76,7 +76,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - Keine Entscheidung über das Signal→Order-Mapping — das ist in REQUIREMENTS.md bereits gesetzt und wird hier nicht neu aufgerollt.
 - Keine Gateway-Dauerbetriebseinstellung (Auto-Restart, `ClosedownAt`, Scheduler) — das ist Phase 8.
 
-**Plans:** TBD
+**Plans:** keine (Operator-Phase, kein Entwicklungsschritt)
 
 ---
 
