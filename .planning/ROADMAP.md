@@ -203,7 +203,7 @@ Plans:
 - Das Trockenlauf-Protokoll ist **noch nicht** der Ledger, auf den sich Idempotenz stützt: es gibt in dieser Phase keine Write-Ahead-Disziplin und keinen Lock.
 - Kein Push auf irgendeinen Branch, kein Heartbeat.
 
-**Plans:** 6/9 plans executed
+**Plans:** 8/9 plans executed
 
 Plans:
 **Wave 1**
@@ -220,8 +220,8 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-07-PLAN.md — Subkommando `preview`: vollständiger Trockenlauf bis zum beurteilten `whatIf`, nichts gesendet (SC1–SC8, G2)
-- [ ] 04-08-PLAN.md — Operator-Messung am Gateway: `whatIf` mit Read-Only-Schalter aus/an (D-14)
+- [x] 04-07-PLAN.md — Subkommando `preview`: vollständiger Trockenlauf bis zum beurteilten `whatIf`, nichts gesendet (SC1–SC8, G2)
+- [x] 04-08-PLAN.md — Operator-Messung am Gateway: `whatIf` mit Read-Only-Schalter aus/an (D-14)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
