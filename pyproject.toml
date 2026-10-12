@@ -49,6 +49,8 @@ ibkr = [
     # tzdata is at 2026.5 (2026-10-03), but ib_async 2.1.0 itself declares the cap below. Stated here
     # so it is visible where it bites: with tzdata>=2025.2,<2026.0 required by ib_async, any tzdata>=2026 requirement elsewhere makes this extra unresolvable.
     "tzdata>=2025.2,<2026.0",
+    # XNYS session calendar for the phase-4 freshness rule (D-05): liquidHours only reaches about five days ahead, never back.
+    "exchange_calendars>=4.13,<5",
 ]
 
 [project.scripts]
