@@ -58,18 +58,22 @@ Code 3 means "gateway" here, unlike EXIT_RUN_FAILED (3) in the paper run.
 """
 
 import argparse
+import contextlib
 import importlib.util
+import io
 import json
 import logging
 import os
 import sys
+import tempfile
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 from dotenv import dotenv_values
 
+from tradingagents.memory.log import TradingMemoryLog
 from tradingagents.portfolio import PortfolioContext, Position, load_portfolio
 
 EXIT_OK = 0
@@ -722,10 +726,8 @@ def build_parser() -> argparse.ArgumentParser:
     resolve.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
 
     # No date option (D-07): the decision's date comes from the paper-log entry.
-    preview = sub.add_parser(
-        "preview",
-        help="dry run: decision from paper-log to a whatIf preview; sends nothing",
-    )
+    help_text = "dry run: decision from paper-log to a whatIf preview; sends nothing"
+    preview = sub.add_parser("preview", help=help_text)
     preview.add_argument("tickers", nargs="*", metavar="TICKER")
     preview.add_argument("--contracts", type=Path, default=None, help="contracts.json path")
     preview.add_argument("--out", type=Path, default=None, help="dry-run record (JSON)")
@@ -1005,6 +1007,201 @@ def _abort_run(ctx, abort: _RunAbort) -> int:
     return code
 
 
+_ROW_KEYS = (
+    "trade_date",
+    "rating",
+    "freshness",
+    "session",
+    "position",
+    "open_orders",
+    "intent",
+    "preview",
+    "budget",
+)
+
+
+def _new_row(ticker: str) -> dict:
+    row = {"ticker": ticker, "state": None, "exit": None, "detail": ""}
+    row.update(dict.fromkeys(_ROW_KEYS))
+    return row
+
+
+def _console_suffix(row: dict) -> str:
+    """The short addition to a console line: the order intent, then the dating."""
+    intent = row["intent"]
+    head = f" {intent['side']} {intent['quantity']}" if intent else ""
+    notes = []
+    if row["trade_date"]:
+        notes.append(f"trade_date {row['trade_date']}")
+    fresh = row["freshness"]
+    if fresh and fresh.get("weekend_gap"):
+        notes.append(f"weekend_gap {fresh['gap_days']}d")
+    if row["session"] and row["session"].get("closed"):
+        notes.append("market closed")
+    return head + (f" ({', '.join(notes)})" if notes else "")
+
+
+def _finish_row(ctx, row: dict, state: str, detail: str) -> None:
+    """Give a ticker its end state: exit code, one log line (with the SHA), one console line."""
+    # Phase-3 rejections (not-mapped, drift, ...) have no entry in the decision table; D-16
+    # puts every precondition under exit 2.
+    code = ctx.mods.decision.EXIT_BY_STATE.get(state, EXIT_PRECONDITION)
+    row.update(state=state, exit=code, detail=detail)
+    ctx.logger.log(
+        logging.WARNING if code else logging.INFO,
+        "ibkr-state=PREVIEW ticker=%s state=%s sha=%s detail=%r",
+        row["ticker"],
+        state,
+        ctx.sha,
+        detail,
+    )
+    print(f"preview: {row['ticker']} {state}{_console_suffix(row)}")
+
+
+def _finish_run(ctx, rows: dict) -> int:
+    """Write the record and combine the ticker states into the exit code (1 > 5 > 2 > 0)."""
+    decision_mod = ctx.mods.decision
+    # A phase-3 rejection counts as exit 2, like every other precondition.
+    states = [
+        row["state"] if row["state"] in decision_mod.EXIT_BY_STATE else decision_mod.NOT_RESOLVED_YET
+        for row in rows.values()
+    ]
+    payload = _preview_payload(
+        None, rows.values(), ctx.sha, ctx.remote, ctx.branch, ctx.now_utc
+    )
+    _write_preview(ctx.out, payload, ctx.mods.contracts, ctx.logger)
+    return decision_mod.worst_exit(states)
+
+
+def _write_bytes_atomic(path: Path, data: bytes) -> None:
+    """Write ``data`` through a temp file in the same directory, then move it into place."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_bytes(data)
+        os.replace(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def _read_log_entries(ctx, source) -> list[dict]:
+    """Fetch ``decision-log.md``, keep a byte-exact copy, verify it, parse its entries (REQ-15)."""
+    paperlog_mod = ctx.mods.paperlog
+    decision_mod = ctx.mods.decision
+    where = f"{ctx.branch}@{ctx.sha}"
+    try:
+        blob = source.read(paperlog_mod.DECISION_LOG_PATH)
+    except paperlog_mod.BlobMissing:
+        raise _RunAbort(
+            decision_mod.LOG_FINDING, f"{paperlog_mod.DECISION_LOG_PATH} missing on {where}"
+        ) from None
+    copy = default_paper_log_copy()
+    _write_bytes_atomic(copy, blob)
+    try:
+        text = paperlog_mod.decode_utf8(blob, paperlog_mod.DECISION_LOG_PATH)
+    except paperlog_mod.PaperLogUnavailable as exc:
+        raise _RunAbort(decision_mod.LOG_FINDING, exc.reason) from None
+    if not text.strip():
+        # verify reads an empty file as "nothing to check"; for a decision source it is a finding.
+        raise _RunAbort(decision_mod.LOG_FINDING, f"{paperlog_mod.DECISION_LOG_PATH} is empty")
+    buffer = io.StringIO()
+    # An empty cache directory: verify also looks at <cache_dir>/checkpoints.
+    with tempfile.TemporaryDirectory() as cache_dir, contextlib.redirect_stdout(buffer):
+        status = ctx.mods.maintenance.verify(cache_dir=cache_dir, memory_log=str(copy))
+    lines = buffer.getvalue().splitlines()
+    for line in lines:
+        ctx.logger.info("state_maintenance verify: %s", line)
+    if status != 0:
+        findings = "; ".join(line for line in lines if line.startswith("FAIL:"))
+        raise _RunAbort(decision_mod.LOG_FINDING, findings or f"verify returned {status}")
+    return TradingMemoryLog({"memory_log_path": str(copy)}).load_entries()
+
+
+def _summary_reader(ctx, source):
+    """A cached reader of ``runs/<date>/summary.json``; ``None`` for a missing file."""
+    paperlog_mod = ctx.mods.paperlog
+    decision_mod = ctx.mods.decision
+    cache: dict[str, object] = {}
+
+    def read(day: str):
+        if day not in cache:
+            path = paperlog_mod.summary_path(day)
+            try:
+                blob = source.read(path)
+            except paperlog_mod.BlobMissing:
+                cache[day] = None
+            else:
+                text = paperlog_mod.decode_utf8(blob, path)
+                try:
+                    cache[day] = decision_mod.read_summary(text)
+                except decision_mod.SummarySchemaError as exc:
+                    raise _RunAbort(decision_mod.SUMMARY_SCHEMA, f"{path}: {exc}") from None
+                except decision_mod.SummaryContractError as exc:
+                    raise _RunAbort(decision_mod.SUMMARY_CONTRACT, f"{path}: {exc}") from None
+        return cache[day]
+
+    return read
+
+
+def _local_chain(ctx, source, tickers) -> tuple[dict, list[str]]:
+    """Everything that needs no gateway: the log, the summaries, the freshness.
+
+    Returns the rows (input order) and the tickers that still need the gateway. A Hold
+    ends here, so it never connects (SC1).
+    """
+    decision_mod = ctx.mods.decision
+    rows = {ticker: _new_row(ticker) for ticker in dict.fromkeys(tickers)}
+    latest = decision_mod.latest_entries(_read_log_entries(ctx, source))
+    run_dates = source.list_run_dates()
+    read_summary = _summary_reader(ctx, source)
+    remaining: list[str] = []
+    for ticker, row in rows.items():
+        entry = latest.get(ticker)
+        if entry is None:
+            state, detail = decision_mod.NO_DECISION, "no entry for this ticker in the log"
+            if run_dates:
+                newest = read_summary(run_dates[-1])
+                found = (
+                    decision_mod.newer_summary_state(date.min, newest, ticker) if newest else None
+                )
+                if found:
+                    state = found
+                    detail = f"summary of {run_dates[-1]} reports this ticker, the log has no entry"
+            _finish_row(ctx, row, state, detail)
+            continue
+        entry_day = entry["date"]
+        parsed = decision_mod.parse_trade_date(entry_day)
+        row["rating"] = entry["rating"]
+        row["trade_date"] = entry_day
+        verdict = decision_mod.evaluate_decision(entry, read_summary(entry_day) if parsed else None)
+        if verdict.state != decision_mod.EXECUTABLE:
+            _finish_row(ctx, row, verdict.state, verdict.detail)
+            continue
+        newer = [day for day in run_dates if day > entry_day]
+        if newer:
+            summary = read_summary(newer[-1])
+            found = decision_mod.newer_summary_state(parsed, summary, ticker) if summary else None
+            if found:
+                detail = f"summary of {newer[-1]} supersedes the log entry of {entry_day}"
+                _finish_row(ctx, row, found, detail)
+                continue
+        fresh = decision_mod.freshness(parsed, ctx.now_utc, ctx.calendar)
+        row["freshness"] = {
+            "state": fresh.state,
+            "execution_day": fresh.execution_day.isoformat() if fresh.execution_day else None,
+            "in_session_day": fresh.in_session_day,
+            "gap_days": fresh.gap_days,
+            "weekend_gap": fresh.weekend_gap,
+            "closed_sessions": [day.isoformat() for day in fresh.closed_sessions],
+        }
+        if fresh.state != "fresh":
+            _finish_row(ctx, row, fresh.state, fresh.detail)
+            continue
+        remaining.append(ticker)
+    return rows, remaining
+
+
 def run_preview(
     args, mods, broker_factory, paper_log_factory, calendar, logger, progress, now_utc: datetime
 ) -> int:
@@ -1045,12 +1242,16 @@ def run_preview(
     )
     try:
         ctx.sha = source.fetch()
+        rows, remaining = _local_chain(ctx, source, args.tickers)
     except mods.paperlog.PaperLogUnavailable as exc:
         # No second attempt and no fall back to a local ref (D-02).
         return _abort_run(ctx, _RunAbort(mods.decision.PAPER_LOG_UNAVAILABLE, exc.reason))
-    payload = _preview_payload(None, (), ctx.sha, remote, branch, now_utc)
-    _write_preview(out, payload, mods.contracts, logger)
-    return EXIT_OK
+    except _RunAbort as stop:
+        return _abort_run(ctx, stop)
+    if remaining:
+        # The gateway chain follows with the next change of this plan.
+        raise NotImplementedError("the gateway chain of preview is not wired yet")
+    return _finish_run(ctx, rows)
 
 
 if __name__ == "__main__":
