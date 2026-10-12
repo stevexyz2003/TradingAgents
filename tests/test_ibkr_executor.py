@@ -437,6 +437,21 @@ class TestAccount:
         assert "disconnect" in fake.calls
         assert len(capsys.readouterr().err.strip().splitlines()) == 1
 
+    def test_link_loss_during_the_snapshot_exits_3_without_a_file(self, tmp_path, capsys, loop):
+        # CR-01 negative control: the gateway answers from its local state after a
+        # 1100, the answer is well formed, and the run must still not write a file.
+        fake = ibkr_fakes.FakeIB(
+            emit_during={"positions": [(-1, 1100, "Connectivity lost", None)]}, **_book()
+        )
+        code, out, log = _run(tmp_path, _fake_factory(fake, loop))
+        assert code == executor.EXIT_GATEWAY
+        assert not out.exists()
+        text = _log_text(log)
+        assert "ibkr-state=CONNECTIVITY_LOST code=1100" in text
+        assert "snapshot discarded" in text
+        assert "disconnect" in fake.calls
+        assert len(capsys.readouterr().err.strip().splitlines()) == 1
+
     def test_read_only_warning_survives_in_the_log(self, tmp_path, loop):
         fake = ibkr_fakes.FakeIB(
             emit_on_connect=[(-1, 321, "Die API befindet sich im schreibgeschützten Modus", None)],

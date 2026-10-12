@@ -5,6 +5,7 @@ the suite-wide network block does not stop asyncio loopback on Windows and the
 real paper gateway listens on this machine.
 """
 
+import asyncio
 import logging
 import time
 
@@ -272,6 +273,21 @@ def test_health_after_open_link_codes(loop, code, state):
     assert "probe" not in fake.calls
 
 
+def test_health_sees_1100_during_the_probe(loop):
+    # The probe still answers well formed; only the 1100 inside its window shows the loss.
+    fake = FakeIB(emit_during={"probe": [(-1, 1100, "Connectivity lost", None)]})
+    health = _connected(fake, loop).health()
+    assert (health.ok, health.state) == (False, "CONNECTIVITY_LOST")
+    assert "probe" in fake.calls
+
+
+def test_health_sees_a_lost_and_restored_link_during_the_probe(loop):
+    events = [(-1, 1100, "Connectivity lost", None), (-1, 1101, "restored, data lost", None)]
+    fake = FakeIB(emit_during={"probe": events})
+    health = _connected(fake, loop).health()
+    assert (health.ok, health.state) == (False, "CONNECTIVITY_LOST")
+
+
 def test_health_when_not_connected(loop):
     fake = FakeIB()
     adapter = _connected(fake, loop)
@@ -348,6 +364,63 @@ def test_positions_request_timeout(loop):
         adapter.positions()
     assert time.monotonic() - started < 1.0
     assert info.value.state == "REQUEST_TIMEOUT"
+
+
+@pytest.mark.parametrize("where", ["positions", "account_summary"])
+@pytest.mark.parametrize(
+    ("codes", "state"),
+    [
+        ((1100,), "CONNECTIVITY_LOST"),
+        ((1100, 1102), "CONNECTIVITY_LOST"),  # lost and restored inside the window
+        ((2110,), "SERVER_LINK_BROKEN"),
+        ((1300,), "PORT_CHANGED"),
+    ],
+    ids=["1100", "1100-1102", "2110", "1300"],
+)
+def test_positions_discards_a_snapshot_with_a_link_event_inside(loop, where, codes, state):
+    # Fail-closed (CR-01): the answers are well formed, so only the link event
+    # inside the read window can tell that they came from the gateway's local state.
+    events = [(-1, code, "link event", None) for code in codes]
+    fake = FakeIB(
+        positions=[position("DUQ634065", "AAPL", 3)],
+        summary=_summary(),
+        emit_during={where: events},
+    )
+    adapter = _connected(fake, loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.positions()
+    assert info.value.state == state
+    assert info.value.code == codes[0]
+    assert "snapshot discarded" in info.value.detail
+
+
+def test_positions_refuses_to_read_while_a_link_is_open(loop):
+    fake = FakeIB(summary=_summary())
+    adapter = _connected(fake, loop)
+    fake.errorEvent.emit(-1, 1100, "Connectivity lost", None)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.positions()
+    assert info.value.state == "CONNECTIVITY_LOST"
+    assert "positions" not in fake.calls
+
+
+class _LateLinkLoss(FakeIB):
+    """Answers the summary, and the gateway's 1100 lands on the socket just after."""
+
+    async def accountSummaryAsync(self, account=""):
+        rows = await super().accountSummaryAsync(account)
+        asyncio.get_running_loop().call_later(
+            0.01, self.errorEvent.emit, -1, 1100, "Connectivity lost", None
+        )
+        return rows
+
+
+def test_positions_settles_the_socket_before_it_trusts_the_snapshot(loop):
+    fake = _LateLinkLoss(summary=_summary())
+    adapter = _connected(fake, loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.positions()
+    assert info.value.state == "CONNECTIVITY_LOST"
 
 
 def test_positions_when_not_connected(loop):

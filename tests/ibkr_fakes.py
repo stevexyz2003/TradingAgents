@@ -91,10 +91,14 @@ class FakeIB:
         positions=None,
         summary=None,
         probe="ok",
+        emit_during=None,
     ):
         self.accounts = list(accounts)
         self.refuse = refuse
         self.emit_on_connect = list(emit_on_connect)
+        #: call name ("positions", "account_summary", "probe") -> error events emitted
+        #: while that request is in flight; the answer still comes back well formed.
+        self.emit_during = dict(emit_during or {})
         self._positions = [] if positions is None else positions
         self._summary = [account_value("TotalCashValue", "1000.0")] if summary is None else summary
         self.probe = probe
@@ -135,20 +139,27 @@ class FakeIB:
         self.calls.append("disconnect")
         self.connected = False
 
+    def _emit_during(self, name):
+        for args in self.emit_during.get(name, ()):
+            self.errorEvent.emit(*args)
+
     async def reqPositionsAsync(self):
         self.calls.append("positions")
+        self._emit_during("positions")
         if self._positions == "hang":
             await _forever()
         return list(self._positions)
 
     async def accountSummaryAsync(self, account=""):
         self.calls.append("account_summary")
+        self._emit_during("account_summary")
         if self._summary == "hang":
             await _forever()
         return list(self._summary)
 
     async def reqContractDetailsAsync(self, contract):
         self.calls.append("probe")
+        self._emit_during("probe")
         if self.probe == "hang":
             await _forever()
         if self.probe == "empty":

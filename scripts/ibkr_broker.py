@@ -39,6 +39,16 @@ CONNECT_TIMEOUT_S = 10.0
 REQUEST_TIMEOUT_S = 10.0
 #: Seconds the liveness probe may take.
 PROBE_TIMEOUT_S = 5.0
+#: Seconds the loop keeps reading the socket after the last answer of a snapshot,
+#: so a 1100 that lands right behind it is seen before the snapshot is trusted.
+#: One ``sleep(0)`` tick is not enough on the Windows proactor loop: a socket read
+#: needs one iteration for the completion and another for ``data_received``.
+SNAPSHOT_SETTLE_S = 0.05
+
+#: Codes that open or close a link outage. Any of them inside a read window voids
+#: what was read there: after a 1100 the gateway answers from its local state, and
+#: a 1101/1102 inside the window means a loss happened in it.
+LINK_CODES = frozenset({1100, 1101, 1102, 1300, 2110})
 
 #: Client calls that would change the account; blocked before connectAsync.
 _WRITE_CALLS = ("placeOrder", "cancelOrder", "reqGlobalCancel", "exerciseOptions")
@@ -196,6 +206,7 @@ class IbkrBroker:
         connect_timeout: float = CONNECT_TIMEOUT_S,
         request_timeout: float = REQUEST_TIMEOUT_S,
         probe_timeout: float = PROBE_TIMEOUT_S,
+        settle: float = SNAPSHOT_SETTLE_S,
     ):
         self._host = host
         self._port = port
@@ -207,12 +218,15 @@ class IbkrBroker:
         self._connect_timeout = connect_timeout
         self._request_timeout = request_timeout
         self._probe_timeout = probe_timeout
+        self._settle = settle
         self._handles: IbHandles | None = None
         self._ib = None
         self.link_lost = False
         self.server_link_broken = False
         self.port_changed = False
         self._seen_codes: list[int] = []
+        #: Every LINK_CODES event of the session, in order; read windows compare its length.
+        self._link_codes: list[int] = []
 
     def __enter__(self) -> IbkrBroker:
         self.connect()
@@ -310,10 +324,12 @@ class IbkrBroker:
         within ``probe_timeout``. One loop tick runs before the state flags are
         read, so an error event already queued in the loop (a 1100 that arrived
         between two calls) reaches ``_on_error`` first. While a flag is open no
-        probe is sent.
+        probe is sent, and a link event that arrives while the probe is in
+        flight voids its answer.
 
         Known limit (assumption A4): should the gateway answer the probe from a
-        cache while the server link is down, only the 1100/2110 flags reveal it.
+        cache while the server link is down, only the 1100/2110 events reveal
+        it; they are checked before and after the probe.
         """
         ib, handles = self._ib, self._handles
         if ib is None or handles is None:
@@ -321,12 +337,10 @@ class IbkrBroker:
         self._call(lambda: asyncio.sleep(0), self._probe_timeout)
         if not ib.isConnected():
             return self._unhealthy("NOT_CONNECTED", "socket is down")
-        if self.link_lost:
-            return self._unhealthy("CONNECTIVITY_LOST", "1100 open, no 1101/1102 since")
-        if self.server_link_broken:
-            return self._unhealthy("SERVER_LINK_BROKEN", "2110 open, no 1101/1102 since")
-        if self.port_changed:
-            return self._unhealthy("PORT_CHANGED", "1300: the gateway changed its port")
+        opened = self._open_link()
+        if opened is not None:
+            return self._unhealthy(*opened)
+        mark = len(self._link_codes)
         try:
             details = self._call(
                 lambda: ib.reqContractDetailsAsync(handles.contract(conId=PROBE_CON_ID)),
@@ -338,6 +352,10 @@ class IbkrBroker:
             )
         except ConnectionError as exc:
             return self._unhealthy("NOT_CONNECTED", f"probe not sent ({type(exc).__name__})")
+        event = self._link_event_since(mark)
+        if event is not None:
+            state, code = event
+            return self._unhealthy(state, f"link event {code} while the probe was in flight")
         if len(details) != 1 or details[0].contract.conId != PROBE_CON_ID:
             return self._unhealthy(
                 PROBE_FAILED, f"probe conId {PROBE_CON_ID} returned {len(details)} matches"
@@ -351,12 +369,35 @@ class IbkrBroker:
         and zero-quantity rows are dropped. Cash is the one ``TotalCashValue`` row
         of the paper account (conservative, without margin; assumption A3), not
         the margin-levered buying power.
+
+        Fail-closed over the whole read window: no read starts while a link flag
+        is open, the loop settles for ``settle`` seconds after the last answer,
+        and any 1100/1101/1102/1300/2110 seen in between discards the snapshot.
+        After a 1100 the gateway answers from its local state with well-formed
+        rows, so "no error" is no proof of a fresh book.
         """
         ib = self._ib
         if ib is None:
             raise GatewayUnavailable("NOT_CONNECTED", 504, "no session; connect() first")
+        opened = self._open_link()
+        if opened is not None:
+            raise GatewayUnavailable(opened[0], None, f"{opened[1]}; no snapshot read")
+        mark = len(self._link_codes)
         raw = self._request("reqPositions", ib.reqPositionsAsync)
         values = self._request("accountSummary", lambda: ib.accountSummaryAsync(EXPECTED_ACCOUNT))
+        self._call(lambda: asyncio.sleep(self._settle), self._settle + self._probe_timeout)
+        if not ib.isConnected():
+            raise GatewayUnavailable(
+                "NOT_CONNECTED", 504, "socket went down during the snapshot; snapshot discarded"
+            )
+        event = self._link_event_since(mark)
+        if event is not None:
+            state, code = event
+            raise GatewayUnavailable(
+                state,
+                code,
+                f"link event(s) {self._link_codes[mark:]} during the snapshot; snapshot discarded",
+            )
 
         held = tuple(
             BrokerPosition(
@@ -403,6 +444,27 @@ class IbkrBroker:
                 "NOT_CONNECTED", 504, f"{name} not sent ({type(exc).__name__})"
             ) from exc
 
+    def _open_link(self) -> tuple[str, str] | None:
+        """``(state, detail)`` of an open 1100/2110/1300, or None."""
+        if self.link_lost:
+            return "CONNECTIVITY_LOST", "1100 open, no 1101/1102 since"
+        if self.server_link_broken:
+            return "SERVER_LINK_BROKEN", "2110 open, no 1101/1102 since"
+        if self.port_changed:
+            return "PORT_CHANGED", "1300: the gateway changed its port"
+        return None
+
+    def _link_event_since(self, mark: int) -> tuple[str, int] | None:
+        """``(state, code)`` of the first link event after ``mark``, or None.
+
+        The first event names the state: 1100 then 1102 inside one window is
+        still a lost link, whatever the flags say afterwards.
+        """
+        new = self._link_codes[mark:]
+        if not new:
+            return None
+        return state_for_code(new[0]), new[0]
+
     def _unhealthy(self, state: str, detail: str) -> Health:
         self._log.warning('ibkr-state=%s code=- detail="%s"', state, detail)
         return Health(False, state, detail)
@@ -421,6 +483,8 @@ class IbkrBroker:
         level = logging.INFO if errorCode in INFO_CODES else logging.WARNING
         self._log.log(level, 'ibkr-state=%s code=%s detail="%s"', state, errorCode, errorString)
         self._seen_codes.append(errorCode)
+        if errorCode in LINK_CODES:
+            self._link_codes.append(errorCode)
         if errorCode == 1100:
             self.link_lost = True
         elif errorCode in (1101, 1102):

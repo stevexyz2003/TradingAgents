@@ -167,6 +167,14 @@ conId 265598 (AAPL on SMART) under a timeout and counts the session as healthy
 only when exactly that contract comes back. An open 1100/2110/1300 makes the
 session unhealthy without a probe.
 
+The snapshot is fail-closed over its whole read window: `positions()` reads
+nothing while a 1100/2110/1300 is open, lets the loop read the socket for
+`SNAPSHOT_SETTLE_S` (0.05 s) after the last answer, and discards the snapshot
+when any of 1100, 1101, 1102, 1300 or 2110 (`LINK_CODES`) arrived inside the
+window — exit 3, no file. After a 1100 the gateway answers from its local
+state with well-formed rows, so the absence of an error proves nothing. The
+same rule voids a probe answer that arrived together with a link event.
+
 ## Startup sequence
 
 1. Write barrier on the client (`scripts/ibkr_broker.py:241`).
