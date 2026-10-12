@@ -155,7 +155,7 @@ Plans:
 - Keine Marktdaten über den delayed-Default hinaus; kein Limitpreis, keine Preisabfrage im Order-Pfad.
 - Keine Erweiterung der Allow-List über `STK` hinaus — die breitere Liste ist dokumentierter Erweiterungspfad.
 
-**Plans:** 2/6 plans executed
+**Plans:** 4/6 plans executed
 
 Plans:
 **Wave 1**
@@ -165,8 +165,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-03-PLAN.md — Persistenz `contracts.json` + History, `resolve_all` (Lernen, Gegenprobe, Drift, init-Anker, rebaseline) (Wave 2)
-- [ ] 03-04-PLAN.md — Guards D-07/SC7/Uhr-Injektion, REQ-IBKR-31 nach D-19 umformuliert (Wave 2)
+- [x] 03-03-PLAN.md — Persistenz `contracts.json` + History, `resolve_all` (Lernen, Gegenprobe, Drift, init-Anker, rebaseline) (Wave 2)
+- [x] 03-04-PLAN.md — Guards D-07/SC7/Uhr-Injektion, REQ-IBKR-31 nach D-19 umformuliert (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
