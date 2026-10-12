@@ -7,6 +7,7 @@ module, and every call of ``main`` gets its own ``--env-file``, ``--log-file``,
 """
 
 import importlib.util
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -273,3 +274,242 @@ class TestScaffold:
         code, _c, _l = _run(tmp_path, factory, ["AAPL"], contracts=path, env_file=env)
         assert code == executor.EXIT_CONFIG
         assert factory.calls == []
+
+
+# --- resolve against FakeIB (D-10 .. D-18, D-22, D-26 .. D-31) -----------------------
+
+
+def _json(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _history(contracts_path):
+    history = contracts_mod.contracts_history_path(contracts_path)
+    if not history.exists():
+        return []
+    return [json.loads(x) for x in history.read_text(encoding="utf-8").splitlines()]
+
+
+def _lines(capsys):
+    return [x for x in capsys.readouterr().out.splitlines() if x.startswith("resolve: ")]
+
+
+class TestInit:
+    def test_init_creates_the_file_and_history(self, tmp_path, loop, capsys):
+        fake = _fake_for(("AAPL", "MSFT", "NVDA"))
+        code, path, log = _run(
+            tmp_path, _fake_factory(fake, loop), ["AAPL", "MSFT", "NVDA"], extra=["--init"]
+        )
+        assert code == executor.EXIT_OK
+        data = _json(path)
+        assert data["schema_version"] == 1
+        assert {t: e["conId"] for t, e in data["contracts"].items()} == CON_IDS
+        assert [h["event"] for h in _history(path)] == ["init"] * 3
+        assert "reqMarketDataType(3)" in fake.calls
+        lines = _lines(capsys)
+        assert len(lines) == 3
+        assert lines[0].startswith("resolve: AAPL ok conId=265598 NASDAQ/USD/AAPL")
+
+    def test_anchor_mismatch_writes_nothing(self, tmp_path, loop, capsys):
+        wrong = ibkr_fakes.stk_contract("AAPL", 111)
+        fake = ibkr_fakes.FakeIB(
+            qualify={"AAPL": [wrong]},
+            details={111: [ibkr_fakes.contract_detail(wrong, liquid_hours=OPEN_HOURS)]},
+        )
+        code, path, log = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], extra=["--init"])
+        assert code == executor.EXIT_PRECONDITION
+        text = _log_text(log)
+        assert "ANCHOR_MISMATCH" in text
+        assert "265598" in text
+        assert "111" in text
+        assert not path.exists()
+        assert _history(path) == []
+
+
+class TestRuns:
+    def test_unknown_ticker_is_learned(self, tmp_path, loop, capsys):
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        fake = _fake_for(("AAPL", "MSFT"))
+        code, _c, log = _run(tmp_path, _fake_factory(fake, loop), ["AAPL", "MSFT"], contracts=path)
+        assert code == executor.EXIT_OK
+        assert "learned conId=272093" in _log_text(log)
+        assert [h["event"] for h in _history(path)] == ["learn"]
+        assert _json(path)["contracts"]["MSFT"]["conId"] == 272093
+
+    def test_second_run_reads_by_con_id_and_changes_nothing(self, tmp_path, loop):
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        before = path.read_bytes()
+        fake = _fake_for(("AAPL",))
+        code, _c, _l = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path)
+        assert code == executor.EXIT_OK
+        assert "contract_details" in fake.calls
+        assert "qualify" in fake.calls
+        assert _history(path) == []
+        assert path.read_bytes() == before
+
+    def test_drift_is_reported_and_the_file_stays(self, tmp_path, loop, capsys):
+        path = _contracts_file(
+            tmp_path, {"AAPL": _identity("AAPL", 999999), "MSFT": _identity("MSFT")}
+        )
+        before = path.read_bytes()
+        fake = _fake_for(("AAPL", "MSFT"))
+        code, _c, log = _run(tmp_path, _fake_factory(fake, loop), ["AAPL", "MSFT"], contracts=path)
+        assert code == executor.EXIT_PRECONDITION
+        lines = _lines(capsys)
+        assert lines[0].startswith("resolve: AAPL drift")
+        assert lines[1].startswith("resolve: MSFT ok")
+        text = _log_text(log)
+        assert "CONTRACT_DRIFT" in text
+        assert "999999" in text
+        assert path.read_bytes() == before
+
+    def test_ambiguous_candidates_all_land_in_the_log(self, tmp_path, loop, capsys):
+        path = _contracts_file(tmp_path, {"MSFT": _identity("MSFT")})
+        cands = [ibkr_fakes.stk_contract("AAPL", n) for n in (111, 222, 333)]
+        fake = ibkr_fakes.FakeIB(qualify={"AAPL": cands})
+        code, _c, log = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path)
+        assert code == executor.EXIT_PRECONDITION
+        assert _lines(capsys)[0].startswith("resolve: AAPL ambiguous")
+        row = next(x for x in _log_text(log).splitlines() if "AMBIGUOUS_CONTRACT" in x)
+        for con_id in (111, 222, 333):
+            assert f"conId={con_id}" in row
+
+    def test_rebaseline_shows_old_and_new(self, tmp_path, loop, capsys):
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL", 999999)})
+        fake = _fake_for(("AAPL",))
+        code, _c, _l = _run(
+            tmp_path,
+            _fake_factory(fake, loop),
+            ["AAPL"],
+            contracts=path,
+            extra=["--rebaseline", "AAPL"],
+        )
+        assert code == executor.EXIT_OK
+        out = capsys.readouterr().out
+        assert "999999" in out
+        assert "265598" in out
+        assert _json(path)["contracts"]["AAPL"]["conId"] == 265598
+        rows = _history(path)
+        assert [h["event"] for h in rows] == ["rebaseline"]
+        assert rows[0]["old"]["conId"] == 999999
+
+    def test_value_only_listing_is_not_tradable(self, tmp_path, loop, capsys):
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        fake = _fake_for(("AAPL",), valid_exchanges="VALUE")
+        code, _c, _l = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path)
+        assert code == executor.EXIT_PRECONDITION
+        assert _lines(capsys)[0].startswith("resolve: AAPL not-tradable")
+
+    def test_closed_with_a_next_window_is_exit_0(self, tmp_path, loop, capsys):
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        fake = _fake_for(("AAPL",), liquid_hours=CLOSED_HOURS)
+        code, _c, _l = _run(
+            tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path, clock=CLOSED_NOW
+        )
+        assert code == executor.EXIT_OK
+        line = _lines(capsys)[0]
+        assert "closed" in line
+        assert "next window 2026-10-12T" in line
+
+    def test_empty_hours_are_session_unknown(self, tmp_path, loop, capsys):
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        fake = _fake_for(("AAPL",), liquid_hours="")
+        code, _c, _l = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path)
+        assert code == executor.EXIT_PRECONDITION
+        assert _lines(capsys)[0].startswith("resolve: AAPL session-unknown")
+
+
+class TestOutputAndPersistence:
+    def test_out_file_schema_and_no_session_values(self, tmp_path, loop):
+        out = tmp_path / "res" / "resolve.json"
+        out.parent.mkdir(parents=True)
+        out.write_text("stale", encoding="utf-8")
+        fake = _fake_for(("AAPL",), liquid_hours=OPEN_HOURS)
+        code, path, _log = _run(
+            tmp_path, _fake_factory(fake, loop), ["AAPL"], extra=["--init", "--out", str(out)]
+        )
+        assert code == executor.EXIT_OK
+        data = _json(out)
+        assert data["schema_version"] == 1
+        assert data["as_of"] == OPEN_NOW.isoformat()
+        (row,) = data["results"]
+        assert set(row) == {
+            "ticker",
+            "state",
+            "detail",
+            "conId",
+            "primaryExchange",
+            "currency",
+            "localSymbol",
+            "window_start",
+            "window_end",
+            "next_open",
+        }
+        assert row["conId"] == 265598
+        assert list(out.parent.glob("*.tmp")) == []
+        for file in (path, contracts_mod.contracts_history_path(path), out):
+            text = file.read_text(encoding="utf-8")
+            assert "liquid" not in text.lower()
+            assert "tradingHours" not in text
+
+    def test_previous_out_file_is_removed_on_failure(self, tmp_path):
+        out = tmp_path / "resolve.json"
+        out.write_text("stale", encoding="utf-8")
+        code, _p, _l = _run(tmp_path, _RecordingFactory(), ["AAPL"], extra=["--out", str(out)])
+        assert code == executor.EXIT_PRECONDITION  # contracts file missing
+        assert not out.exists()
+
+    def test_contracts_are_written_after_the_session_closed(self, tmp_path, loop, monkeypatch):
+        fake = _fake_for(("AAPL",))
+        seen = []
+        original = contracts_mod.commit_contracts
+
+        def spy(*args, **kwargs):
+            seen.append(list(fake.calls))
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(contracts_mod, "commit_contracts", spy)
+        code, _p, _l = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], extra=["--init"])
+        assert code == executor.EXIT_OK
+        assert seen and "disconnect" in seen[0]
+
+    def test_commit_failure_is_exit_1_without_traceback(self, tmp_path, loop, monkeypatch, capsys):
+        fake = _fake_for(("AAPL",))
+
+        def boom(*_a, **_k):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(contracts_mod, "commit_contracts", boom)
+        code, _p, log = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], extra=["--init"])
+        assert code == executor.EXIT_CONFIG
+        assert "OUTPUT_INVALID" in _log_text(log)
+        assert "Traceback" not in capsys.readouterr().err
+
+
+class TestGatewayFailures:
+    def _existing(self, tmp_path):
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        return path, path.read_bytes()
+
+    def test_unreachable_gateway_is_exit_3(self, tmp_path, loop):
+        path, before = self._existing(tmp_path)
+        fake = ibkr_fakes.FakeIB(refuse=ConnectionRefusedError())
+        code, _c, log = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path)
+        assert code == executor.EXIT_GATEWAY
+        assert "GATEWAY_UNREACHABLE" in _log_text(log)
+        assert path.read_bytes() == before
+
+    def test_guard_violation_is_exit_8_before_any_request(self, tmp_path, loop):
+        path, before = self._existing(tmp_path)
+        fake = ibkr_fakes.FakeIB(accounts=("U1234567",))
+        code, _c, _l = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path)
+        assert code == executor.EXIT_ACCOUNT_GUARD
+        assert "reqMarketDataType(3)" not in fake.calls
+        assert path.read_bytes() == before
+
+    def test_unhealthy_probe_is_exit_3(self, tmp_path, loop):
+        path, before = self._existing(tmp_path)
+        fake = ibkr_fakes.FakeIB(probe="empty")
+        code, _c, _l = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path)
+        assert code == executor.EXIT_GATEWAY
+        assert path.read_bytes() == before
