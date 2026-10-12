@@ -52,6 +52,17 @@ is the setting *Configure → Settings → API → Settings → "Allow connectio
 from localhost only"*: the operator checked it on 2026-10-12 and it was already
 set. Keep the *Trusted IPs* list empty or at `127.0.0.1`.
 
+Phase 4 measurement (D-14, 2026-10-12, gateway 10.50.1, `ibkr-konto-befund.md`,
+section "whatIf-Vorschau und Read-Only-Schalter"): with the switch **off** the
+`whatIf` preview answers in 0.79 s with margin and commission; with the switch
+**on** it is blocked: error 321 ("API is in read-only mode"), no margin data,
+and the preview runs into its 10 s timeout. So the switch cannot protect the
+preview. **Rule for phase 4: the switch stays off.** What protects phase 4 is
+the socket barrier alone: it lets message id 3 through only as a stock `whatIf`
+preview and refuses every real order. Error 154 (halt) cannot be provoked on
+the paper gateway and is not measured; `halted` is covered by the official code
+list and a fake test only.
+
 Marker: with the switch on, gateway 10.50.1 rejects a write with error **321**
 (state `READ_ONLY_API`), not with the documented 10015
 (`ibkr-konto-befund.md`, Korrektur 1; `scripts/ibkr_broker.py:65-68`). With the
@@ -92,6 +103,14 @@ directory; `--env-file PATH` overrides it. Only these keys are taken
 | `IBKR_PORT` | yes | integer 1..65535; measured **7497** (the gateway runs on the TWS paper port, not on 4002; `ibkr-konto-befund.md`) |
 | `IBKR_ACCOUNT_ID` | yes | must be `DUQ634065`: the expected account is a code constant (`scripts/ibkr_broker.py:27`), the `.env` has to match it, never the other way round |
 | `IBKR_TRADING_MODE` | no | when set, must be `paper` |
+| `IBKR_PAPER_LOG_REMOTE` | no | git remote `preview` reads the decision log from; default `fork` |
+| `IBKR_PAPER_LOG_BRANCH` | no | branch `preview` reads; default `paper-log` |
+
+The two paper-log keys accept only a plain ref name (letters, digits, `.`, `_`,
+`-`, `/`; no leading `-`, no `..`); anything else ends with exit 1 before a
+command line sees it. A failed fetch stops the run with
+`paper-log-unavailable` (exit 2): there is no fallback to an older local copy
+(D-02), because a stale decision must never look like a fresh one.
 
 A missing or blank required key, or an unreadable settings file, ends with
 exit 20 before any connection; an invalid port, another account or another
@@ -108,11 +127,11 @@ Identical to the table in the docstring of `scripts/ibkr_executor.py`; a test
 | Code | Constant | Meaning |
 |---|---|---|
 | 0 | `EXIT_OK` | ok, including "nothing to do" |
-| 1 | `EXIT_CONFIG` | configuration error - nothing was done |
-| 2 | `EXIT_PRECONDITION` | precondition not met: a ticker was rejected by resolve, contracts.json is missing, or --init found an existing file |
+| 1 | `EXIT_CONFIG` | configuration error - nothing was done; also a `summary.json` with `schema_version` != 1 or a broken contract |
+| 2 | `EXIT_PRECONDITION` | precondition not met, including Hold (D-16): a ticker was rejected by resolve or preview, the paper-log is unavailable, contracts.json is missing, or --init found an existing file |
 | 3 | `EXIT_GATEWAY` | gateway/session not reachable |
 | 4 | `EXIT_KILL_SWITCH` | kill switch active or release missing (reserved for later phases) |
-| 5 | `EXIT_REJECTED` | order rejected (reserved for later phases) |
+| 5 | `EXIT_REJECTED` | whatIf preview rejected: empty or incomplete, rejected with a reason, halted (154), over budget, tif overridden or unconfirmed, read-only gateway, currency mismatch |
 | 6 | `EXIT_RECONCILE` | reconciliation unresolved, run aborted (reserved for later phases) |
 | 7 | `EXIT_LOCKED` | lock not acquired (second instance), clean exit (reserved for later phases) |
 | 8 | `EXIT_ACCOUNT_GUARD` | account guard violated (managedAccounts != ["DUQ634065"]) |
@@ -342,9 +361,110 @@ no `resolve` is running, then delete the `.lock` file by hand.
 This is a convention, not a technical gate. Non-STK classes stay blocked by the
 allow-list; to open one, extend the allow-list, do not rebuild the table (D-04).
 
+## preview
+
+`preview TICKER...` is the dry run: it takes the newest decision of each ticker
+from the `paper-log` branch, works out what the paper account would do and asks
+the gateway for a `whatIf` preview. It **sends nothing**, and it is not the
+ledger (no write-ahead, no lock; that is phase 5). The tickers are required (no
+default list). Call: `python scripts/ibkr_executor.py preview AAPL [MSFT ...]`.
+
+Chain, in steps (the gateway is contacted only for a ticker that survives
+steps 1-6):
+
+1. Fetch `IBKR_PAPER_LOG_REMOTE`/`IBKR_PAPER_LOG_BRANCH` and read the branch
+   without a checkout. A failed fetch is `paper-log-unavailable`.
+2. Copy the files under `%LOCALAPPDATA%\TradingEngineX\ibkr\paper-log\decision-log.md`
+   (without `LOCALAPPDATA`: `~/.tradingenginex/ibkr/paper-log/`) and verify the
+   copy; every log line carries the read commit SHA.
+3. Newest entry per ticker (`no-decision`, `log-missing-entry`, `rating-review`).
+4. `summary.json` contract: `schema_version` 1 and the fields the consumer
+   reads (`summary-missing`, `summary-schema`, `summary-contract`,
+   `run-not-ok`, `signal-null`, `signal-divergence`).
+5. Preconditions: Hold is `skipped-hold`, exit 2 (D-16).
+6. Freshness, counted in XNYS sessions, not in calendar days: an entry is
+   fresh for the next execution session; a calendar gap over a weekend or
+   holiday is flagged `weekend_gap` and is still fresh. Otherwise
+   `stale-decision`, `future-decision` or `calendar-conflict`.
+7. Resolve and session as in `resolve`; a `closed` market is a mark, not a stop.
+8. Position by `conId` (never by symbol); a fractional position stops the ticker.
+9. Foreign open orders: in phase 4 every open order is foreign (`foreign-open-order`).
+10. Target: blocks x `block_qty`, tolerance of one block, long-only
+    (`within-tolerance`, `long-only-noop`).
+11. `whatIf` with a market order, time in force DAY.
+12. Judgement: fail-closed on anything missing, rejected, halted, with another
+    time in force than sent, in another currency than the account, or with an
+    initial margin at or above the available funds.
+
+Console: one line per ticker (`preview: <TICKER> <state> ...`). Log: one
+`ibkr-state=PREVIEW ticker=... sha=...` line per ticker, plus a
+`PREVIEW_RESULT` line for every ticker that reached the preview. Exit: the
+worst state over all tickers, ranked 1 > 5 > 2 > 0.
+
+Dry-run record: `%LOCALAPPDATA%\TradingEngineX\ibkr\preview.json` (`--out`
+overrides), written atomically; the record of an earlier run is removed at the
+start. Fields: `schema_version` (1), `as_of` (UTC), `paper_log` (`remote`,
+`branch`, `sha` - the provenance of the decision), `run_state`, `sent` (always
+`false`) and `rows`. A row has `ticker`, `state`, `detail`, the entry
+(`rating`, `trade_date`), `freshness` (including `weekend_gap` and `gap_days`),
+`session`, `intent` (side, quantity, `MKT`, `tif_sent`; absent for a Hold) and
+`preview` (margin and commission, `warning_text`, `reject_reason`, `errors`,
+`tif_sent`, `effective_tif`). `reject_reason` is built from the request's error
+texts: the order state of the client library has no reject-reason field.
+`effective_tif` is read back from the gateway's echo, never assumed.
+
+### States (phase 4)
+
+| State | Exit | Meaning |
+|---|---|---|
+| `skipped-hold` | 2 | the decision is Hold; nothing to do (D-16) |
+| `rating-review` | 2 | the rating needs a human look |
+| `run-not-ok` | 2 | the run behind the decision did not finish ok |
+| `signal-null` | 2 | the run produced no signal |
+| `signal-divergence` | 2 | log entry and summary disagree on the signal |
+| `summary-missing` | 2 | no `summary.json` for the entry's day |
+| `summary-schema` | 1 | `summary.json` has a `schema_version` this tool does not know |
+| `summary-contract` | 1 | `summary.json` lacks a field the tool reads |
+| `no-decision` | 2 | no entry for the ticker |
+| `log-missing-entry` | 2 | the summary lists the ticker but the log has no entry |
+| `invalid-trade-date` | 2 | the entry's trade date is not a date |
+| `log-finding` | 2 | the copy of the log failed verification |
+| `paper-log-unavailable` | 2 | the fetch or the read of the branch failed |
+| `stale-decision` | 2 | the decision is older than the next execution session |
+| `future-decision` | 2 | the decision is dated after the execution session |
+| `calendar-conflict` | 2 | the session calendar cannot answer for the date |
+| `not-resolved-yet` | 2 | the ticker has no stored contract yet |
+| `foreign-open-order` | 2 | an open order exists; phase 4 never sends, so it is foreign |
+| `fractional-position` | 2 | the held quantity is fractional |
+| `within-tolerance` | 0 | target and holding differ by less than one block |
+| `long-only-noop` | 0 | sell or underweight without a holding; no short |
+| `preview-ok` | 0 | whatIf ok, within budget |
+| `preview-empty` | 5 | the whatIf returned nothing or incomplete values |
+| `preview-rejected` | 5 | the gateway rejected the order with a reason |
+| `preview-read-only` | 5 | the gateway's Read-Only API switch blocks the preview (321) |
+| `tif-overridden` | 5 | the gateway changed the time in force |
+| `tif-unconfirmed` | 5 | the effective time in force was not readable |
+| `over-budget` | 5 | initial margin at or above the available funds |
+| `currency-mismatch` | 5 | funds currency differs from the account currency |
+| `halted` | 5 | the instrument is halted (154) |
+
+Source: `EXIT_BY_STATE` in `scripts/ibkr_decision.py`; a test keeps the table in
+step with it.
+
+### Block size
+
+The target is `blocks x block_qty`: Buy = 2 blocks, Overweight = 1, Underweight
+and Sell = 0. `block_qty` sits per ticker in the contract table
+(`scripts/ibkr_contracts.py`): 1 share per block for AAPL, MSFT and NVDA. It is
+the operator's fixed choice and never derived from a price; changing it is a
+commit.
+
 ## Commands
 
 ```
+:: dry run: decision from paper-log to a whatIf preview, sends nothing
+python scripts/ibkr_executor.py preview AAPL
+
 :: first build of contracts.json, anchor AAPL (Windows cmd)
 python scripts/ibkr_executor.py resolve --init AAPL MSFT NVDA
 

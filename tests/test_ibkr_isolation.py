@@ -285,7 +285,6 @@ PAPERLOG = ROOT / "scripts" / "ibkr_paperlog.py"
 
 def _load_decision():
     import importlib.util
-
     import sys
 
     name = "ibkr_decision_isolation_probe"
