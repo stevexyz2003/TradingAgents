@@ -1177,6 +1177,173 @@ def test_open_orders_when_not_connected(loop):
     assert info.value.state == "NOT_CONNECTED"
 
 
+PREVIEW_ARGS = {
+    "con_id": 265598,
+    "symbol": "AAPL",
+    "sec_type": "STK",
+    "currency": "USD",
+    "primary_exchange": "NASDAQ",
+    "action": "BUY",
+    "quantity": 2,
+}
+
+
+def _preview(fake, loop, **overrides):
+    return _connected(fake, loop).preview_order(**{**PREVIEW_ARGS, **overrides})
+
+
+def _state(init="997.14"):
+    return ibkr_fakes.order_state(init=init, maint="997.14")
+
+
+def test_preview_returns_a_fully_read_result(loop):
+    fake = FakeIB(whatif=_state())
+    result = _preview(fake, loop)
+    assert result == broker.PreviewResult(
+        state="OK",
+        init_margin_change=997.14,
+        maint_margin_change=997.14,
+        commission=1.00003,
+        commission_currency="USD",
+        warning_text="",
+        errors=(),
+        effective_tif="DAY",
+        sent_tif="DAY",
+    )
+
+
+def test_preview_sends_one_whatif_market_order_with_explicit_tif_and_account(loop):
+    fake = FakeIB(whatif=_state())
+    _preview(fake, loop)
+    ((contract, order),) = fake.whatif_calls
+    assert (order.orderType, order.tif, order.account) == ("MKT", "DAY", "DUQ634065")
+    assert (order.action, order.totalQuantity, order.whatIf) == ("BUY", 2, True)
+    assert contract.conId == 265598
+    assert (contract.exchange, contract.secType, contract.currency) == ("SMART", "STK", "USD")
+    assert contract.primaryExchange == "NASDAQ"
+    assert fake.calls.count("placeOrder(whatIf)") == 1
+    assert "placeOrder" not in fake.calls
+    assert not any(c in fake.calls for c in ("whatIfOrder", "placeOrder", "reqMktData"))
+
+
+def test_preview_empty_answer_has_no_numbers(loop):
+    result = _preview(FakeIB(whatif=[]), loop)
+    assert result.state == "EMPTY"
+    assert (result.init_margin_change, result.maint_margin_change, result.commission) == (
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        ibkr_fakes.order_state(init="1.7976931348623157E308"),
+        ibkr_fakes.order_state(init="abc"),
+        ibkr_fakes.order_state(init=float("nan")),
+    ],
+    ids=["unset", "text", "nan"],
+)
+def test_preview_unset_margin_is_none(loop, state):
+    result = _preview(FakeIB(whatif=state), loop)
+    assert result.init_margin_change is None
+
+
+def test_preview_unset_commission_is_none(loop):
+    state = ibkr_fakes.order_state(commission=float("nan"))
+    assert _preview(FakeIB(whatif=state), loop).commission is None
+
+
+def test_preview_halted_code_154_is_its_own_state(loop):
+    text = "Orders cannot be transmitted for a halted security."
+    fake = FakeIB(whatif=[], emit_during={"whatif": [(17, 154, text, None)]})
+    result = _preview(fake, loop)
+    assert result.state == "HALTED"
+    assert (154, text) in result.errors
+
+
+def test_preview_tif_overridden_code_10349_is_its_own_state(loop):
+    fake = FakeIB(whatif=[], emit_during={"whatif": [(17, 10349, "TIF set to DAY", None)]})
+    assert _preview(fake, loop).state == "TIF_OVERRIDDEN"
+
+
+@pytest.mark.parametrize("req_id", [-1, 17])
+def test_preview_read_only_api_321_on_timeout(loop, req_id):
+    fake = FakeIB(whatif="hang", emit_during={"whatif": [(req_id, 321, "read-only", None)]})
+    assert _preview(fake, loop).state == "READ_ONLY_API"
+
+
+def test_preview_timeout_without_321_is_unavailable(loop):
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _preview(FakeIB(whatif="hang"), loop)
+    assert info.value.state == "REQUEST_TIMEOUT"
+
+
+def test_preview_request_error_text_is_kept(loop):
+    text = "Order rejected - reason: x"
+    fake = FakeIB(whatif=[], emit_during={"whatif": [(17, 201, text, None)]})
+    result = _preview(fake, loop)
+    assert result.state == "EMPTY"
+    assert result.errors == ((201, text),)
+
+
+def test_preview_discards_an_answer_with_a_link_event_inside(loop):
+    fake = FakeIB(whatif=_state(), emit_during={"whatif": [(-1, 1100, "lost", None)]})
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _preview(fake, loop)
+    assert info.value.state == "CONNECTIVITY_LOST"
+
+
+def test_preview_sends_nothing_while_a_link_is_open(loop):
+    fake = FakeIB(whatif=_state())
+    adapter = _connected(fake, loop)
+    adapter._on_error(-1, 1100, "lost", None)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.preview_order(**PREVIEW_ARGS)
+    assert info.value.state == "CONNECTIVITY_LOST"
+    assert fake.whatif_calls == []
+
+
+def test_preview_effective_tif_comes_from_the_echo(loop):
+    assert _preview(FakeIB(whatif=_state(), whatif_echo_tif="GTC"), loop).effective_tif == "GTC"
+    assert _preview(FakeIB(whatif=_state(), whatif_echo_tif=None), loop).effective_tif is None
+
+
+@pytest.mark.parametrize("hang", [False, True])
+def test_preview_restores_the_wrapper_open_order(loop, hang):
+    fake = FakeIB(whatif="hang" if hang else _state())
+    original = fake.wrapper.openOrder
+    adapter = _connected(fake, loop)
+    if hang:
+        with pytest.raises(broker.GatewayUnavailable):
+            adapter.preview_order(**PREVIEW_ARGS)
+    else:
+        adapter.preview_order(**PREVIEW_ARGS)
+    assert fake.wrapper.openOrder == original
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"action": "SHORT"}, {"quantity": 0}, {"quantity": 1.5}, {"quantity": True}],
+    ids=["action", "zero", "fraction", "bool"],
+)
+def test_preview_refuses_a_bad_request_before_the_gateway(loop, overrides):
+    fake = FakeIB(whatif=_state())
+    with pytest.raises(ValueError):
+        _preview(fake, loop, **overrides)
+    assert fake.whatif_calls == []
+
+
+def test_preview_codes_are_mapped_and_not_generic_errors():
+    assert broker.STATE_BY_CODE[154] == "HALTED"
+    assert broker.STATE_BY_CODE[10349] == "TIF_OVERRIDDEN"
+    adapter = broker.IbkrBroker("127.0.0.1", 7497)
+    adapter._on_error(17, 154, "halted", None)
+    adapter._on_error(17, 10349, "tif", None)
+    assert adapter._request_error_since(0) is None
+
+
 def test_the_fake_forbids_market_data():
     fake = FakeIB()
     for name in ("reqMktData", "reqTickers"):
