@@ -104,7 +104,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - Kein Lesen von `paper-log`, keine Entscheidungsübernahme.
 - **Keine Änderung am CI-Produktivpfad.** Das Portfolio-JSON wird in dieser Phase nur lokal übergeben; die Verdrahtung in den täglichen Lauf braucht den Veröffentlichungsbranch und passiert in Phase 7.
 
-**Plans:** 1/6 plans executed
+**Plans:** 3/6 plans executed
 
 Plans:
 **Wave 1**
@@ -113,8 +113,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02-PLAN.md — Adapter `scripts/ibkr_broker.py`: Schreibsperre vor dem Connect, Paper-Guard, Zustandstabelle, Liveness-Probe, frisches Konto-Lesen (Fake-IB)
-- [ ] 02-03-PLAN.md — `--portfolio` in `daily_paper_run.py` + additiver Portfolio-Block in `reporting._header`
+- [x] 02-02-PLAN.md — Adapter `scripts/ibkr_broker.py`: Schreibsperre vor dem Connect, Paper-Guard, Zustandstabelle, Liveness-Probe, frisches Konto-Lesen (Fake-IB)
+- [x] 02-03-PLAN.md — `--portfolio` in `daily_paper_run.py` + additiver Portfolio-Block in `reporting._header`
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
