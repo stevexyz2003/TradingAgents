@@ -1,0 +1,211 @@
+"""Shared stand-ins for the IBKR adapter tests: a fake client, a loop, a connect block.
+
+Nothing here opens a socket. The real gateway listens on this machine, and the
+suite-wide network block does not stop an asyncio loopback connection on
+Windows, so the IBKR test modules also block the client library's connect.
+"""
+
+import asyncio
+import importlib.util
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
+
+_BROKER = Path(__file__).resolve().parents[1] / "scripts" / "ibkr_broker.py"
+
+#: The write calls the adapter must block on the client object.
+WRITE_CALLS = ("placeOrder", "cancelOrder", "reqGlobalCancel", "exerciseOptions")
+
+
+def load_broker():
+    """The adapter module, loaded once under one name so its exception classes are shared."""
+    if "ibkr_broker" in sys.modules:
+        return sys.modules["ibkr_broker"]
+    spec = importlib.util.spec_from_file_location("ibkr_broker", _BROKER)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["ibkr_broker"] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop("ibkr_broker", None)
+        raise
+    return module
+
+
+class FakeEvent:
+    """Minimal event: handlers added with +=, called by emit()."""
+
+    def __init__(self):
+        self.handlers = []
+
+    def __iadd__(self, handler):
+        self.handlers.append(handler)
+        return self
+
+    def __isub__(self, handler):
+        self.handlers.remove(handler)
+        return self
+
+    def emit(self, *args):
+        for handler in list(self.handlers):
+            handler(*args)
+
+
+@dataclass
+class FakeContract:
+    conId: int = 0
+    symbol: str = ""
+    secType: str = "STK"
+    localSymbol: str = ""
+    currency: str = "USD"
+
+
+def position(account, symbol, quantity, avg_cost=100.0, **contract):
+    """A position row as the client library reports it."""
+    return SimpleNamespace(
+        account=account,
+        contract=FakeContract(symbol=symbol, localSymbol=symbol, **contract),
+        position=quantity,
+        avgCost=avg_cost,
+    )
+
+
+def account_value(tag, value, currency="EUR", account="DUQ634065"):
+    """An account summary row as the client library reports it."""
+    return SimpleNamespace(account=account, tag=tag, value=value, currency=currency, modelCode="")
+
+
+async def _forever():
+    await asyncio.Event().wait()
+
+
+class FakeIB:
+    """Stand-in for the client library's IB object with a controllable outcome."""
+
+    def __init__(
+        self,
+        accounts=("DUQ634065",),
+        refuse=None,
+        emit_on_connect=(),
+        positions=None,
+        summary=None,
+        probe="ok",
+    ):
+        self.accounts = list(accounts)
+        self.refuse = refuse
+        self.emit_on_connect = list(emit_on_connect)
+        self._positions = [] if positions is None else positions
+        self._summary = (
+            [account_value("TotalCashValue", "1000.0")] if summary is None else summary
+        )
+        self.probe = probe
+        self.calls: list[str] = []
+        self.connect_kwargs: dict = {}
+        self.connected = False
+        self.errorEvent = FakeEvent()
+        self._recorders = {name: self._record(name) for name in WRITE_CALLS}
+        self.client = SimpleNamespace(**self._recorders)
+
+    def _record(self, name):
+        def recorder(*_args, **_kwargs):
+            self.calls.append(name)
+
+        return recorder
+
+    async def connectAsync(self, host, port, clientId, timeout, readonly, **kw):
+        self.connect_kwargs = dict(
+            host=host, port=port, clientId=clientId, timeout=timeout, readonly=readonly, **kw
+        )
+        self.barrier_armed_at_connect = all(
+            getattr(self.client, name) is not self._recorders[name] for name in WRITE_CALLS
+        )
+        self.calls.append("connect")
+        for args in self.emit_on_connect:
+            self.errorEvent.emit(*args)
+        if self.refuse is not None:
+            raise self.refuse
+        self.connected = True
+
+    def managedAccounts(self):
+        return list(self.accounts)
+
+    def isConnected(self):
+        return self.connected
+
+    def disconnect(self):
+        self.calls.append("disconnect")
+        self.connected = False
+
+    async def reqPositionsAsync(self):
+        self.calls.append("positions")
+        if self._positions == "hang":
+            await _forever()
+        return list(self._positions)
+
+    async def accountSummaryAsync(self, account=""):
+        self.calls.append("account_summary")
+        if self._summary == "hang":
+            await _forever()
+        return list(self._summary)
+
+    async def reqContractDetailsAsync(self, contract):
+        self.calls.append("probe")
+        if self.probe == "hang":
+            await _forever()
+        if self.probe == "empty":
+            return []
+        return [SimpleNamespace(contract=FakeContract(conId=contract.conId))]
+
+    # Phase 2 reads fresh and never touches orders; any of these is a bug.
+    def positions(self):
+        raise AssertionError("phase 2 must not call positions() (library cache)")
+
+    def reqAllOpenOrders(self, *a, **k):
+        raise AssertionError("phase 2 must not call reqAllOpenOrders")
+
+    def reqCompletedOrders(self, *a, **k):
+        raise AssertionError("phase 2 must not call reqCompletedOrders")
+
+    def reqExecutions(self, *a, **k):
+        raise AssertionError("phase 2 must not call reqExecutions")
+
+    def whatIfOrder(self, *a, **k):
+        raise AssertionError("phase 2 must not call whatIfOrder")
+
+    def placeOrder(self, *a, **k):
+        raise AssertionError("phase 2 must not call placeOrder")
+
+
+def make_handles(fake):
+    """An ib_factory for IbkrBroker that hands out the given fake."""
+    broker = load_broker()
+
+    def factory():
+        return broker.IbHandles(ib=fake, contract=FakeContract, fetch_none=0)
+
+    return factory
+
+
+def session_loop():
+    """One event loop for the session, created before the per-test network block."""
+    loop = asyncio.new_event_loop()
+    try:
+        yield loop
+    finally:
+        loop.close()
+
+
+def block_real_ib_connect(monkeypatch):
+    """Make the client library's connect fail at once, so no test reaches the gateway."""
+    try:
+        import ib_async
+        import ib_async.client
+    except ImportError:
+        return
+
+    async def refuse(*_args, **_kwargs):
+        raise OSError("test tried to reach the IBKR gateway")
+
+    monkeypatch.setattr(ib_async.IB, "connectAsync", refuse)
+    monkeypatch.setattr(ib_async.client.Client, "connectAsync", refuse)
