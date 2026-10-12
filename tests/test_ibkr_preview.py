@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tests import ibkr_fakes
+from tests import ibkr_fakes, paper_log_fixture
 from tests.calendar_stub import WeekdayCalendar
 from tests.paper_log_fixture import FROZEN_DIR, FROZEN_SHA, FixturePaperLog, write_paper_log
 
@@ -36,7 +36,7 @@ executor = _load_executor()
 broker = executor.load_broker_module()
 contracts_mod = executor.load_contracts_module()
 decision = executor.load_decision_module()
-paperlog = executor.load_paperlog_module()
+paperlog = paper_log_fixture._pl
 
 DEFAULT_ENV = {
     "IBKR_HOST": "127.0.0.1",
@@ -61,6 +61,17 @@ SHA = "a" * 40
 @pytest.fixture(scope="session")
 def loop():
     yield from ibkr_fakes.session_loop()
+
+
+@pytest.fixture(autouse=True)
+def _pin_modules(monkeypatch):
+    """Hand the executor this file's module instances, whatever ``sys.modules`` holds.
+
+    Other test files load ``ibkr_decision`` and ``ibkr_paperlog`` under the same name;
+    the exception classes the fakes raise must be the ones the executor catches.
+    """
+    monkeypatch.setattr(executor, "load_decision_module", lambda: decision)
+    monkeypatch.setattr(executor, "load_paperlog_module", lambda: paperlog)
 
 
 @pytest.fixture(autouse=True)
@@ -340,9 +351,7 @@ class TestWiring:
         assert "decision_key" not in data
         assert "previous output removed" in _log_text(log)
 
-    def test_module_loaders_share_sys_modules(self):
-        assert executor.load_decision_module() is sys.modules["ibkr_decision"]
-        assert executor.load_paperlog_module() is sys.modules["ibkr_paperlog"]
+    def test_the_state_tool_loader_registers_its_module(self):
         assert executor.load_state_maintenance_module() is sys.modules["state_maintenance"]
 
     def test_settings_do_not_demand_the_optional_keys(self, tmp_path):

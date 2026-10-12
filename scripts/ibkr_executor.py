@@ -988,9 +988,13 @@ def _write_preview(out: Path, payload: dict, contracts_mod, logger) -> None:
     logger.info("preview output written: %s", out)
 
 
-def _abort_run(ctx, abort: _RunAbort) -> int:
-    """Report a run-level stop: one log line, one console line, the record, the exit code."""
-    code = ctx.mods.decision.EXIT_BY_STATE[abort.state]
+def _abort_run(ctx, abort: _RunAbort, rows: dict | None = None) -> int:
+    """Report a run-level stop: one log line, one console line, the record, the exit code.
+
+    ``rows`` are the tickers that were already decided before the stop.
+    """
+    code = ctx.mods.decision.EXIT_BY_STATE.get(abort.state, EXIT_PRECONDITION)
+    decided = [row for row in (rows or {}).values() if row["state"]]
     name = abort.state.upper().replace("-", "_")
     ctx.logger.log(
         logging.WARNING if code else logging.INFO,
@@ -1002,7 +1006,7 @@ def _abort_run(ctx, abort: _RunAbort) -> int:
         abort.detail,
     )
     print(f"preview: {abort.state} ({abort.detail})")
-    payload = _preview_payload(abort.state, (), ctx.sha, ctx.remote, ctx.branch, ctx.now_utc)
+    payload = _preview_payload(abort.state, decided, ctx.sha, ctx.remote, ctx.branch, ctx.now_utc)
     _write_preview(ctx.out, payload, ctx.mods.contracts, ctx.logger)
     return code
 
@@ -1202,6 +1206,203 @@ def _local_chain(ctx, source, tickers) -> tuple[dict, list[str]]:
     return rows, remaining
 
 
+def _load_stored_contracts(ctx) -> dict:
+    """The persisted contracts, read only: ``preview`` never learns, writes or repairs one."""
+    contracts_mod = ctx.mods.contracts
+    path = Path(ctx.args.contracts or default_contracts_file()).resolve()
+    try:
+        return contracts_mod.load_contracts_file(path)
+    except FileNotFoundError:
+        history = contracts_mod.contracts_history_path(path)
+        if history.exists() and history.stat().st_size > 0:
+            hint = f"{path} not found; {history} exists, restore contracts.json manually"
+        else:
+            hint = f"{path} not found; create it with: resolve --init AAPL MSFT NVDA"
+        raise _RunAbort("CONTRACTS_MISSING", hint) from None
+    except OSError as exc:
+        raise ConfigError(f"contracts file: {path}: unreadable ({type(exc).__name__})") from exc
+    except contracts_mod.ContractsFileError as exc:
+        raise ConfigError(f"contracts file: {exc}") from exc
+
+
+def _session_info(result, closed: bool) -> dict:
+    return {
+        "state": result.state,
+        "closed": closed,
+        "session_day": result.session_day,
+        "window_start": _iso(result.window.start) if result.window else None,
+        "window_end": _iso(result.window.end) if result.window else None,
+        "next_open": _iso(result.next_open),
+        "detail": result.detail,
+    }
+
+
+def _preview_ticker(ctx, broker, row: dict, result, snapshot) -> None:
+    """Position by conId, open orders, target, whatIf preview and verdict for one ticker."""
+    contracts_mod = ctx.mods.contracts
+    decision_mod = ctx.mods.decision
+    ticker = row["ticker"]
+    identity = result.identity
+    spec = contracts_mod.CONTRACT_TABLE[ticker]
+    held = 0.0
+    elsewhere = []
+    for position in snapshot.positions:
+        if position.con_id == identity.con_id:
+            held += position.quantity
+        elif position.symbol == spec.symbol:
+            # Same symbol, other contract: reported, never netted (D-11).
+            elsewhere.append({"con_id": position.con_id, "quantity": position.quantity})
+            ctx.logger.warning(
+                "ibkr-state=POSITION_OTHER_CONID ticker=%s conId=%s quantity=%s",
+                ticker,
+                position.con_id,
+                position.quantity,
+            )
+    row["position"] = {"con_id": identity.con_id, "held": held, "other_conid": elsewhere}
+    orders = broker.open_orders(identity.con_id)
+    row["open_orders"] = [
+        {
+            "con_id": order.con_id,
+            "action": order.action,
+            "quantity": order.quantity,
+            "order_type": order.order_type,
+            "status": order.status,
+            "client_id": order.client_id,
+        }
+        for order in orders
+    ]
+    # The block is the operator's fixed share count from the table, never derived from a price.
+    plan = decision_mod.plan_order(
+        row["rating"], held_qty=held, open_orders=len(orders), block_qty=spec.block_qty
+    )
+    if plan.state != decision_mod.INTENT:
+        _finish_row(ctx, row, plan.state, plan.detail)
+        return
+    preview = broker.preview_order(
+        con_id=identity.con_id,
+        symbol=spec.symbol,
+        sec_type=spec.sec_type,
+        currency=identity.currency,
+        primary_exchange=identity.primary_exchange,
+        action=plan.side,
+        quantity=plan.quantity,
+    )
+    verdict = decision_mod.judge_preview(
+        preview,
+        available_funds=snapshot.available_funds,
+        funds_currency=snapshot.available_funds_currency,
+        account_currency=snapshot.cash_currency,
+    )
+    row["intent"] = {
+        "side": plan.side,
+        "quantity": plan.quantity,
+        "order_type": "MKT",
+        "tif_sent": preview.sent_tif,
+    }
+    row["preview"] = {
+        "state": preview.state,
+        "init_margin_change": preview.init_margin_change,
+        "maint_margin_change": preview.maint_margin_change,
+        "commission": preview.commission,
+        "commission_currency": preview.commission_currency,
+        "warning_text": preview.warning_text,
+        "reject_reason": verdict.reject_reason,
+        "reject_source": verdict.reject_source,
+        "errors": [[code, text] for code, text in preview.errors],
+        "tif_sent": preview.sent_tif,
+        "effective_tif": preview.effective_tif,
+    }
+    row["budget"] = {
+        "available_funds": snapshot.available_funds,
+        "currency": snapshot.available_funds_currency,
+    }
+    ctx.logger.info(
+        "ibkr-state=PREVIEW_RESULT ticker=%s sha=%s side=%s quantity=%s initMarginChange=%s "
+        "commission=%s %s rejectReason=%r tif_sent=%s tif_effective=%s",
+        ticker,
+        ctx.sha,
+        plan.side,
+        plan.quantity,
+        preview.init_margin_change,
+        preview.commission,
+        preview.commission_currency,
+        verdict.reject_reason,
+        preview.sent_tif,
+        preview.effective_tif,
+    )
+    _finish_row(ctx, row, verdict.state, verdict.detail)
+
+
+def _resolve_and_preview(ctx, broker, rows: dict, to_resolve: list[str]) -> None:
+    """Resolve against the stored contracts, then judge each surviving ticker."""
+    contracts_mod = ctx.mods.contracts
+    decision_mod = ctx.mods.decision
+    outcome = contracts_mod.resolve_all(
+        to_resolve,
+        contracts=ctx.stored,
+        broker=broker,
+        now_utc=ctx.now_utc,
+        logger=ctx.logger,
+        mode=contracts_mod.MODE_RUN,
+    )
+    # Every ticker has a stored contract, so nothing is learned; were it otherwise, the
+    # events would only be logged, never written.
+    for event in outcome.events:
+        ctx.logger.warning(
+            "ibkr-state=CONTRACT_EVENT_NOT_WRITTEN event=%s ticker=%s", event.event, event.ticker
+        )
+    snapshot = None
+    for result in outcome.results:
+        row = rows[result.ticker]
+        # A closed market is a mark, not a stop: the preview still runs (D-08).
+        closed = result.state == contracts_mod.CLOSED
+        row["session"] = _session_info(result, closed)
+        if result.rejected:
+            _finish_row(ctx, row, result.state, result.detail)
+            continue
+        if decision_mod.calendar_conflict(ctx.now_utc, ctx.calendar, result.session_day):
+            detail = (
+                f"exchange calendar and liquid hours disagree about today "
+                f"(liquid hours: session day {result.session_day})"
+            )
+            _finish_row(ctx, row, decision_mod.CALENDAR_CONFLICT, detail)
+            continue
+        if snapshot is None:
+            snapshot = broker.positions()
+        _preview_ticker(ctx, broker, row, result, snapshot)
+
+
+def _gateway_chain(ctx, rows: dict, remaining: list[str]) -> int | None:
+    """Everything that needs the gateway; returns an exit code only if the session is unusable."""
+    contracts_mod = ctx.mods.contracts
+    decision_mod = ctx.mods.decision
+    ctx.stored = _load_stored_contracts(ctx)
+    to_resolve = []
+    for ticker in remaining:
+        if ticker in ctx.stored:
+            to_resolve.append(ticker)
+        else:
+            detail = "no stored contract; run resolve first (preview never learns one)"
+            _finish_row(ctx, rows[ticker], decision_mod.NOT_RESOLVED_YET, detail)
+    if not to_resolve:
+        return None
+    if not contracts_mod.needs_broker(to_resolve):
+        _resolve_and_preview(ctx, None, rows, to_resolve)
+        return None
+    adapter = ctx.broker_factory(ctx.host, ctx.port, ctx.logger)
+    ctx.progress["connecting"] = True
+    with adapter as broker:
+        ctx.progress["connected"] = True
+        health = broker.health()
+        if not health.ok:
+            line = f'ibkr-state={health.state} code=- detail="{health.detail}"'
+            ctx.logger.error(line)
+            print(f"error: {line}", file=sys.stderr)
+            return EXIT_GATEWAY
+        _resolve_and_preview(ctx, broker, rows, to_resolve)
+    return None
+
+
 def run_preview(
     args, mods, broker_factory, paper_log_factory, calendar, logger, progress, now_utc: datetime
 ) -> int:
@@ -1249,8 +1450,12 @@ def run_preview(
     except _RunAbort as stop:
         return _abort_run(ctx, stop)
     if remaining:
-        # The gateway chain follows with the next change of this plan.
-        raise NotImplementedError("the gateway chain of preview is not wired yet")
+        try:
+            early_exit = _gateway_chain(ctx, rows, remaining)
+        except _RunAbort as stop:
+            return _abort_run(ctx, stop, rows)
+        if early_exit is not None:
+            return early_exit
     return _finish_run(ctx, rows)
 
 
