@@ -169,3 +169,66 @@ def test_real_git_fetch_without_checkout(tmp_path):
     assert log.fetch() == sha
     assert log.read("decision-log.md") == b"hello\r\n"
     assert [p.name for p in work.iterdir()] == [".git"]
+
+
+# --- frozen fixture of paper-log commit 71df89d ---------------------------------
+
+import hashlib  # noqa: E402
+
+from tests.paper_log_fixture import (  # noqa: E402
+    FROZEN_BLOB_IDS,
+    FROZEN_DIR,
+    FROZEN_SHA,
+    FixturePaperLog,
+    write_paper_log,
+)
+
+
+def _blob_id(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+@pytest.mark.parametrize("rel", sorted(FROZEN_BLOB_IDS))
+def test_frozen_bytes_match_blob_ids(rel):
+    assert _blob_id((FROZEN_DIR / rel).read_bytes()) == FROZEN_BLOB_IDS[rel]
+
+
+def test_frozen_fixture_reads():
+    src = FixturePaperLog(FROZEN_DIR, FROZEN_SHA)
+    assert src.fetch() == FROZEN_SHA
+    assert src.read("decision-log.md") == (FROZEN_DIR / "decision-log.md").read_bytes()
+    with pytest.raises(pl.BlobMissing):
+        src.read("runs/2026-10-08/summary.json")
+    assert src.list_run_dates() == ("2026-10-09",)
+
+
+def test_fixture_unavailable():
+    with pytest.raises(pl.PaperLogUnavailable):
+        FixturePaperLog.unavailable("offline").fetch()
+
+
+def test_frozen_log_parses():
+    from tradingagents.memory.log import TradingMemoryLog
+
+    entries = TradingMemoryLog(
+        {"memory_log_path": str(FROZEN_DIR / "decision-log.md")}
+    ).load_entries()
+    assert len(entries) == 1
+    e = entries[0]
+    assert (e["date"], e["ticker"], e["rating"]) == ("2026-10-09", "AAPL", "Hold")
+
+
+def test_fixture_write_paper_log_roundtrip(tmp_path):
+    from tradingagents.memory.log import TradingMemoryLog
+
+    root = write_paper_log(
+        tmp_path / "pl",
+        entries=[("2026-10-09", "AAPL", "Buy")],
+        summaries={"2026-10-09": {"schema_version": 1}},
+    )
+    src = FixturePaperLog(root, FROZEN_SHA)
+    src.fetch()
+    assert src.list_run_dates() == ("2026-10-09",)
+    assert b"schema_version" in src.read("runs/2026-10-09/summary.json")
+    log = TradingMemoryLog({"memory_log_path": str(root / "decision-log.md")})
+    assert log.load_entries()[0]["rating"] == "Buy"

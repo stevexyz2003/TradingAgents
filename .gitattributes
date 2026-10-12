@@ -1,0 +1,2 @@
+# Frozen paper-log bytes (commit 71df89d) must stay byte-identical for the phase-4 SC1 test.
+tests/fixtures/paper_log_71df89d/** -text
