@@ -154,6 +154,27 @@ async def _forever():
     await asyncio.Event().wait()
 
 
+class FakeWrapper:
+    """The library wrapper's part the adapter touches: the summary cache and openOrder."""
+
+    def __init__(self):
+        self.acctSummary = {}
+
+    def openOrder(self, *args):
+        """The library's own handler; a no-op here."""
+
+
+def order_state(init="997.14", maint="997.14", commission=1.00003, currency="USD", warning=""):
+    """An OrderState row as the client library reports a whatIf answer."""
+    return SimpleNamespace(
+        initMarginChange=init,
+        maintMarginChange=maint,
+        commission=commission,
+        commissionCurrency=currency,
+        warningText=warning,
+    )
+
+
 class FakeIB:
     """Stand-in for the client library's IB object with a controllable outcome."""
 
@@ -169,6 +190,8 @@ class FakeIB:
         qualify=None,
         details=None,
         open_orders=None,
+        whatif=None,
+        whatif_echo_tif="DAY",
     ):
         self.accounts = list(accounts)
         self.refuse = refuse
@@ -196,7 +219,14 @@ class FakeIB:
         self.connect_kwargs: dict = {}
         self.connected = False
         self.errorEvent = FakeEvent()
-        self.wrapper = SimpleNamespace(acctSummary={})
+        self.wrapper = FakeWrapper()
+        #: whatIf answer: OrderState namespace, [] / None (empty) or "hang"
+        self.whatif = whatif
+        #: tif the openOrder echo carries (None = no echo)
+        self.whatif_echo_tif = whatif_echo_tif
+        #: (copy of the contract, the whatIf order copy) per whatIfOrderAsync
+        self.whatif_calls: list = []
+        self._next_req_id = 100
         self._recorders = {name: self._record(name) for name in (*WRITE_CALLS, *WIRE_CALLS)}
         self.client = SimpleNamespace(**self._recorders)
 
@@ -308,6 +338,26 @@ class FakeIB:
             await _forever()
         return list(self.details.get(contract.conId, []))
 
+    async def whatIfOrderAsync(self, contract, order):
+        # Modelled on the library (ib.py:2204-2212 in 2.1.0): a copy of the order with
+        # whatIf set goes through client.placeOrder; the echo reaches wrapper.openOrder.
+        what_if_order = copy.copy(order)
+        what_if_order.whatIf = True
+        req_id = self._next_req_id
+        self._next_req_id += 1
+        self.client.placeOrder(req_id, contract, what_if_order)
+        self.calls.append("whatif")
+        self.whatif_calls.append((copy.copy(contract), what_if_order))
+        self._emit_during("whatif")
+        if self.whatif == "hang":
+            await _forever()
+        answer = self.whatif
+        if answer is not None and answer != [] and self.whatif_echo_tif is not None:
+            echo = copy.copy(what_if_order)
+            echo.tif = self.whatif_echo_tif
+            self.wrapper.openOrder(req_id, contract, echo, answer)
+        return answer
+
     async def reqAllOpenOrdersAsync(self):
         self.calls.append("open_orders")
         self._emit_during("open_orders")
@@ -353,7 +403,7 @@ def make_handles(fake):
     broker = load_broker()
 
     def factory():
-        return broker.IbHandles(ib=fake, contract=FakeContract, fetch_none=0)
+        return broker.IbHandles(ib=fake, contract=FakeContract, fetch_none=0, order=FakeOrder)
 
     return factory
 

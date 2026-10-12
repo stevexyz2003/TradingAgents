@@ -401,8 +401,8 @@ def test_market_data_codes_log_at_info(loop, caplog, code, label):
     assert not adapter.port_changed
 
 
-def test_halt_code_is_not_mapped_before_measurement():
-    assert 154 not in broker.STATE_BY_CODE
+def test_halt_code_is_mapped_for_the_preview():
+    assert broker.STATE_BY_CODE[154] == "HALTED"
 
 
 def test_other_codes_log_at_warning(loop, caplog):

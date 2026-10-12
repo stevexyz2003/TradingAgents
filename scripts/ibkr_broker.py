@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -119,11 +120,22 @@ STATE_BY_CODE: dict[int, str] = {
     # Measured for an unknown symbol (XYZQ): no contract matches.
     200: "CONTRACT_NOT_FOUND",
     2172: "GATEWAY_VERSION_EXPIRING",
+    # Official TWS API code list: "Orders cannot be transmitted for a halted
+    # security." It cannot be provoked on the paper gateway, so it rests on the
+    # official list and a fake test (REQ-IBKR-67 gap, assumption A5).
+    154: "HALTED",
+    # Measured 2026-10-12, ibkr-marktdaten-befund.md Befund 4: a preview without
+    # an explicit tif comes back empty with 10349.
+    10349: "TIF_OVERRIDDEN",
 }
 
+#: Codes ``preview_order`` evaluates itself; they are no generic request failure.
+_PREVIEW_CODES = frozenset({154, 10349})
+
+#: The tif every preview names explicitly (REQ-IBKR-25, REQ-IBKR-69).
+PREVIEW_TIF = "DAY"
+
 #: Farm-OK and delayed-market-data notices: expected states, logged at INFO.
-#: The halt code 154 stays unmapped here; it is measured at the whatIf preview
-#: in phase 4 (REQ-IBKR-67).
 INFO_CODES = frozenset({2104, 2106, 2158, 10089, 10090, 10167})
 
 # Named states without a gateway code.
@@ -178,6 +190,7 @@ class IbHandles:
     ib: Any
     contract: Any
     fetch_none: Any
+    order: Any = None
 
 
 @dataclass(frozen=True)
@@ -273,6 +286,37 @@ class AccountSnapshot:
 
 
 @dataclass(frozen=True)
+class PreviewResult:
+    """The evaluated answer of one whatIf preview, broker-neutral.
+
+    ``state`` is OK, EMPTY, HALTED, TIF_OVERRIDDEN or READ_ONLY_API. A number the
+    gateway left unset (or sent unreadable) is ``None``. The adapter does not judge
+    budget or rejection; ``judge_preview`` does.
+    """
+
+    state: str
+    init_margin_change: float | None
+    maint_margin_change: float | None
+    commission: float | None
+    commission_currency: str
+    warning_text: str
+    errors: tuple[tuple[int, str], ...]
+    effective_tif: str | None
+    sent_tif: str
+
+
+def _money(value) -> float | None:
+    """A readable number, else None: text, NaN and the unset sentinel (1.797e308) are None."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number) or abs(number) >= 1e300:
+        return None
+    return number
+
+
+@dataclass(frozen=True)
 class Health:
     """Liveness verdict: ``ok`` only on a real server answer."""
 
@@ -282,9 +326,9 @@ class Health:
 
 
 def _default_ib_factory() -> IbHandles:
-    from ib_async import IB, Contract, StartupFetchNONE  # the only import site in the repo
+    from ib_async import IB, Contract, Order, StartupFetchNONE  # the only import site in the repo
 
-    return IbHandles(IB(), Contract, StartupFetchNONE)
+    return IbHandles(IB(), Contract, StartupFetchNONE, Order)
 
 
 def _message_id(field) -> int | None:
@@ -449,7 +493,7 @@ class IbkrBroker:
     """One read-only session against the paper gateway.
 
     Public: ``connect``, ``positions``, ``health``, ``search_contract``,
-    ``contract_details``. Use as a context
+    ``contract_details``, ``open_orders``, ``preview_order``. Use as a context
     manager; leaving it disconnects.
     """
 
@@ -488,6 +532,8 @@ class IbkrBroker:
         self._seen_codes: list[int] = []
         #: Codes of errors tied to a request id (``reqId >= 0``), in order.
         self._request_errors: list[int] = []
+        #: The same errors with their text, for the preview's error report.
+        self._request_error_texts: list[tuple[int, str]] = []
         #: Every LINK_CODES event of the session, in order; read windows compare its length.
         self._link_codes: list[int] = []
 
@@ -807,6 +853,146 @@ class IbkrBroker:
             and t.orderStatus.status not in _DONE_ORDER_STATUSES
         )
 
+    def preview_order(
+        self,
+        *,
+        con_id: int,
+        symbol: str,
+        sec_type: str,
+        currency: str,
+        primary_exchange: str,
+        action: str,
+        quantity: int,
+    ) -> PreviewResult:
+        """The whatIf preview of a market order: margin, commission, errors, tif (D-13).
+
+        Builds the order itself (market, ``tif="DAY"`` explicit, paper account) and
+        sends it only through ``whatIfOrderAsync``, which the write barrier lets
+        pass as a preview. Never a real order. The echo of the gateway is tapped
+        for the tif it actually applied; the tap is removed again in ``finally``.
+
+        Fail-closed like every read: no preview while a link is open, a link event
+        in the window discards the answer, a timeout without 321 is
+        ``REQUEST_TIMEOUT``. 154, 10349 and 321 (on a timeout) are states of the
+        result, not exceptions. Budget and rejection are judged elsewhere.
+        """
+        if action not in ("BUY", "SELL"):
+            raise ValueError(f"action must be BUY or SELL, got {action!r}")
+        if type(quantity) is not int or quantity <= 0:
+            raise ValueError(f"quantity must be a positive whole number, got {quantity!r}")
+        ib, handles = self._ib, self._handles
+        if ib is None or handles is None:
+            raise GatewayUnavailable("NOT_CONNECTED", 504, "no session; connect() first")
+        if handles.order is None:
+            raise RuntimeError("no order type in IbHandles")
+        opened = self._open_link()
+        if opened is not None:
+            raise GatewayUnavailable(opened[0], None, f"{opened[1]}; no preview sent")
+        mark = len(self._link_codes)
+        code_mark = len(self._request_error_texts)
+        seen_mark = len(self._seen_codes)
+        contract = handles.contract(
+            conId=con_id,
+            symbol=symbol,
+            secType=sec_type,
+            exchange="SMART",
+            currency=currency,
+            primaryExchange=primary_exchange,
+        )
+        order = handles.order(
+            action=action,
+            totalQuantity=quantity,
+            orderType="MKT",
+            tif=PREVIEW_TIF,
+            account=EXPECTED_ACCOUNT,
+        )
+        echoed: list[str] = []
+        original = ib.wrapper.openOrder
+
+        def capture(*args):
+            echo_order = args[2] if len(args) > 2 else None
+            if getattr(echo_order, "whatIf", False):
+                echoed.append(str(getattr(echo_order, "tif", "")))
+            return original(*args)
+
+        ib.wrapper.openOrder = capture
+        response = None
+        timed_out = False
+        try:
+            response = self._call(lambda: ib.whatIfOrderAsync(contract, order), self._request_timeout)
+        except TimeoutError:
+            timed_out = True
+        except ConnectionError as exc:
+            raise GatewayUnavailable(
+                "NOT_CONNECTED", 504, f"preview not sent ({type(exc).__name__})"
+            ) from exc
+        finally:
+            ib.wrapper.openOrder = original
+
+        event = self._link_event_since(mark)
+        if event is not None:
+            state, code = event
+            raise GatewayUnavailable(
+                state, code, f"link event {code} while the preview was in flight; answer discarded"
+            )
+        errors = tuple(
+            (code, text)
+            for code, text in self._request_error_texts[code_mark:]
+            if code not in INFO_CODES
+        )
+        codes = {code for code, _ in errors} | set(self._seen_codes[seen_mark:])
+        effective_tif = echoed[-1] if echoed else None
+        if 154 in codes:
+            state = "HALTED"
+        elif 10349 in codes:
+            state = "TIF_OVERRIDDEN"
+        elif timed_out:
+            if 321 not in codes:
+                raise GatewayUnavailable(
+                    REQUEST_TIMEOUT,
+                    None,
+                    f"preview did not answer within {self._request_timeout}s",
+                )
+            state = "READ_ONLY_API"
+        elif getattr(response, "initMarginChange", None) is None:
+            state = "EMPTY"
+        else:
+            state = "OK"
+        if state == "OK":
+            result = PreviewResult(
+                state=state,
+                init_margin_change=_money(response.initMarginChange),
+                maint_margin_change=_money(getattr(response, "maintMarginChange", None)),
+                commission=_money(getattr(response, "commission", None)),
+                commission_currency=_text(response, "commissionCurrency"),
+                warning_text=_text(response, "warningText"),
+                errors=errors,
+                effective_tif=effective_tif,
+                sent_tif=PREVIEW_TIF,
+            )
+        else:
+            result = PreviewResult(
+                state=state,
+                init_margin_change=None,
+                maint_margin_change=None,
+                commission=None,
+                commission_currency="",
+                warning_text="",
+                errors=errors,
+                effective_tif=effective_tif,
+                sent_tif=PREVIEW_TIF,
+            )
+        self._log.info(
+            'ibkr-state=PREVIEW code=- detail="state=%s init_margin=%s commission=%s '
+            'tif sent=%s effective=%s"',
+            result.state,
+            result.init_margin_change,
+            result.commission,
+            result.sent_tif,
+            result.effective_tif,
+        )
+        return result
+
     def _read(self, name: str, make_awaitable):
         """One fail-closed read: timeout, no open link before, no link event during."""
         if self._ib is None or self._handles is None:
@@ -834,13 +1020,14 @@ class IbkrBroker:
         return result
 
     def _request_error_since(self, mark: int) -> tuple[str, int] | None:
-        """First request-scoped error after ``mark``, except code 200.
+        """First request-scoped error after ``mark``, except code 200 and the preview codes.
 
         Only errors carrying a request id count: system and farm notices
         (``reqId == -1``, e.g. 2107) are session state, not an answer to this read.
+        154 and 10349 are answers of the whatIf preview and evaluated there.
         """
         for code in self._request_errors[mark:]:
-            if code not in INFO_CODES and code != 200:
+            if code not in INFO_CODES and code not in _PREVIEW_CODES and code != 200:
                 return state_for_code(code), code
         return None
 
@@ -898,6 +1085,7 @@ class IbkrBroker:
         self._seen_codes.append(errorCode)
         if isinstance(reqId, int) and reqId >= 0:
             self._request_errors.append(errorCode)
+            self._request_error_texts.append((errorCode, str(errorString)))
         if errorCode in LINK_CODES:
             self._link_codes.append(errorCode)
         if errorCode == 1100:
