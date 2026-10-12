@@ -93,7 +93,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 3. Ohne laufendes Gateway endet der Lauf mit Exit 3 und einer Logzeile, die den Zustand benennt (502 / „Gateway nicht erreichbar") — nicht mit einem Traceback. Fehlende Zugangsdaten ergeben Exit 20.
 4. Eine Suche nach `ib_async` in `tradingagents/` und `scripts/` nennt genau eine Datei, und dieser Adapter hat höchstens zehn öffentliche Methoden.
 5. Die Liveness-Prüfung hängt an einer **echten Antwort** auf einen Probe-Request, nicht am Socket-Status; ein Test mit „Socket oben, Session tot" liefert „nicht gesund".
-6. `ib_async==2.1.0` und der `tzdata<2026.0`-Pin lösen in einer frischen Umgebung auf; ohne den `tzdata`-Pin bricht die Auflösung reproduzierbar (damit ist der Deckel dokumentiert statt entdeckt).
+6. `ib_async==2.1.0` und der `tzdata>=2025.2,<2026.0`-Pin lösen in einer frischen Umgebung auf; `ib_async==2.1.0` **zusammen mit dem aktuellen `tzdata>=2026.1`** ist reproduzierbar unauflösbar (`pip install --dry-run` → `ResolutionImpossible`) — damit ist der Deckel dokumentiert statt entdeckt. *Korrigiert 2026-10-11: Ohne den eigenen Pin löst es weiter auf, weil `ib_async` 2.1.0 die Obergrenze `tzdata<2026.0` selbst in seinen Metadaten trägt; der eigene Pin macht sie nur sichtbar.*
 7. Ein **lokaler** Lauf von `scripts/daily_paper_run.py` mit dem erzeugten Portfolio-JSON zeigt den Positionsblock aus `PortfolioContext.render()` im Report — der Beweis, dass das Kontolesen die Analysequalität verbessert und nicht nur die Mengenrechnung bedient.
 8. `git ls-files .env` ist leer, und in `.github/workflows/` steht keine IBKR-Secret-Referenz.
 

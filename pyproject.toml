@@ -41,6 +41,15 @@ dev = [
 bedrock = [
     "langchain-aws>=1.7.9",
 ]
+# IBKR paper execution (local operator tooling under scripts/, milestone M2).
+# Optional so the core install and upstream CI stay free of it: pip install ".[ibkr]".
+ibkr = [
+    # Pinned exactly: single maintainer, main idle since 2025-12-06; scripts/ibkr_broker.py is the only module that imports it.
+    "ib_async==2.1.0",
+    # tzdata is at 2026.5 (2026-10-03), but ib_async 2.1.0 itself declares the cap below. Stated here
+    # so it is visible where it bites: with tzdata>=2025.2,<2026.0 required by ib_async, any tzdata>=2026 requirement elsewhere makes this extra unresolvable.
+    "tzdata>=2025.2,<2026.0",
+]
 
 [project.scripts]
 tradingagents = "cli.main:app"

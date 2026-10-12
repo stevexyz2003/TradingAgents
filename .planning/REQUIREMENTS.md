@@ -45,7 +45,7 @@ Jede Anforderung ist **ein prüfbarer Satz**. Wo der Satz allein nicht sagt, wie
 > **Nachweis:** `git ls-files .env` ist leer; eine Suche nach `IBKR` in `.github/workflows/` findet keine Secret-Referenz.
 
 **REQ-IBKR-06** — `ib_async` ist auf **2.1.0** exakt gepinnt, `tzdata` auf `<2026.0` mitgepinnt, und die Deklaration trägt einen Kommentar, der den Grund benennt (`ib_async` 2.1.0 verlangt `tzdata<2026.0,>=2025.2`, aktuell ist `tzdata` 2026.5 — es geht nur auf, weil die `.venv` 2025.2 hält).
-> **Nachweis:** Eine Auflösung in einer frischen Umgebung läuft durch; ohne den `tzdata`-Pin bricht sie.
+> **Nachweis:** Eine Auflösung in einer frischen Umgebung läuft durch; mit `tzdata>=2026.1` bricht sie (`ResolutionImpossible`) — korrigiert 2026-10-11, siehe ROADMAP Phase 2 Kriterium 6.
 
 **REQ-IBKR-07** — Die gesamte IBKR-Nutzung liegt hinter **einem** eigenen Adapter mit höchstens zehn Methoden (`connect`, `resolve`, `is_tradable_now`, `preview`, `place`, `positions`, `open_orders`, `executions`, `cancel_all`, `health`); kein anderer Modulpfad importiert `ib_async`.
 > Begründung: Bus-Faktor 1 bei `ib_async` und IBKRs laufende Protobuf-Migration. Ein Austausch gegen den offiziellen `TWSSyncWrapper` soll eine Datei kosten und nicht eine Umschreibung — mit dem Wissen, dass dieser Fallback ab TWS API 10.49 GPL-belastet ist und für einen öffentlichen Fork vorher lizenzrechtlich geklärt werden müsste.
