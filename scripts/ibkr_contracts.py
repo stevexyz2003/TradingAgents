@@ -17,7 +17,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from types import MappingProxyType
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
@@ -177,3 +179,134 @@ def identity_diff(expected: Identity, seen: Identity) -> tuple[str, ...]:
         ("localSymbol", expected.local_symbol, seen.local_symbol),
     )
     return tuple(name for name, a, b in pairs if a != b)
+
+
+# --- session -----------------------------------------------------------------------------
+
+
+class SessionParseError(ValueError):
+    """The liquid-hours text or its time zone could not be read; never guessed around."""
+
+
+@dataclass(frozen=True)
+class SessionWindow:
+    """One liquid window; both ends are aware datetimes in the contract's zone."""
+
+    start: datetime
+    end: datetime
+
+
+@dataclass(frozen=True)
+class LiquidHours:
+    windows: tuple[SessionWindow, ...]
+    closed_dates: frozenset[date]
+    time_zone_id: str
+
+
+@dataclass(frozen=True)
+class SessionVerdict:
+    state: str
+    window: SessionWindow | None
+    next_open: datetime | None
+    detail: str
+
+
+_STAMP = "%Y%m%d:%H%M"
+_CLOSED_SUFFIX = ":CLOSED"
+
+
+def _load_zone(time_zone_id: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(time_zone_id)
+    except (ValueError, TypeError, OSError, KeyError) as exc:
+        # ZoneInfoNotFoundError is a KeyError subclass.
+        raise SessionParseError(f"unusable time zone {time_zone_id!r}: {exc}") from exc
+
+
+def _parse_window(segment: str, zone: ZoneInfo) -> SessionWindow:
+    parts = segment.split("-")
+    if len(parts) != 2:
+        raise SessionParseError(f"unreadable liquid-hours segment {segment!r}")
+    left, right = parts
+    try:
+        start = datetime.strptime(left, _STAMP).replace(tzinfo=zone)
+        if ":" in right:
+            end = datetime.strptime(right, _STAMP).replace(tzinfo=zone)
+        else:
+            # Old format: the end carries only the time and falls on the start date.
+            end_time = datetime.strptime(right, "%H%M")
+            end = start.replace(hour=end_time.hour, minute=end_time.minute)
+    except ValueError as exc:
+        raise SessionParseError(f"unreadable liquid-hours segment {segment!r}") from exc
+    if end <= start:
+        raise SessionParseError(f"window ends before it starts in segment {segment!r}")
+    return SessionWindow(start, end)
+
+
+def parse_liquid_hours(raw: str, time_zone_id: str) -> LiquidHours:
+    """Parse the broker's liquid-hours text (new and old format) into aware windows."""
+    zone = _load_zone(time_zone_id)
+    windows: list[SessionWindow] = []
+    closed: set[date] = set()
+    for segment in (raw or "").split(";"):
+        if not segment:
+            continue
+        if segment.endswith(_CLOSED_SUFFIX):
+            day = segment[: -len(_CLOSED_SUFFIX)]
+            try:
+                closed.add(datetime.strptime(day, "%Y%m%d").date())
+            except ValueError as exc:
+                raise SessionParseError(f"unreadable liquid-hours segment {segment!r}") from exc
+            continue
+        windows.append(_parse_window(segment, zone))
+    windows.sort(key=lambda w: w.start)
+    return LiquidHours(tuple(windows), frozenset(closed), time_zone_id)
+
+
+def evaluate_session(
+    liquid_hours: str,
+    time_zone_id: str,
+    now_utc: datetime,
+    buffer_minutes: int = SESSION_BUFFER_MINUTES,
+) -> SessionVerdict:
+    """Decide whether the instrument may be traded at ``now_utc``.
+
+    The caller passes the current time as ``now_utc`` (aware); this function never
+    reads a clock, and the hours are never persisted (D-22). ``ok`` needs the
+    moment to lie inside a window shrunk by the buffer at both ends. A day with
+    neither a window nor a closed entry is ``session-unknown``, not ``closed`` (D-24).
+    """
+    if now_utc.tzinfo is None:
+        raise ValueError("now_utc must carry a time zone")
+    try:
+        parsed = parse_liquid_hours(liquid_hours, time_zone_id)
+    except SessionParseError as exc:
+        return SessionVerdict(SESSION_UNKNOWN, None, None, str(exc))
+
+    buffer = timedelta(minutes=buffer_minutes)
+    usable = [w for w in parsed.windows if w.start + buffer <= w.end - buffer]
+    for window in usable:
+        if window.start + buffer <= now_utc <= window.end - buffer:
+            return SessionVerdict(OK, window, None, "inside a liquid window")
+
+    upcoming = [w.start + buffer for w in usable if w.start + buffer > now_utc]
+    next_open = min(upcoming) if upcoming else None
+
+    zone = ZoneInfo(time_zone_id)
+    today = now_utc.astimezone(zone).date()
+    covered = today in parsed.closed_dates or any(
+        w.start.date() <= today <= w.end.date() for w in parsed.windows
+    )
+    if not covered:
+        return SessionVerdict(
+            SESSION_UNKNOWN, None, next_open, f"no liquid-hours entry for {today.isoformat()}"
+        )
+    if today in parsed.closed_dates and not any(
+        w.start.date() <= today <= w.end.date() for w in parsed.windows
+    ):
+        detail = "closed today"
+    elif any(w.start <= now_utc <= w.end for w in parsed.windows):
+        detail = "inside the opening or closing buffer"
+    else:
+        detail = "outside every liquid window"
+    return SessionVerdict(CLOSED, None, next_open, detail)
