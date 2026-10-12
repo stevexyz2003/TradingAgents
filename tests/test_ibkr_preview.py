@@ -18,7 +18,7 @@ import pytest
 
 from tests import ibkr_fakes
 from tests.calendar_stub import WeekdayCalendar
-from tests.paper_log_fixture import FixturePaperLog, write_paper_log
+from tests.paper_log_fixture import FROZEN_DIR, FROZEN_SHA, FixturePaperLog, write_paper_log
 
 pytestmark = pytest.mark.unit
 
@@ -354,3 +354,298 @@ class TestWiring:
             "IBKR_PAPER_LOG_BRANCH": "paper-log",
         }
 
+
+
+# --- the local chain: no gateway is contacted (D-01, D-02, D-04, D-07, D-16) ----------
+
+
+class _RecordingLog(FixturePaperLog):
+    """A fixture source that remembers every path it was asked for (REQ-IBKR-18)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.paths: list[str] = []
+
+    def read(self, path):
+        self.paths.append(path)
+        return super().read(path)
+
+
+def _raw_paper(tmp_path, log_text, summaries=None):
+    """A paper-log directory with a hand-written ``decision-log.md``."""
+    root = tmp_path / "pl"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "decision-log.md").write_bytes(log_text)
+    for trade_date, summary in (summaries or {}).items():
+        target = root / "runs" / trade_date / "summary.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(summary), encoding="utf-8")
+    return FixturePaperLog(root, SHA)
+
+
+_ENTRY_END = "\n\n<!-- ENTRY_END -->\n\n"
+
+
+def _local(tmp_path, source, tickers=("AAPL",), clock=FROZEN_NOW, calendar=None):
+    """Run ``preview`` with a gateway factory that must stay unused."""
+    factory = _RecordingFactory()
+    code, out, log, _c = _run_preview(
+        tmp_path, factory, list(tickers), paper_log=source, clock=clock, calendar=calendar
+    )
+    assert factory.calls == [], "the gateway was contacted"
+    return code, out, log
+
+
+class TestRealBranchHold:
+    """SC1 against the frozen copy of the branch: a Hold never reaches the gateway."""
+
+    def _check(self, tmp_path, capsys, calendar):
+        source = FixturePaperLog(FROZEN_DIR, FROZEN_SHA)
+        code, out, log = _local(tmp_path, source, calendar=calendar)
+        assert code == executor.EXIT_PRECONDITION
+        assert "preview: AAPL skipped-hold" in capsys.readouterr().out
+        data = _payload(out)
+        row = _rows(out)["AAPL"]
+        assert row["state"] == "skipped-hold"
+        assert row["detail"] == "skipped: hold"
+        assert row["exit"] == executor.EXIT_PRECONDITION
+        assert data["paper_log"]["sha"] == FROZEN_SHA
+        assert data["run_state"] is None
+        assert data["sent"] is False
+        assert f"sha={FROZEN_SHA}" in _log_text(log)
+
+    def test_real_branch_hold_with_the_stub_calendar(self, tmp_path, capsys):
+        self._check(tmp_path, capsys, None)
+
+    def test_real_branch_hold_with_the_xnys_calendar(self, tmp_path, capsys):
+        pytest.importorskip("exchange_calendars")
+        self._check(tmp_path, capsys, decision.load_xnys_calendar())
+
+
+class TestPaperLogUnavailable:
+    def test_a_failed_fetch_ends_the_run_without_fallback(self, tmp_path, capsys):
+        source = FixturePaperLog.unavailable("offline")
+        code, out, log = _local(tmp_path, source)
+        assert code == executor.EXIT_PRECONDITION
+        assert "preview: paper-log-unavailable" in capsys.readouterr().out
+        data = _payload(out)
+        assert data["run_state"] == "paper-log-unavailable"
+        assert data["paper_log"]["sha"] is None
+        assert data["rows"] == []
+        assert source.fetch_calls == 1
+        assert "PAPER_LOG_UNAVAILABLE" in _log_text(log)
+
+
+class TestVerify:
+    def test_a_broken_tag_line_is_a_log_finding(self, tmp_path):
+        text = (
+            "[2026-10-09 | AAPL | Buy | pending]\n\nDECISION:\nok"
+            + _ENTRY_END
+            + "[2026-10-10 | AAPL | Buy]\n\nDECISION:\nbroken"
+            + _ENTRY_END
+        )
+        source = _raw_paper(tmp_path, text.encode("utf-8"))
+        code, out, log = _local(tmp_path, source)
+        assert code == executor.EXIT_PRECONDITION
+        assert _payload(out)["run_state"] == "log-finding"
+        assert "FAIL" in _log_text(log)
+
+    def test_an_empty_log_is_a_log_finding(self, tmp_path):
+        source = _raw_paper(tmp_path, b"")
+        code, out, _log = _local(tmp_path, source)
+        assert code == executor.EXIT_PRECONDITION
+        assert _payload(out)["run_state"] == "log-finding"
+
+    def test_a_missing_log_is_a_log_finding(self, tmp_path):
+        (tmp_path / "pl").mkdir()
+        code, out, _log = _local(tmp_path, FixturePaperLog(tmp_path / "pl", SHA))
+        assert code == executor.EXIT_PRECONDITION
+        assert _payload(out)["run_state"] == "log-finding"
+
+    def test_invalid_utf8_is_a_log_finding(self, tmp_path):
+        source = _raw_paper(tmp_path, b"[2026-10-09 | AAPL | Buy | pending]\n\n\xff\xfe")
+        code, out, _log = _local(tmp_path, source)
+        assert code == executor.EXIT_PRECONDITION
+        assert _payload(out)["run_state"] == "log-finding"
+
+    def test_the_copy_is_byte_equal_with_the_blob(self, tmp_path):
+        source = FixturePaperLog(FROZEN_DIR, FROZEN_SHA)
+        _local(tmp_path, source)
+        copy = tmp_path / "TradingEngineX" / "ibkr" / "paper-log" / "decision-log.md"
+        assert copy.read_bytes() == (FROZEN_DIR / "decision-log.md").read_bytes()
+
+
+class TestSchema:
+    def test_an_unknown_schema_version_is_exit_1(self, tmp_path):
+        source = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy")],
+            {"2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Buy"), schema=2)},
+        )
+        code, out, _log = _local(tmp_path, source)
+        assert code == executor.EXIT_CONFIG
+        assert _payload(out)["run_state"] == "summary-schema"
+
+    def test_a_malformed_summary_is_exit_1(self, tmp_path):
+        source = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy")],
+            {"2026-10-09": {"schema_version": 1, "trade_date": "2026-10-09"}},
+        )
+        code, out, _log = _local(tmp_path, source)
+        assert code == executor.EXIT_CONFIG
+        assert _payload(out)["run_state"] == "summary-contract"
+
+
+class TestDivergence:
+    def test_log_and_summary_disagree(self, tmp_path):
+        source = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy")],
+            {"2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Sell"))},
+        )
+        code, out, _log = _local(tmp_path, source)
+        assert code == executor.EXIT_PRECONDITION
+        row = _rows(out)["AAPL"]
+        assert row["state"] == "signal-divergence"
+        assert row["rating"] == "Buy"
+        assert "Buy" in row["detail"]
+        assert "Sell" in row["detail"]
+
+
+def _pre(tmp_path, entries, summaries, ticker="AAPL"):
+    source = _RecordingLog(write_paper_log(tmp_path / "pl", entries, summaries), SHA)
+    code, out, _log = _local(tmp_path, source, tickers=(ticker,))
+    return code, _rows(out).get(ticker), source
+
+
+class TestPreconditions:
+    def test_review_rating(self, tmp_path):
+        code, row, _s = _pre(
+            tmp_path,
+            [("2026-10-09", "AAPL", "REVIEW")],
+            {"2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Buy"))},
+        )
+        assert (code, row["state"]) == (executor.EXIT_PRECONDITION, "rating-review")
+
+    def test_run_failed_for_the_log_date(self, tmp_path):
+        code, row, _s = _pre(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy")],
+            {"2026-10-09": _summary("2026-10-09", ("AAPL", "failed", None), status="failed")},
+        )
+        assert (code, row["state"]) == (executor.EXIT_PRECONDITION, "run-not-ok")
+
+    def test_newer_summary_with_a_failed_run(self, tmp_path):
+        code, row, _s = _pre(
+            tmp_path,
+            [("2026-10-08", "AAPL", "Buy")],
+            {
+                "2026-10-08": _summary("2026-10-08", ("AAPL", "ok", "Buy")),
+                "2026-10-09": _summary("2026-10-09", ("AAPL", "failed", None), status="failed"),
+            },
+        )
+        assert (code, row["state"]) == (executor.EXIT_PRECONDITION, "run-not-ok")
+
+    def test_newer_summary_with_a_null_signal(self, tmp_path):
+        code, row, _s = _pre(
+            tmp_path,
+            [("2026-10-08", "AAPL", "Buy")],
+            {
+                "2026-10-08": _summary("2026-10-08", ("AAPL", "ok", "Buy")),
+                "2026-10-09": _summary("2026-10-09", ("AAPL", "ok", None)),
+            },
+        )
+        assert (code, row["state"]) == (executor.EXIT_PRECONDITION, "signal-null")
+
+    def test_newer_summary_without_a_newer_log_entry(self, tmp_path):
+        code, row, _s = _pre(
+            tmp_path,
+            [("2026-10-08", "AAPL", "Buy")],
+            {
+                "2026-10-08": _summary("2026-10-08", ("AAPL", "ok", "Buy")),
+                "2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Buy")),
+            },
+        )
+        assert (code, row["state"]) == (executor.EXIT_PRECONDITION, "log-missing-entry")
+
+    def test_summary_file_is_missing(self, tmp_path):
+        code, row, _s = _pre(tmp_path, [("2026-10-09", "AAPL", "Buy")], {})
+        assert (code, row["state"]) == (executor.EXIT_PRECONDITION, "summary-missing")
+
+    def test_ticker_without_a_log_entry(self, tmp_path):
+        code, row, _s = _pre(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy")],
+            {"2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Buy"))},
+            ticker="MSFT",
+        )
+        assert (code, row["state"]) == (executor.EXIT_PRECONDITION, "no-decision")
+
+    def test_the_newest_entry_per_ticker_wins(self, tmp_path):
+        code, row, _s = _pre(
+            tmp_path,
+            [("2026-10-08", "AAPL", "Buy"), ("2026-10-09", "AAPL", "Hold")],
+            {
+                "2026-10-08": _summary("2026-10-08", ("AAPL", "ok", "Buy")),
+                "2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Hold")),
+            },
+        )
+        assert (code, row["state"]) == (executor.EXIT_PRECONDITION, "skipped-hold")
+        assert row["trade_date"] == "2026-10-09"
+
+    def test_only_log_and_summary_paths_are_read(self, tmp_path):
+        _code, _row, source = _pre(
+            tmp_path,
+            [("2026-10-08", "AAPL", "Buy")],
+            {
+                "2026-10-08": _summary("2026-10-08", ("AAPL", "ok", "Buy")),
+                "2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Buy")),
+            },
+        )
+        assert source.paths
+        for path in source.paths:
+            assert path == "decision-log.md" or (
+                path.startswith("runs/") and path.endswith("/summary.json")
+            )
+
+
+class TestFreshness:
+    def test_a_decision_with_a_closed_session_in_between_is_stale(self, tmp_path):
+        source = _paper(
+            tmp_path,
+            [("2026-10-06", "AAPL", "Buy")],
+            {"2026-10-06": _summary("2026-10-06", ("AAPL", "ok", "Buy"))},
+        )
+        clock = datetime(2026, 10, 8, 15, 0, tzinfo=UTC)
+        code, out, _log = _local(tmp_path, source, clock=clock)
+        assert code == executor.EXIT_PRECONDITION
+        assert _rows(out)["AAPL"]["state"] == "stale-decision"
+
+    def test_a_decision_of_today_is_a_future_decision(self, tmp_path):
+        source = _paper(
+            tmp_path,
+            [("2026-10-12", "AAPL", "Buy")],
+            {"2026-10-12": _summary("2026-10-12", ("AAPL", "ok", "Buy"))},
+        )
+        code, out, _log = _local(tmp_path, source)
+        assert code == executor.EXIT_PRECONDITION
+        assert _rows(out)["AAPL"]["state"] == "future-decision"
+
+    def test_two_tickers_are_both_reported(self, tmp_path, capsys):
+        source = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Hold"), ("2026-10-09", "MSFT", "Buy")],
+            {
+                "2026-10-09": _summary(
+                    "2026-10-09", ("AAPL", "ok", "Hold"), ("MSFT", "ok", "Sell")
+                )
+            },
+        )
+        code, out, _log = _local(tmp_path, source, tickers=("AAPL", "MSFT"))
+        assert code == executor.EXIT_PRECONDITION
+        lines = [x for x in capsys.readouterr().out.splitlines() if x.startswith("preview: ")]
+        assert len(lines) == 2
+        rows = _rows(out)
+        assert rows["AAPL"]["state"] == "skipped-hold"
+        assert rows["MSFT"]["state"] == "signal-divergence"
