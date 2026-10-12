@@ -32,6 +32,7 @@ from tradingagents.budget import BudgetConfigError, BudgetExceededError, ensure_
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients.api_key_env import get_api_key_env
+from tradingagents.portfolio import load_portfolio
 
 EXIT_OK = 0
 EXIT_CONFIG = 1
@@ -289,8 +290,12 @@ def _spend(graph) -> tuple[int, int, float]:
     return tracker.tokens_in, tracker.tokens_out, tracker.cost
 
 
-def run_ticker(graph, ticker: str, trade_date: str, out_dir: Path) -> dict:
-    """Analyze one ticker; never raises - the outcome is in the returned record."""
+def run_ticker(graph, ticker: str, trade_date: str, out_dir: Path, portfolio=None) -> dict:
+    """Analyze one ticker; never raises - the outcome is in the returned record.
+
+    ``portfolio`` is only forwarded when given, so a run without ``--portfolio``
+    (the CI run) makes exactly the same ``propagate`` call as before.
+    """
     record = {
         "ticker": ticker,
         "status": "ok",
@@ -304,7 +309,10 @@ def run_ticker(graph, ticker: str, trade_date: str, out_dir: Path) -> dict:
     }
     started = time.monotonic()
     try:
-        final_state, signal = graph.propagate(ticker, trade_date)
+        if portfolio is not None:
+            final_state, signal = graph.propagate(ticker, trade_date, portfolio=portfolio)
+        else:
+            final_state, signal = graph.propagate(ticker, trade_date)
         record["signal"] = signal
         record["report"] = str(graph.save_reports(final_state, ticker, out_dir / "reports" / ticker))
     except BudgetExceededError as exc:
@@ -354,6 +362,13 @@ def parse_args(argv=None) -> argparse.Namespace:
         default=Path(__file__).with_name("paper_run_rates.json"),
         help="JSON rate table {model: {input, output}} in USD per 1M tokens.",
     )
+    parser.add_argument(
+        "--portfolio",
+        type=Path,
+        default=None,
+        help="Local PortfolioContext JSON (e.g. from scripts/ibkr_executor.py account). "
+        "Optional; the CI run never passes it.",
+    )
     parser.add_argument("--out", type=Path, required=True, help="Per-run output directory.")
     parser.add_argument(
         "--state", type=Path, required=True, help="Persistent directory (decision log, index)."
@@ -373,6 +388,12 @@ def main(argv=None) -> int:
         tickers = parse_tickers(args.tickers, max_tickers=args.max_tickers)
         trade_date = resolve_trade_date(args.date)
         rates = load_rates(args.rates)
+        portfolio = None
+        if args.portfolio is not None:
+            try:
+                portfolio = load_portfolio(args.portfolio.resolve())
+            except ValueError as exc:
+                raise ConfigError(str(exc)) from exc
         if args.max_cost <= 0:
             raise ConfigError("--max-cost must be greater than 0.")
         max_total = args.max_total_cost
@@ -400,6 +421,11 @@ def main(argv=None) -> int:
         f"provider={provider} deep={config['deep_think_llm']} quick={config['quick_think_llm']} | "
         f"budget ${args.max_cost:.2f}/ticker, ${max_total:.2f} total"
     )
+    if portfolio is not None:
+        print(
+            f"portfolio: {args.portfolio.resolve()} ({len(portfolio.positions)} position(s), "
+            f"cash {portfolio.cash} {portfolio.currency})"
+        )
     if args.preflight:
         if absent:
             print(
@@ -458,7 +484,7 @@ def main(argv=None) -> int:
             })
             continue
         print(f"--- {ticker} {trade_date} ---", flush=True)
-        record = run_ticker(graph, ticker, trade_date, out_dir)
+        record = run_ticker(graph, ticker, trade_date, out_dir, portfolio=portfolio)
         spent += record["cost_usd"]
         summary["runs"].append(record)
         print(
