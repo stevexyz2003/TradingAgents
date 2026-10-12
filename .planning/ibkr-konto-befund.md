@@ -320,3 +320,44 @@ Nachweis „nichts gesendet":
 - Sonden-Log (188 Zeilen): keine Treffer für `orderStatus`, `execDetails`,
   `ReadOnlyViolation`; einzige Previewzeile: `state=OK init_margin=100.86
   commission=1.000003 tif sent=DAY effective=DAY`.
+
+### Messung 2: Schalter an — 2026-10-12
+
+Aufruf: dieselbe Sonde unverändert (`preview_order`, AAPL BUY 1, conId 265598, NASDAQ, USD),
+Gateway 10.50.1 auf 127.0.0.1:7497, "Read-Only API" vom Operator eingeschaltet.
+
+```text
+state             = READ_ONLY_API
+initMarginChange  = None
+maintMarginChange = None
+commission        = None
+effective_tif     = None       (gesendet: DAY)
+warningText       = ''
+errors            = [(321, "Bei der Validierung der Anfrage ist ein Fehler aufgetreten.-'bC' :
+                      cause - Die API befindet sich im schreibgeschützten Modus.")]
+Dauer bis Ende   = 10,02 s     (Timeout der Vorschau; bei Schalter aus 0,79 s)
+```
+
+Bewertung: Der Schalter blockt die whatIf-Vorschau. Das Gateway antwortet mit Fehler 321
+(read-only) und liefert keine Margin-/Kommissionsdaten; der Adapter mappt das auf
+`READ_ONLY_API`.
+
+Nachweis „nichts gesendet":
+
+- `open_orders(265598)` vorher: leer; nachher: leer.
+- Positionen vorher: 0; nachher: 0 (unverändert).
+- Sonden-Log (`probe_m2.log`, 190 Zeilen): keine Treffer für `orderStatus`, `execDetails`,
+  `ReadOnlyViolation`.
+
+### Folge für SC2
+
+Variante (a): Der Schalter blockt whatIf. Phase 4 schützt daher allein die Socket-Sperre
+(Id 3 nur STK-whatIf, 04-02); der Gateway-Schalter bleibt während Phase 4 aus. Der SC2-Satz
+zu 321 wird angepasst; die Bestätigung gibt der Operator im 04-VERIFICATION.md (D-14).
+Der Operator schaltet "Read-Only API" nach dieser Messung wieder aus; die Bestätigung holt 04-09 ein.
+
+### Nicht messbar
+
+Fehler 154 (Halt) lässt sich am Paper-Gateway nicht herbeiführen. `halted` ist nur über die
+offizielle Codeliste und einen Fake-Test belegt (A5). Das bleibt eine offene REQ-67-Lücke
+für die Verifikation; es wird keine Messung behauptet.
