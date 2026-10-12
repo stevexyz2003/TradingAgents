@@ -15,26 +15,40 @@ identity, tradability, session) and reports one line per ticker. It connects
 only when a ticker survives the local checks. The clock is injected: tests pass
 ``main(clock=...)``.
 
+Phase 4 adds ``preview``, a dry run that sends nothing: it reads the ``paper-log``
+branch (fetch, copy, ``state_maintenance.verify``), checks the preconditions and the
+freshness of each ticker's newest decision, and only for a ticker that survives them
+contacts the gateway: resolution and session, position by ``conId``, foreign open
+orders, the target calculation and a ``whatIf`` preview, judged for rejection, halt,
+time in force and budget. The result is one console line and one log line per ticker
+(the read commit SHA in every log line) and an atomic dry-run JSON. The clock, the
+paper-log source and the session calendar are injected: tests pass
+``main(clock=..., paper_log_factory=..., calendar=...)``.
+
 Operating manual: ``scripts/IBKR_EXECUTION.md``.
 
     ibkr_executor.py account --out PATH [--log-file PATH] [--env-file PATH]
     ibkr_executor.py resolve TICKER... [--contracts PATH] [--init | --rebaseline TICKER]
                              [--out PATH] [--log-file PATH] [--env-file PATH]
+    ibkr_executor.py preview TICKER... [--contracts PATH] [--out PATH] [--log-file PATH]
+                             [--env-file PATH]
 
 Settings come from the ``.env`` at the repository root (a fixed path, not the
 current directory) or from ``--env-file``. Only IBKR_HOST, IBKR_PORT,
-IBKR_ACCOUNT_ID and IBKR_TRADING_MODE are taken from it; the API needs no user
-name or password, and this command copies neither.
+IBKR_ACCOUNT_ID and IBKR_TRADING_MODE are taken from it, plus the optional
+IBKR_PAPER_LOG_REMOTE (default fork) and IBKR_PAPER_LOG_BRANCH (default paper-log) for
+``preview``; the API needs no user name or password, and this command copies neither.
 
 Every run writes a UTF-8 log file; the console gets one summary or error line.
 
 Exit codes:
     0   ok, including "nothing to do"
     1   configuration error - nothing was done
-    2   precondition not met - a ticker was rejected, or contracts.json is missing (resolve)
+    2   precondition not met - a ticker was rejected (including Hold, per D-16), the
+        paper-log is unavailable, or contracts.json is missing (resolve, preview)
     3   gateway/session not reachable
     4   kill switch active or release missing (reserved for later phases)
-    5   order rejected (reserved for later phases)
+    5   order preview rejected (whatIf): empty, rejected, halted, over budget, tif
     6   reconciliation unresolved, run aborted (reserved for later phases)
     7   lock not acquired (second instance), clean exit (reserved for later phases)
     8   account guard violated (managedAccounts != ["DUQ634065"])
@@ -52,6 +66,7 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from dotenv import dotenv_values
 
@@ -75,6 +90,11 @@ REQUIRED_ENV = ("IBKR_HOST", "IBKR_PORT", "IBKR_ACCOUNT_ID")
 TRADING_MODE_ENV = "IBKR_TRADING_MODE"
 EXPECTED_TRADING_MODE = "paper"
 
+#: Optional: where ``preview`` reads the paper-log branch from (D-03).
+PAPER_LOG_REMOTE_ENV = "IBKR_PAPER_LOG_REMOTE"
+PAPER_LOG_BRANCH_ENV = "IBKR_PAPER_LOG_BRANCH"
+OPTIONAL_ENV_DEFAULTS = {PAPER_LOG_REMOTE_ENV: "fork", PAPER_LOG_BRANCH_ENV: "paper-log"}
+
 #: Top-level key of the portfolio JSON that dates the snapshot (UTC, ISO 8601).
 #: Same literal as ``PORTFOLIO_AS_OF_KEY`` in daily_paper_run.py; a test keeps them in step.
 AS_OF_KEY = "as_of"
@@ -82,8 +102,13 @@ AS_OF_KEY = "as_of"
 #: The repository's .env, by a fixed path so the current directory does not matter.
 DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 _BROKER_PATH = Path(__file__).with_name("ibkr_broker.py")
 _CONTRACTS_PATH = Path(__file__).with_name("ibkr_contracts.py")
+_DECISION_PATH = Path(__file__).with_name("ibkr_decision.py")
+_PAPERLOG_PATH = Path(__file__).with_name("ibkr_paperlog.py")
+_STATE_MAINTENANCE_PATH = Path(__file__).with_name("state_maintenance.py")
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 _LOGGER_NAME = "ibkr_executor"
@@ -103,6 +128,15 @@ class MissingSettings(Exception):
 
 class OutputError(Exception):
     """The portfolio JSON could not be written or did not validate."""
+
+
+class _RunAbort(Exception):
+    """A run-level stop of ``preview``: no ticker verdicts, one named state."""
+
+    def __init__(self, state: str, detail: str):
+        super().__init__(f"{state}: {detail}")
+        self.state = state
+        self.detail = detail
 
 
 def load_broker_module():
@@ -144,6 +178,54 @@ def load_contracts_module():
     return module
 
 
+def _load_script_module(name: str, path: Path):
+    """Load ``path`` once under ``name``; registered before it runs, removed if it fails."""
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def load_decision_module():
+    """The decision logic, loaded once under the name ``ibkr_decision``."""
+    return _load_script_module("ibkr_decision", _DECISION_PATH)
+
+
+def load_paperlog_module():
+    """The paper-log reader, loaded once under the name ``ibkr_paperlog``."""
+    return _load_script_module("ibkr_paperlog", _PAPERLOG_PATH)
+
+
+def load_state_maintenance_module():
+    """The state tool whose ``verify`` checks the log copy, loaded as ``state_maintenance``."""
+    return _load_script_module("state_maintenance", _STATE_MAINTENANCE_PATH)
+
+
+def _ibkr_base(environ=None) -> Path:
+    environ = os.environ if environ is None else environ
+    base = environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base) / "TradingEngineX" / "ibkr"
+    return Path.home() / ".tradingenginex" / "ibkr"
+
+
+def default_preview_file(environ=None) -> Path:
+    """The default dry-run record, outside every repository."""
+    return _ibkr_base(environ) / "preview.json"
+
+
+def default_paper_log_copy(environ=None) -> Path:
+    """Where the byte-exact copy of ``decision-log.md`` is kept for ``verify``."""
+    return _ibkr_base(environ) / "paper-log" / "decision-log.md"
+
+
 def default_contracts_file(environ=None) -> Path:
     """The default contracts file, outside every git tree (D-11)."""
     environ = os.environ if environ is None else environ
@@ -176,7 +258,7 @@ def read_settings(env_file: Path) -> dict[str, str]:
         raise MissingSettings(
             f"settings file not readable: {env_file} ({type(exc).__name__})"
         ) from exc
-    wanted = (*REQUIRED_ENV, TRADING_MODE_ENV)
+    wanted = (*REQUIRED_ENV, TRADING_MODE_ENV, *OPTIONAL_ENV_DEFAULTS)
     settings = {key: values[key].strip() for key in wanted if isinstance(values.get(key), str)}
     missing = [key for key in REQUIRED_ENV if not settings.get(key)]
     if missing:
@@ -205,6 +287,18 @@ def validate_settings(raw: dict[str, str], expected_account: str) -> tuple[str, 
             f"{TRADING_MODE_ENV} is {mode!r}; this executor runs {EXPECTED_TRADING_MODE} only"
         )
     return host, port, account
+
+
+def paper_log_settings(settings: dict[str, str], paperlog_mod) -> tuple[str, str]:
+    """Remote and branch for ``preview``, whitelisted before any command line sees them (D-03)."""
+    values = []
+    for key, what in ((PAPER_LOG_REMOTE_ENV, "remote"), (PAPER_LOG_BRANCH_ENV, "branch")):
+        value = settings.get(key) or OPTIONAL_ENV_DEFAULTS[key]
+        try:
+            values.append(paperlog_mod.validate_ref_name(value, what))
+        except ValueError as exc:
+            raise ConfigError(f"{key}: {exc}") from exc
+    return values[0], values[1]
 
 
 # --- logging ------------------------------------------------------------------------
@@ -606,7 +700,10 @@ def _resolve_payload(outcome, contracts_mod, now_utc: datetime) -> dict:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ibkr_executor.py",
-        description="IBKR paper executor for DUQ634065 (read-only in phases 2-3).",
+        description=(
+            "IBKR paper executor for DUQ634065 (read-only in phases 2-4; "
+            "phase 4 previews with whatIf and sends nothing)."
+        ),
     )
     sub = parser.add_subparsers(dest="command")
     account = sub.add_parser("account", help="read positions and cash into a portfolio JSON")
@@ -623,10 +720,28 @@ def build_parser() -> argparse.ArgumentParser:
     resolve.add_argument("--out", type=Path, default=None, help="write the results as JSON")
     resolve.add_argument("--log-file", type=Path, default=default_log_file())
     resolve.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
+
+    # No date option (D-07): the decision's date comes from the paper-log entry.
+    preview = sub.add_parser(
+        "preview",
+        help="dry run: decision from paper-log to a whatIf preview; sends nothing",
+    )
+    preview.add_argument("tickers", nargs="*", metavar="TICKER")
+    preview.add_argument("--contracts", type=Path, default=None, help="contracts.json path")
+    preview.add_argument("--out", type=Path, default=None, help="dry-run record (JSON)")
+    preview.add_argument("--log-file", type=Path, default=default_log_file())
+    preview.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     return parser
 
 
-def main(argv: list[str] | None = None, *, broker_factory=None, clock=None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    broker_factory=None,
+    clock=None,
+    paper_log_factory=None,
+    calendar=None,
+) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
@@ -637,10 +752,17 @@ def main(argv: list[str] | None = None, *, broker_factory=None, clock=None) -> i
 
     if not args.command:
         parser.print_usage(sys.stderr)
-        print("error: ibkr_executor.py needs a subcommand: account, resolve", file=sys.stderr)
+        print(
+            "error: ibkr_executor.py needs a subcommand: account, resolve, preview",
+            file=sys.stderr,
+        )
         return EXIT_CONFIG
     if args.command == "account" and args.out is None:
         print("error: account needs --out PATH", file=sys.stderr)
+        return EXIT_CONFIG
+    if args.command == "preview" and not args.tickers:
+        parser.print_usage(sys.stderr)
+        print("error: preview needs at least one TICKER (no default list)", file=sys.stderr)
         return EXIT_CONFIG
     if args.command == "resolve":
         if not args.tickers:
@@ -668,6 +790,8 @@ def main(argv: list[str] | None = None, *, broker_factory=None, clock=None) -> i
     try:
         if args.command == "account":
             return _account(args, broker_factory, logger)
+        if args.command == "preview":
+            return _preview(args, broker_factory, logger, clock, paper_log_factory, calendar)
         return _resolve(args, broker_factory, logger, clock)
     finally:
         close_logging()
@@ -790,6 +914,143 @@ def _resolve(args, broker_factory, logger, clock) -> int:
         ),
         "resolve output",
     )
+
+
+# --- the preview command ------------------------------------------------------------
+
+
+def _preview(args, broker_factory, logger, clock, paper_log_factory, calendar) -> int:
+    try:
+        broker_mod = load_broker_module()
+        contracts_mod = load_contracts_module()
+        decision_mod = load_decision_module()
+        paperlog_mod = load_paperlog_module()
+        maintenance_mod = load_state_maintenance_module()
+        calendar = calendar or decision_mod.load_xnys_calendar()
+    except ImportError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=LIBRARY_MISSING {type(exc).__name__}: {exc}",
+            'a library for the preview is missing - pip install -e ".[ibkr]"',
+        )
+    if broker_factory is None:
+
+        def broker_factory(host, port, logger):
+            return broker_mod.IbkrBroker(host, port, logger=logger)
+
+    if paper_log_factory is None:
+
+        def paper_log_factory(repo, remote, branch):
+            return paperlog_mod.GitPaperLog(repo, remote, branch)
+
+    mods = SimpleNamespace(
+        broker=broker_mod,
+        contracts=contracts_mod,
+        decision=decision_mod,
+        paperlog=paperlog_mod,
+        maintenance=maintenance_mod,
+    )
+    progress = {"connecting": False, "connected": False}
+    return _guarded(
+        logger,
+        broker_mod,
+        progress,
+        lambda: run_preview(
+            args, mods, broker_factory, paper_log_factory, calendar, logger, progress, clock()
+        ),
+        "preview output",
+    )
+
+
+def _preview_payload(run_state, rows, sha, remote, branch, now_utc: datetime) -> dict:
+    """The dry-run record: provenance (``paper_log.sha``), the verdict per ticker, ``sent: false``.
+
+    Dry-run record, not the ledger (phase 5): no write-ahead, no lock.
+    """
+    return {
+        "schema_version": 1,
+        "as_of": now_utc.isoformat(),
+        "paper_log": {"remote": remote, "branch": branch, "sha": sha},
+        "run_state": run_state,
+        "sent": False,
+        "rows": list(rows),
+    }
+
+
+def _write_preview(out: Path, payload: dict, contracts_mod, logger) -> None:
+    try:
+        contracts_mod.write_json_atomic(out, payload)
+    except OSError as exc:
+        raise OutputError(f"{out}: {type(exc).__name__}: {exc}") from exc
+    logger.info("preview output written: %s", out)
+
+
+def _abort_run(ctx, abort: _RunAbort) -> int:
+    """Report a run-level stop: one log line, one console line, the record, the exit code."""
+    code = ctx.mods.decision.EXIT_BY_STATE[abort.state]
+    name = abort.state.upper().replace("-", "_")
+    ctx.logger.log(
+        logging.WARNING if code else logging.INFO,
+        'ibkr-state=%s remote=%s branch=%s sha=%s detail="%s"',
+        name,
+        ctx.remote,
+        ctx.branch,
+        ctx.sha,
+        abort.detail,
+    )
+    print(f"preview: {abort.state} ({abort.detail})")
+    payload = _preview_payload(abort.state, (), ctx.sha, ctx.remote, ctx.branch, ctx.now_utc)
+    _write_preview(ctx.out, payload, ctx.mods.contracts, ctx.logger)
+    return code
+
+
+def run_preview(
+    args, mods, broker_factory, paper_log_factory, calendar, logger, progress, now_utc: datetime
+) -> int:
+    """The dry run from the paper-log to a judged whatIf preview; nothing is sent.
+
+    The earlier ``--out`` is removed first, so a failed run leaves no record that
+    looks like a result. The paper-log is read before any gateway contact.
+    """
+    out = Path(args.out or default_preview_file()).resolve()
+    try:
+        _discard_previous(out, logger)
+    except OSError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=OUTPUT_INVALID previous file not removable: {out} "
+            f"({type(exc).__name__}: {exc})",
+            f"previous preview output not removable: {out} ({type(exc).__name__})",
+        )
+    raw = read_settings(args.env_file)
+    host, port, _account = validate_settings(raw, mods.broker.EXPECTED_ACCOUNT)
+    remote, branch = paper_log_settings(raw, mods.paperlog)
+    source = paper_log_factory(REPO_ROOT, remote, branch)
+    ctx = SimpleNamespace(
+        mods=mods,
+        logger=logger,
+        out=out,
+        remote=remote,
+        branch=branch,
+        sha=None,
+        now_utc=now_utc,
+        host=host,
+        port=port,
+        calendar=calendar,
+        progress=progress,
+        broker_factory=broker_factory,
+        args=args,
+    )
+    try:
+        ctx.sha = source.fetch()
+    except mods.paperlog.PaperLogUnavailable as exc:
+        # No second attempt and no fall back to a local ref (D-02).
+        return _abort_run(ctx, _RunAbort(mods.decision.PAPER_LOG_UNAVAILABLE, exc.reason))
+    payload = _preview_payload(None, (), ctx.sha, remote, branch, now_utc)
+    _write_preview(out, payload, mods.contracts, logger)
+    return EXIT_OK
 
 
 if __name__ == "__main__":
