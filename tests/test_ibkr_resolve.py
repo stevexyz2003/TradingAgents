@@ -449,8 +449,11 @@ class TestOutputAndPersistence:
         assert list(out.parent.glob("*.tmp")) == []
         for file in (path, contracts_mod.contracts_history_path(path), out):
             text = file.read_text(encoding="utf-8")
-            assert "liquid" not in text.lower()
-            assert "tradingHours" not in text
+            # The verdict text may say "a liquid window"; the broker's hours must not appear.
+            assert "liquidhours" not in text.lower()
+            assert "tradinghours" not in text.lower()
+            assert OPEN_HOURS not in text
+            assert "0930" not in text
 
     def test_previous_out_file_is_removed_on_failure(self, tmp_path):
         out = tmp_path / "resolve.json"

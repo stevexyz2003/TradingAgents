@@ -493,9 +493,80 @@ def run_resolve(
             str(exc),
         )
 
+    # The gateway session is closed here; only now does anything reach the disk.
+    if outcome.events:
+        try:
+            contracts_mod.commit_contracts(contracts_path, outcome.contracts, outcome.events)
+        except OSError as exc:
+            raise OutputError(f"{contracts_path}: {type(exc).__name__}: {exc}") from exc
+        for event in outcome.events:
+            logger.info(
+                "ibkr-state=CONTRACTS_WRITTEN event=%s ticker=%s conId=%s",
+                event.event,
+                event.ticker,
+                event.new.con_id,
+            )
+            if event.event == "rebaseline" and event.old is not None:
+                print(
+                    f"resolve: {event.ticker} rebaselined conId {event.old.con_id} -> "
+                    f"{event.new.con_id} (primaryExchange/currency/localSymbol "
+                    f"{event.old.primary_exchange}/{event.old.currency}/{event.old.local_symbol}"
+                    f" -> {event.new.primary_exchange}/{event.new.currency}/"
+                    f"{event.new.local_symbol})"
+                )
+        print(f"contracts: {len(outcome.events)} change(s) written -> {contracts_path}")
+
     for result in outcome.results:
-        print(_result_line(result, contracts_mod.SESSION_BUFFER_MINUTES))
+        line = _result_line(result, contracts_mod.SESSION_BUFFER_MINUTES)
+        print(line)
+        state = "RESOLVED" if not result.rejected else "RESOLVE_REJECTED"
+        logger.log(
+            logging.WARNING if result.rejected else logging.INFO,
+            "ibkr-state=%s ticker=%s state=%s detail=%r",
+            state,
+            result.ticker,
+            result.state,
+            result.detail,
+        )
+
+    if args.out is not None:
+        payload = _resolve_payload(outcome, contracts_mod, now_utc)
+        try:
+            contracts_mod.write_json_atomic(out, payload)
+        except OSError as exc:
+            raise OutputError(f"{out}: {type(exc).__name__}: {exc}") from exc
+        logger.info("resolve output written: %s", out)
     return EXIT_PRECONDITION if outcome.rejected else EXIT_OK
+
+
+def _iso(moment: datetime | None) -> str | None:
+    return None if moment is None else moment.isoformat()
+
+
+def _resolve_payload(outcome, contracts_mod, now_utc: datetime) -> dict:
+    """The ``--out`` content: identities and window bounds, never the broker's hours text."""
+    rows = []
+    for result in outcome.results:
+        ident = result.identity
+        rows.append(
+            {
+                "ticker": result.ticker,
+                "state": result.state,
+                "detail": result.detail,
+                "conId": None if ident is None else ident.con_id,
+                "primaryExchange": None if ident is None else ident.primary_exchange,
+                "currency": None if ident is None else ident.currency,
+                "localSymbol": None if ident is None else ident.local_symbol,
+                "window_start": _iso(result.window.start) if result.window else None,
+                "window_end": _iso(result.window.end) if result.window else None,
+                "next_open": _iso(result.next_open),
+            }
+        )
+    return {
+        "schema_version": contracts_mod.SCHEMA_VERSION,
+        "as_of": now_utc.isoformat(),
+        "results": rows,
+    }
 
 
 # --- command line -------------------------------------------------------------------
