@@ -440,6 +440,66 @@ Findings for later plans:
   localhost only" was confirmed as set on 2026-10-12 (see "Gateway Read-Only
   switch").
 
+## First resolve run
+
+Four `resolve` runs against the running paper gateway (account `DUQ634065`),
+executed by the plan-03-06 executor agent from the repository root; each run
+once, no retry, no other command against the gateway.
+
+| | |
+|---|---|
+| Date | 2026-10-12, 20:09:45 – 20:09:59 local time (CEST), 14:09 in New York (EDT) |
+| Read-Only API | on (table above) |
+| Market data type | `ibkr-state=MARKET_DATA_TYPE detail="delayed (3)"` on every connected run |
+
+**(a)** `resolve --init AAPL MSFT NVDA` - exit **0**
+
+```
+contracts: 3 change(s) written -> C:\Users\admin\AppData\Local\TradingEngineX\ibkr\contracts.json
+resolve: AAPL ok conId=265598 NASDAQ/USD/AAPL tradable until 2026-10-12T15:45:00-04:00
+resolve: MSFT ok conId=272093 NASDAQ/USD/MSFT tradable until 2026-10-12T15:45:00-04:00
+resolve: NVDA ok conId=4815747 NASDAQ/USD/NVDA tradable until 2026-10-12T15:45:00-04:00
+```
+
+Learned identities (log: `CONTRACT_LEARNED`, tradingClass NMS for all three):
+AAPL 265598, MSFT 272093, NVDA 4815747, each `primaryExchange=NASDAQ`,
+`currency=USD`, `localSymbol` = symbol. `contracts-history.jsonl` got three
+`init` lines (3 lines in total).
+
+**(b)** `resolve AAPL MSFT NVDA --out ...\resolve.json` - exit **0**; the same
+three `ok` lines with the same conIds. No new history line (still 3), no
+`CONTRACT_LEARNED`: the identities were checked by `conId` and exchange.
+
+**(c)** `resolve XYZQ ^GSPC XAUUSD+` - exit **2**
+
+```
+resolve: 'XYZQ' not-mapped - 'XYZQ': no entry in the contract table; nothing tried
+resolve: ^GSPC not-allowed - '^GSPC': secType IND is not in the allow-list {STK}
+resolve: XAUUSD+ not-allowed - 'XAUUSD+': secType CMDTY is not in the allow-list {STK}
+```
+
+No `CONNECTED` line in the log for this run: nothing reached the gateway.
+
+**(d)** drift check on a COPY of `contracts.json` (AAPL `conId` set to 999999),
+`resolve AAPL --contracts <copy>` - exit **2**
+
+```
+resolve: AAPL drift - ticker=AAPL fields=conId stored=conId=999999/primaryExchange=NASDAQ/currency=USD/localSymbol=AAPL seen=none (persisted conId unknown to the gateway); check, then resolve --rebaseline AAPL
+```
+
+The gateway does not know 999999 (`ibkr-state=CONTRACT_NOT_FOUND code=200`), so
+the drift line says `seen=none` instead of naming 265598; log:
+`ibkr-state=CONTRACT_DRIFT` at ERROR. The real `contracts.json` was
+unchanged by the drift check (SHA-256 identical before and after).
+
+Observed gateway states: `FARM_OK` 2104 (eufarm) and 2158 (secdefeu) at INFO,
+`UNKNOWN` 2107 (euhmds, inactive but available on demand) at WARNING, as in
+"First real run". 10167 did not appear in these runs. No `orderStatus`,
+`newOrder` or `ReadOnlyViolation` line in the log.
+
+Not covered by this run: the Saturday run (`closed`, D-24 against D-29) is an
+open verification item.
+
 ## See also
 
 * `scripts/PAPER_RUN.md` — the daily analysis run.
