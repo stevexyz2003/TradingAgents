@@ -43,6 +43,15 @@ Underweight / Sell).
    | `TRADINGAGENTS_DEEP_THINK_LLM` | `claude-sonnet-5-5` | the expensive model |
    | `TRADINGAGENTS_QUICK_THINK_LLM` | `claude-haiku-5-5` | the cheap model |
    | `TRADINGAGENTS_MAX_DEBATE_ROUNDS` | `1` | raise = better, pricier |
+   | `TRADINGAGENTS_JEV_ENABLED` | `true` | Jev run review; only acts with the `JEV_API_KEY` secret |
+
+   **Optional: Jev review.** Add the secret `JEV_API_KEY` (a TypeSafe key) and
+   every finished ticker run is reviewed by the Jev decision model, about
+   USD 0.00005 per ticker and at most ~11 s when Jev is slow. A `REVIEW` rating
+   (no readable call) is replaced by Jev's reading only at confidence ≥ 0.9 and
+   is then marked `rating_source: "jev"` in the ticker record; the shadow
+   checks land in the record's `jev` field and never change a decision. Without
+   the secret, or with the variable set to `false`, the run is unchanged.
 
    The provider and both model tiers are **pinned in the workflow**, not left
    to the library's defaults: upstream re-points `deep_think_llm` /
