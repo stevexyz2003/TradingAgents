@@ -274,8 +274,8 @@ identity against `contracts.json` -> tradability -> session.
 |---|---|
 | `ok` | resolved, identity as stored, tradable, session open (outside the buffer) |
 | `closed` | contract fine, session not open; the console line names the next window; exit 0 |
-| `not-mapped` | the ticker is not in `CONTRACT_TABLE` (this also stops `^GSPC`, `XAUUSD+` and the like) |
-| `not-allowed` | the security type is not on the allow-list |
+| `not-mapped` | the ticker is not in `CONTRACT_TABLE` |
+| `not-allowed` | the security type is not on the allow-list (e.g. `^GSPC` IND, `XAUUSD+` CMDTY) |
 | `ambiguous` | the gateway returned more than one contract for the search key |
 | `not-found` | the gateway knows no such contract (code 200) |
 | `drift` | `conId`, `primaryExchange`, `currency` or `localSymbol` differs from `contracts.json` |
@@ -307,9 +307,18 @@ There is no session field.
 
 Next to it, `contracts-history.jsonl` is append-only: one line per change,
 event `init`, `learn` or `rebaseline` (an `-aborted` suffix marks an
-unfinished write).
+unfinished replace after the history append). After a process crash the history
+can be a superset; `contracts.json` is authoritative.
 
-* First build: `resolve --init AAPL MSFT NVDA`. AAPL is the anchor: its
+A write takes `contracts.json.lock` beside the file and aborts (exit 1) if it
+already exists or if `contracts.json` changed since the run read it. A
+`.lock` left behind by a killed process blocks every later write: make sure
+no `resolve` is running, then delete the `.lock` file by hand.
+
+* First build: `resolve --init AAPL MSFT NVDA`. If `contracts-history.jsonl`
+  already contains entries while `contracts.json` is missing, `--init` stops;
+  restore `contracts.json` manually instead of learning a new baseline. AAPL is
+  the anchor: its
   learned `conId` must equal `PROBE_CON_ID` 265598, otherwise the run ends
   with `ANCHOR_MISMATCH` (exit 2) and writes nothing. `--init` never
   overwrites an existing file (exit 2).
