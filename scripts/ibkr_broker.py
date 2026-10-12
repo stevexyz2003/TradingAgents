@@ -19,7 +19,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 #: The one paper account this adapter may talk to (ibkr-konto-befund.md). A code
@@ -301,6 +301,111 @@ class IbkrBroker:
             EXPECTED_ACCOUNT,
             self._client_id,
         )
+
+    def health(self) -> Health:
+        """Liveness from a real server answer, not from the socket (REQ-IBKR-09).
+
+        Healthy only when the socket is up, no 1100/2110/1300 is open, and the
+        contract-details probe for ``PROBE_CON_ID`` returns exactly that contract
+        within ``probe_timeout``. One loop tick runs before the state flags are
+        read, so an error event already queued in the loop (a 1100 that arrived
+        between two calls) reaches ``_on_error`` first. While a flag is open no
+        probe is sent.
+
+        Known limit (assumption A4): should the gateway answer the probe from a
+        cache while the server link is down, only the 1100/2110 flags reveal it.
+        """
+        ib, handles = self._ib, self._handles
+        if ib is None or handles is None:
+            return self._unhealthy("NOT_CONNECTED", "no session; connect() first")
+        self._call(lambda: asyncio.sleep(0), self._probe_timeout)
+        if not ib.isConnected():
+            return self._unhealthy("NOT_CONNECTED", "socket is down")
+        if self.link_lost:
+            return self._unhealthy("CONNECTIVITY_LOST", "1100 open, no 1101/1102 since")
+        if self.server_link_broken:
+            return self._unhealthy("SERVER_LINK_BROKEN", "2110 open, no 1101/1102 since")
+        if self.port_changed:
+            return self._unhealthy("PORT_CHANGED", "1300: the gateway changed its port")
+        try:
+            details = self._call(
+                lambda: ib.reqContractDetailsAsync(handles.contract(conId=PROBE_CON_ID)),
+                self._probe_timeout,
+            )
+        except TimeoutError:
+            return self._unhealthy(
+                PROBE_TIMEOUT, f"probe conId {PROBE_CON_ID} unanswered in {self._probe_timeout}s"
+            )
+        except ConnectionError as exc:
+            return self._unhealthy("NOT_CONNECTED", f"probe not sent ({type(exc).__name__})")
+        if len(details) != 1 or details[0].contract.conId != PROBE_CON_ID:
+            return self._unhealthy(
+                PROBE_FAILED, f"probe conId {PROBE_CON_ID} returned {len(details)} matches"
+            )
+        return Health(True, HEALTHY, f"probe conId {PROBE_CON_ID} answered")
+
+    def positions(self) -> AccountSnapshot:
+        """Positions and cash of the paper account, asked fresh on every call (REQ-IBKR-12).
+
+        Never the library's cached positions, never a file. Rows of other accounts
+        and zero-quantity rows are dropped. Cash is the one ``TotalCashValue`` row
+        of the paper account (conservative, without margin; assumption A3), not
+        the margin-levered buying power.
+        """
+        ib = self._ib
+        if ib is None:
+            raise GatewayUnavailable("NOT_CONNECTED", 504, "no session; connect() first")
+        raw = self._request("reqPositions", ib.reqPositionsAsync)
+        values = self._request("accountSummary", lambda: ib.accountSummaryAsync(EXPECTED_ACCOUNT))
+
+        held = tuple(
+            BrokerPosition(
+                symbol=p.contract.symbol,
+                sec_type=p.contract.secType,
+                local_symbol=p.contract.localSymbol,
+                currency=p.contract.currency,
+                quantity=float(p.position),
+                avg_cost=float(p.avgCost),
+            )
+            for p in raw
+            if p.account == EXPECTED_ACCOUNT and p.position != 0
+        )
+        mine = [v for v in values if v.account == EXPECTED_ACCOUNT]
+        cash_rows = [v for v in mine if v.tag == "TotalCashValue"]
+        if len(cash_rows) != 1:
+            raise GatewayUnavailable(
+                SNAPSHOT_INCOMPLETE,
+                None,
+                f"expected one TotalCashValue row for {EXPECTED_ACCOUNT}, got {len(cash_rows)}",
+            )
+        cash = cash_rows[0]
+        for v in mine:
+            if v.tag in ("AvailableFunds", "NetLiquidation"):
+                self._log.info("ibkr-account %s=%s %s (log only)", v.tag, v.value, v.currency)
+        return AccountSnapshot(
+            account=EXPECTED_ACCOUNT,
+            positions=held,
+            cash=float(cash.value),
+            cash_currency=cash.currency,
+            as_of=datetime.now(UTC),
+        )
+
+    def _request(self, name: str, make_awaitable):
+        """One read request under the request timeout; a hang becomes a named state."""
+        try:
+            return self._call(make_awaitable, self._request_timeout)
+        except TimeoutError as exc:
+            raise GatewayUnavailable(
+                REQUEST_TIMEOUT, None, f"{name} did not answer within {self._request_timeout}s"
+            ) from exc
+        except ConnectionError as exc:
+            raise GatewayUnavailable(
+                "NOT_CONNECTED", 504, f"{name} not sent ({type(exc).__name__})"
+            ) from exc
+
+    def _unhealthy(self, state: str, detail: str) -> Health:
+        self._log.warning('ibkr-state=%s code=- detail="%s"', state, detail)
+        return Health(False, state, detail)
 
     def _call(self, make_awaitable, timeout: float):
         """Run one request in the adapter's loop, bounded by ``timeout`` seconds."""
