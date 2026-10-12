@@ -31,7 +31,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 ## Phasen
 
 - [ ] **Phase 1: Konto-Messung und Gateway-Grundbetrieb** — messen, was am Konto wirklich gilt, bevor Code darauf baut (Operator-Aufgabe, kein Entwicklungsschritt)
-- [ ] **Phase 2: Verbindung, Paper-Guard und Kontolesen** — ein lokaler Prozess liest `DUQ634065` read-only und füllt `PortfolioContext`
+- [x] **Phase 2: Verbindung, Paper-Guard und Kontolesen** — ein lokaler Prozess liest `DUQ634065` read-only und füllt `PortfolioContext` (completed 2026-10-12)
 - [ ] **Phase 3: Symbol-Auflösung, Handelbarkeit und Handelszeiten** — vom Roh-Ticker zu genau einem Contract, oder begründet gar nicht
 - [ ] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet
 - [ ] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order
@@ -104,7 +104,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - Kein Lesen von `paper-log`, keine Entscheidungsübernahme.
 - **Keine Änderung am CI-Produktivpfad.** Das Portfolio-JSON wird in dieser Phase nur lokal übergeben; die Verdrahtung in den täglichen Lauf braucht den Veröffentlichungsbranch und passiert in Phase 7.
 
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 **Wave 1**
@@ -126,7 +126,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 02-06-PLAN.md — Preflight mit echtem JSON, Operator-Checkpoint echter Paper-Lauf mit `--portfolio`
+- [x] 02-06-PLAN.md — Preflight mit echtem JSON, Operator-Checkpoint echter Paper-Lauf mit `--portfolio`
 
 ---
 
