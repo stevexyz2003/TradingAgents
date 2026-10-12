@@ -37,8 +37,12 @@ repository. Its state is recorded here whenever it changes.
 | Date | State | By | Note |
 |---|---|---|---|
 | 2026-10-11 20:27 | off | operator | turned off again after the 321 proof (ibkr-konto-befund.md) |
+| 2026-10-12 08:45 | on | operator | before the first real Phase-2 run (D-02); paper user login confirmed |
 
-Plan 02-05 adds a row before the first real run against the gateway.
+Open observation (2026-10-12, before the first real run): the gateway process
+listened on `:::7497`, i.e. on all interfaces, not only on `127.0.0.1`. Whether
+"Allow connections from localhost only" is set in the gateway was **not**
+confirmed by the operator; this manual does not claim that it is.
 
 Marker: with the switch on, gateway 10.50.1 rejects a write with error **321**
 (state `READ_ONLY_API`), not with the documented 10015
@@ -60,7 +64,8 @@ The executor connects with clientId **20001**, the constant
 
 A clientId already in use shows up as error **326** and ends the run with
 state `CLIENT_ID_IN_USE`, exit 3. Assumption A2 ("the gateway accepts values
-above 9999") is confirmed by the first real run (plan 02-05).
+above 9999") was confirmed by the first real run on 2026-10-12 (see
+"First real run").
 
 Order ids: never set by this code. They start at the gateway's
 `nextValidId` (phase 6); `tests/test_ibkr_isolation.py` keeps hard-coded order
@@ -216,6 +221,53 @@ python scripts/daily_paper_run.py --tickers AAPL --max-cost 0.50 --out results\p
 (`scripts/daily_paper_run.py:342-374`); their meaning and the cost budget are
 described in `scripts/PAPER_RUN.md`. `--portfolio` is local only; the CI run
 never passes it.
+
+## First real run
+
+One single `account` run against the running paper gateway, executed by the
+plan-02-05 executor agent from the repository root; no retry, no other
+command against the gateway.
+
+| | |
+|---|---|
+| Date | 2026-10-12, 13:26:30 – 13:26:32 local time |
+| Command | `.venv/Scripts/python.exe scripts/ibkr_executor.py account --out "$LOCALAPPDATA/TradingEngineX/ibkr/portfolio.json"` |
+| Read-Only API | on (operator, 08:45 the same day; table above) |
+| Gateway | 10.50.1 (`ibkr-konto-befund.md`); log: `Logged on to server version 178` |
+| Exit code | **0** |
+| Console | `account: 0 position(s), cash 1005459.44 EUR -> C:\Users\admin\AppData\Local\TradingEngineX\ibkr\portfolio.json` |
+| Positions | 0 |
+| Cash | 1005459.44 EUR (`TotalCashValue`); log only: `AvailableFunds` and `NetLiquidation` 1005888.32 EUR |
+| clientId | **20001 accepted** — no 326; assumption A2 confirmed |
+| Paper guard | passed: `ibkr-state=CONNECTED account=DUQ634065 clientId=20001 readonly=True` |
+| Session | 333 ms on the socket, 6 messages sent, 103 received; whole run about 2 s |
+| Cross-check | `load_portfolio()` on the written file: `{'cash': 1005459.44, 'currency': 'EUR', 'positions': []}` |
+| Writes | none: no `placeOrder`, `orderStatus`, `newOrder` or `ReadOnlyViolation` line in the log |
+
+Observed gateway states:
+
+* `ibkr-state=FARM_OK code=2104` (eufarm) and `code=2158` (secdefeu) at INFO.
+* `ibkr-state=UNKNOWN code=2107` at WARNING (gateway text, translated): "HMDS data farm connection is
+  inactive but should be available upon demand" (euhmds). 2107 is not in
+  `STATE_BY_CODE` yet; it is harmless and should be mapped as an INFO code.
+* **No 321 at connect.** The phase-1 measurement saw two 321 notices at
+  connect with the switch on; this run saw none, although the operator
+  reported the switch on. Either the notices depend on something else (e.g.
+  the order sync that `readonly=True` skips), or the switch was not in effect.
+  Not decided here — the operator checks the switch in the gateway.
+
+Findings for later plans:
+
+* The health probe is not logged on success: `health()` returns `HEALTHY`
+  without a log line (`scripts/ibkr_broker.py:345`). It is proven only
+  indirectly — an unhealthy session would have ended with exit 3 before the
+  snapshot.
+* The arming of the write barrier is not logged either.
+* `TotalCashValue` (1005459.44) and `NetLiquidation` (1005888.32) differ by
+  428.88 EUR with no position open; probably accrued interest or similar, not
+  examined here.
+* The gateway listened on `:::7497` (all interfaces); see the open observation
+  under "Gateway Read-Only switch".
 
 ## See also
 
