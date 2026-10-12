@@ -155,7 +155,7 @@ Plans:
 - Keine Marktdaten über den delayed-Default hinaus; kein Limitpreis, keine Preisabfrage im Order-Pfad.
 - Keine Erweiterung der Allow-List über `STK` hinaus — die breitere Liste ist dokumentierter Erweiterungspfad.
 
-**Plans:** 4/6 plans executed
+**Plans:** 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -170,7 +170,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-05-PLAN.md — Subkommando `ibkr_executor.py resolve` mit Exit 2, Connect-on-demand, `--init`/`--rebaseline`/`--out` (Wave 3)
+- [x] 03-05-PLAN.md — Subkommando `ibkr_executor.py resolve` mit Exit 2, Connect-on-demand, `--init`/`--rebaseline`/`--out` (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
