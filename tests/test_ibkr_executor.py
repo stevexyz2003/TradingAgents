@@ -329,6 +329,28 @@ class _PositionsBoom(ibkr_fakes.FakeIB):
         raise RuntimeError("boom")
 
 
+class _HandshakeBoom(ibkr_fakes.FakeIB):
+    """The handshake stood, then the library failed while it parsed the accounts."""
+
+    def managedAccounts(self):
+        raise ValueError("unparseable managedAccounts")
+
+
+class _WritesDuringConnect(ibkr_fakes.FakeIB):
+    """Something inside the connect tries to place an order."""
+
+    async def connectAsync(self, *args, **kwargs):
+        await super().connectAsync(*args, **kwargs)
+        self.client.placeOrder(1, None, None)
+
+
+class _WritesOnTheWire(ibkr_fakes.FakeIB):
+    """A read that sends a write message (id 3) through the raw send path."""
+
+    async def reqContractDetailsAsync(self, contract):
+        self.client.send(3, 1, 42)
+
+
 class TestAccount:
     def test_account_writes_portfolio_that_load_portfolio_accepts(self, tmp_path, capsys, loop):
         fake = ibkr_fakes.FakeIB(**_book())
@@ -505,6 +527,39 @@ class TestAccount:
         assert "Traceback" in _log_text(log)
         assert "disconnect" in fake.calls
         assert not out.exists()
+
+    def test_unexpected_error_inside_connect_exits_3_not_1(self, tmp_path, capsys, loop):
+        # WR-03: a socket and a handshake stood, so "nothing was done" (exit 1) is wrong.
+        fake = _HandshakeBoom(**_book())
+        code, out, log = _run(tmp_path, _fake_factory(fake, loop))
+        assert code == executor.EXIT_GATEWAY
+        assert "connect" in fake.calls
+        assert "disconnect" in fake.calls
+        assert "ibkr-state=UNEXPECTED ValueError" in _log_text(log)
+        assert not out.exists()
+        assert "Traceback" not in capsys.readouterr().err
+
+    def test_error_before_the_connect_starts_stays_exit_1(self, tmp_path):
+        def factory(host, port, logger):
+            raise RuntimeError("broken factory")
+
+        code, _out, log = _run(tmp_path, factory)
+        assert code == executor.EXIT_CONFIG
+        assert "ibkr-state=UNEXPECTED RuntimeError" in _log_text(log)
+
+    @pytest.mark.parametrize("fake_cls", [_WritesDuringConnect, _WritesOnTheWire])
+    def test_refused_write_has_its_own_state_and_exits_3(self, tmp_path, capsys, loop, fake_cls):
+        fake = fake_cls(**_book())
+        code, out, log = _run(tmp_path, _fake_factory(fake, loop))
+        assert code == executor.EXIT_GATEWAY
+        text = _log_text(log)
+        assert "ibkr-state=WRITE_REFUSED" in text
+        assert "UNEXPECTED" not in text
+        assert "disconnect" in fake.calls
+        assert not out.exists()
+        err = capsys.readouterr().err
+        assert err.startswith("error: ibkr-state=WRITE_REFUSED")
+        assert len(err.strip().splitlines()) == 1
 
     @pytest.mark.parametrize(
         ("fake_kwargs", "env_values", "expected"),

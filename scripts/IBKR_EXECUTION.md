@@ -117,6 +117,10 @@ Identical to the table in the docstring of `scripts/ibkr_executor.py`; a test
 | 20 | `EXIT_NO_CREDENTIALS` | IBKR settings missing or unreadable - same meaning as `EXIT_NO_CREDENTIALS` in `daily_paper_run.py` |
 
 Code 3 means "gateway" here, unlike `EXIT_RUN_FAILED` (3) in the paper run.
+Exit 3 also covers a write the barrier refused (state `WRITE_REFUSED`, its
+own log line) and any unexpected error once the connect has started: from
+then on a socket and a handshake may have stood, so "nothing was done" no
+longer holds. An unexpected error before the connect starts stays exit 1.
 Exit 1 also covers a missing `ibkr` extra (the console line names
 `pip install -e ".[ibkr]"`) and a portfolio JSON that could not be written or
 did not validate.
@@ -164,8 +168,8 @@ connection error → 504, reset/EOF → 507).
 
 States without a gateway code: `CONNECT_TIMEOUT`, `REQUEST_TIMEOUT`,
 `PROBE_TIMEOUT`, `PROBE_FAILED`, `SNAPSHOT_INCOMPLETE`, `HEALTHY`, and from
-the executor `ACCOUNT_GUARD_VIOLATED`, `SETTINGS_MISSING`, `CONFIG_INVALID`,
-`LIBRARY_MISSING`, `OUTPUT_INVALID`, `UNEXPECTED`.
+the executor `ACCOUNT_GUARD_VIOLATED`, `WRITE_REFUSED`, `SETTINGS_MISSING`,
+`CONFIG_INVALID`, `LIBRARY_MISSING`, `OUTPUT_INVALID`, `UNEXPECTED`.
 
 Liveness is a real server answer, not the socket state: `health()`
 (`scripts/ibkr_broker.py:305`) asks for the contract details of

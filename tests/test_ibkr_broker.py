@@ -136,6 +136,17 @@ def test_guard_rejects_anything_but_the_paper_account(loop, accounts):
     assert not any(call in fake.calls for call in FORBIDDEN_CALLS)
 
 
+def test_error_while_reading_the_accounts_closes_the_session(loop):
+    class Boom(FakeIB):
+        def managedAccounts(self):
+            raise ValueError("unparseable managedAccounts")
+
+    fake = Boom()
+    with pytest.raises(ValueError):
+        _broker(fake, loop).connect()
+    assert "disconnect" in fake.calls
+
+
 def test_guard_accepts_exact_account(loop):
     fake = FakeIB(accounts=["DUQ634065"])
     _connected(fake, loop)

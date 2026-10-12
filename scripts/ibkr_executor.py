@@ -306,12 +306,17 @@ def run_account(args, settings, broker_mod, broker_factory, logger, progress=Non
 
     The JSON is written only on the exit-0 path and only after the session is
     closed; the caller has already removed any earlier file, so a failed run
-    leaves none. ``progress["connected"]`` tells the caller whether a session stood.
+    leaves none. ``progress["connecting"]`` tells the caller that the connect
+    has started, so a socket and a handshake may have stood; from then on no
+    error means "nothing was done". ``progress["connected"]`` marks a session
+    that passed the guard.
     """
     host, port, _account = settings
     out = Path(args.out).resolve()
     progress = {} if progress is None else progress
-    with broker_factory(host, port, logger) as broker:
+    adapter = broker_factory(host, port, logger)
+    progress["connecting"] = True
+    with adapter as broker:
         progress["connected"] = True
         health = broker.health()
         if not health.ok:
@@ -422,12 +427,17 @@ def _account(args, broker_factory, logger) -> int:
         def broker_factory(host, port, logger):
             return broker_mod.IbkrBroker(host, port, logger=logger)
 
-    progress = {"connected": False}
+    progress = {"connecting": False, "connected": False}
     try:
         return run_account(args, settings, broker_mod, broker_factory, logger, progress)
     except broker_mod.AccountGuardViolation as exc:
         line = f"ibkr-state=ACCOUNT_GUARD_VIOLATED accounts_seen={exc.accounts_seen}"
         return _fail(logger, EXIT_ACCOUNT_GUARD, line, line)
+    except broker_mod.ReadOnlyViolation as exc:
+        # The barrier held: a write was refused before it reached the gateway.
+        # The most safety-relevant event of a read-only run gets its own state.
+        line = f'ibkr-state=WRITE_REFUSED code=- detail="{exc}"'
+        return _fail(logger, EXIT_GATEWAY, line, line)
     except broker_mod.GatewayUnavailable as exc:
         return _fail(logger, EXIT_GATEWAY, str(exc), str(exc))
     except ImportError as exc:
@@ -451,7 +461,7 @@ def _account(args, broker_factory, logger) -> int:
             f"error: unexpected {type(exc).__name__}: {exc} (details in {_log_path()})",
             file=sys.stderr,
         )
-        return EXIT_GATEWAY if progress["connected"] else EXIT_CONFIG
+        return EXIT_GATEWAY if progress["connecting"] else EXIT_CONFIG
 
 
 if __name__ == "__main__":

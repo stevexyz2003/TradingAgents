@@ -353,7 +353,13 @@ class IbkrBroker:
             raise
 
         # Paper guard: the first check after the handshake. Exact list, no prefix.
-        accounts = list(ib.managedAccounts())
+        # __exit__ never runs when connect() raises, so any error here closes the
+        # session itself.
+        try:
+            accounts = list(ib.managedAccounts())
+        except BaseException:
+            self._disconnect()
+            raise
         if accounts != [EXPECTED_ACCOUNT]:
             self._log.error("ibkr-state=ACCOUNT_GUARD_VIOLATED accounts_seen=%s", accounts)
             self._disconnect()
