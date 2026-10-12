@@ -180,3 +180,65 @@ def test_handbook_exit_table_matches_executor():
     assert len(codes) == 10
     for name, value in codes.items():
         assert re.search(rf"^\| {value} \| `{name}` \|", text, re.M), f"{name}={value} not in table"
+
+
+# --- the resolver stays pure: no library, no vendor normalizer, no clock, no trading hours --
+
+CONTRACTS = ROOT / "scripts" / "ibkr_contracts.py"
+VENDOR_NORMALIZER_MODULE = "tradingagents.dataflows.symbols"
+VENDOR_NORMALIZER_NAME = "normalize_symbol"
+
+
+def _full_imports(path: Path) -> set[str]:
+    """Full dotted module names plus the imported names themselves."""
+    names = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module)
+            for alias in node.names:
+                names.add(f"{node.module}.{alias.name}")
+                names.add(alias.name)
+    return names
+
+
+@pytest.mark.unit
+def test_resolver_is_library_free():
+    top_level = _imports(CONTRACTS)
+    assert CLIENT_LIBRARY not in top_level
+    assert "tradingagents" not in top_level
+
+
+@pytest.mark.unit
+def test_resolver_does_not_use_the_vendor_normalizer():
+    for path in (CONTRACTS, EXECUTOR):
+        imports = _full_imports(path)
+        offenders = {n for n in imports if n.startswith(VENDOR_NORMALIZER_MODULE)}
+        assert not offenders, f"{path.name} imports {offenders}"
+        assert VENDOR_NORMALIZER_NAME not in imports, f"{path.name} imports the normalizer"
+    assert VENDOR_NORMALIZER_NAME not in CONTRACTS.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_no_hard_coded_trading_times_in_execution_code():
+    # Patterns are built from parts so this file never contains them as literals.
+    patterns = [
+        ":".join(parts) for parts in (("13", "30"), ("14", "30"), ("09", "30"), ("16", "00"))
+    ]
+    files = sorted((ROOT / "scripts").glob("ibkr_*.py"))
+    assert len(files) >= 3, "expected broker, executor and contracts; the guard would check nothing"
+    hits = [
+        (path.name, pattern)
+        for path in files
+        for pattern in patterns
+        if pattern in path.read_text(encoding="utf-8")
+    ]
+    assert hits == []
+
+
+@pytest.mark.unit
+def test_resolver_takes_the_clock_as_a_parameter():
+    source = CONTRACTS.read_text(encoding="utf-8")
+    for forbidden in ("datetime.now", "time.time(", "date.today"):
+        assert forbidden not in source, f"{forbidden} reads the clock inside the resolver"
