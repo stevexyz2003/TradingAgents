@@ -18,7 +18,7 @@ result: passed — 2026-10-12 16:34:17 (lokal), Exit 0, Code nach den Review-Fix
 
 ### 2. K7 erneut — die `&&`-Kette aus `scripts/IBKR_EXECUTION.md` mit Anthropic-Konfiguration
 expected: Exit 0; Block „Portfolio at the analysis date:“ in `complete_report.md`. Das alte JSON ohne `as_of` wird inzwischen mit Exit 1 abgelehnt, die Kette ist nach den Fixes also noch nicht am echten System gelaufen. Test 1 und 2 lassen sich in einem Lauf erledigen (kostet ca. 0,13 $ LLM).
-result: passed — gleiche `&&`-Kette direkt danach, Anthropic aus `.env` (provider=anthropic deep=claude-sonnet-5-5 quick=claude-haiku-5-5), Exit 0, AAPL Hold, 0,1300 $; `complete_report.md` Z. 10–12: „Portfolio at the analysis date:“ / „No current position in AAPL“ / „Cash available: 1,005,459.44 EUR“. Scratch: %TEMP%	ex-phase2-uat, Repo unverändert.
+result: passed — gleiche `&&`-Kette direkt danach, Anthropic aus `.env` (provider=anthropic deep=claude-sonnet-5-5 quick=claude-haiku-5-5), Exit 0, AAPL Hold, 0,1300 $; `complete_report.md` Z. 10–12: „Portfolio at the analysis date:“ / „No current position in AAPL“ / „Cash available: 1,005,459.44 EUR“. Scratch: `%TEMP%/tex-phase2-uat`, Repo unverändert.
 
 ### 3. REQ-IBKR-67 — Codes 1100/1101/1102/1300/2110 am echten Gateway messen oder per Override akzeptieren
 expected: Entweder eine datierte Messung (z. B. Netzverbindung kurz trennen und den Code im Log ablesen), oder eine begründete Override-Notiz in VERIFICATION.md. Der Schutz aus CR-01 baut auf diesen Codes auf, gemessen sind bisher nur 321, 2104, 2158 und 2107.
