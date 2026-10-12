@@ -107,6 +107,11 @@ def review_run(final_state: dict, config: dict) -> None:
     """Classify the run's texts with Jev; apply the REVIEW fallback; record the shadow checks."""
     if not config.get("jev_enabled"):
         return
+    # A run given the account's holdings may quote them in any of its texts, and
+    # account data never goes to Jev: such a run is not reviewed at all.
+    if final_state.get("portfolio_context"):
+        logger.info("Jev review skipped: the run has a portfolio context")
+        return
     from tradingagents.jev import client
 
     key = client.get_api_key()

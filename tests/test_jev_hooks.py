@@ -27,7 +27,7 @@ def _state(**over):
         "trader_investment_plan": "Entry 180.\n\nFINAL TRANSACTION PROPOSAL: **BUY**",
         "sentiment_report": "**Overall Sentiment:** **Mildly Bullish** (Score: 6.5/10)\n\nok",
         "final_rating": "REVIEW",
-        "portfolio_context": "ACCOUNT U1234567 SECRET",
+        "portfolio_context": "",
         "run_settings": {"llm_provider": "anthropic"},
     }
     s.update(over)
@@ -213,10 +213,24 @@ def test_only_the_analysis_texts_are_sent(jev, tmp_path):
     assert set(body["state"]) == {"decision", "plan", "sentiment"}
     assert set(body["questions"]) == {"final_rating", "research_recommendation", "sentiment_band"}
     sent = json.dumps(body)
-    for secret in ("U1234567", "SECRET", "anthropic", FAKE_KEY, "results_dir"):
+    for secret in ("anthropic", FAKE_KEY, "results_dir"):
         assert secret not in sent
     for q in body["questions"].values():
         assert "other" in q["criteria"]
+
+
+@pytest.mark.unit
+def test_a_run_with_a_portfolio_context_is_not_sent(jev, tmp_path):
+    # Any of the analysis texts may quote the holdings the run was given.
+    jev.result = _resp(final_rating=("buy", 0.95))
+    s = _state(portfolio_context="Current position in AAPL: 120 units; cash 50,000 (account U1234567)",
+               final_trade_decision="Hold the 120 units in account U1234567.",
+               trader_investment_plan="Keep 120 units.\n\nFINAL TRANSACTION PROPOSAL: **HOLD**")
+    before = copy.deepcopy(s)
+    hooks.review_run(s, _cfg(tmp_path))
+    assert jev.bodies == []
+    assert s == before
+    assert not tmp_path.joinpath(*SIDE).exists()
 
 
 # ----------------------------------------------------------------- (i) sidecar
