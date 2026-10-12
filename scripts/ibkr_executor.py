@@ -9,9 +9,17 @@ JSON, dated by an ``as_of`` key, that ``scripts/daily_paper_run.py --portfolio``
 accepts while it is fresh. Every run first removes the ``--out`` file of an
 earlier run, so a failed run leaves no book behind.
 
+Phase 3 adds ``resolve``: it turns tickers into broker contracts through the pure
+chain in ``scripts/ibkr_contracts.py`` (mapping table, allow-list, persisted
+identity, tradability, session) and reports one line per ticker. It connects
+only when a ticker survives the local checks. The clock is injected: tests pass
+``main(clock=...)``.
+
 Operating manual: ``scripts/IBKR_EXECUTION.md``.
 
     ibkr_executor.py account --out PATH [--log-file PATH] [--env-file PATH]
+    ibkr_executor.py resolve TICKER... [--contracts PATH] [--init | --rebaseline TICKER]
+                             [--out PATH] [--log-file PATH] [--env-file PATH]
 
 Settings come from the ``.env`` at the repository root (a fixed path, not the
 current directory) or from ``--env-file``. Only IBKR_HOST, IBKR_PORT,
@@ -23,7 +31,7 @@ Every run writes a UTF-8 log file; the console gets one summary or error line.
 Exit codes:
     0   ok, including "nothing to do"
     1   configuration error - nothing was done
-    2   precondition not met (reserved for later phases)
+    2   precondition not met - a ticker was rejected, or contracts.json is missing (resolve)
     3   gateway/session not reachable
     4   kill switch active or release missing (reserved for later phases)
     5   order rejected (reserved for later phases)
@@ -42,7 +50,7 @@ import logging
 import os
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -75,6 +83,7 @@ AS_OF_KEY = "as_of"
 DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
 _BROKER_PATH = Path(__file__).with_name("ibkr_broker.py")
+_CONTRACTS_PATH = Path(__file__).with_name("ibkr_contracts.py")
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 _LOGGER_NAME = "ibkr_executor"
@@ -114,6 +123,34 @@ def load_broker_module():
         sys.modules.pop("ibkr_broker", None)
         raise
     return module
+
+
+def load_contracts_module():
+    """The resolver module, loaded once under the name ``ibkr_contracts``.
+
+    Same rule as ``load_broker_module``: registered in ``sys.modules`` before it
+    runs, and removed again if it fails to load.
+    """
+    if "ibkr_contracts" in sys.modules:
+        return sys.modules["ibkr_contracts"]
+    spec = importlib.util.spec_from_file_location("ibkr_contracts", _CONTRACTS_PATH)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["ibkr_contracts"] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop("ibkr_contracts", None)
+        raise
+    return module
+
+
+def default_contracts_file(environ=None) -> Path:
+    """The default contracts file, outside every git tree (D-11)."""
+    environ = os.environ if environ is None else environ
+    base = environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base) / "TradingEngineX" / "ibkr" / "contracts.json"
+    return Path.home() / ".tradingenginex" / "ibkr" / "contracts.json"
 
 
 def default_log_file(environ=None) -> Path:
@@ -345,37 +382,181 @@ def run_account(args, settings, broker_mod, broker_factory, logger, progress=Non
     return EXIT_OK
 
 
+# --- the resolve command ------------------------------------------------------------
+
+
+def _result_line(result, buffer_minutes: int) -> str:
+    """The console line of one resolve result."""
+    state = result.state
+    if result.identity is None:
+        name = repr(result.ticker) if state == "not-mapped" else result.ticker
+        return f"resolve: {name} {state} - {result.detail}"
+    ident = result.identity
+    head = (
+        f"resolve: {result.ticker} {state} conId={ident.con_id} "
+        f"{ident.primary_exchange}/{ident.currency}/{ident.local_symbol}"
+    )
+    if state == "ok":
+        until = result.window.end - timedelta(minutes=buffer_minutes)
+        return f"{head} tradable until {until.isoformat()}"
+    when = result.next_open.isoformat() if result.next_open else "unknown"
+    return f"{head} next window {when}"
+
+
+def run_resolve(
+    args, contracts_mod, broker_mod, broker_factory, logger, progress, now_utc: datetime
+) -> int:
+    """Resolve the tickers; connect only when one of them needs the gateway.
+
+    Exit 2 when any ticker is rejected, after every ticker was checked and
+    reported. The contracts file is read before anything else and written only
+    after the gateway session is closed.
+    """
+    contracts_path = Path(args.contracts or default_contracts_file()).resolve()
+    if args.out is not None:
+        out = Path(args.out).resolve()
+        try:
+            _discard_previous(out, logger)
+        except OSError as exc:
+            return _fail(
+                logger,
+                EXIT_CONFIG,
+                f"ibkr-state=OUTPUT_INVALID previous file not removable: {out} "
+                f"({type(exc).__name__}: {exc})",
+                f"previous resolve output not removable: {out} ({type(exc).__name__})",
+            )
+
+    if args.init:
+        mode = contracts_mod.MODE_INIT
+        if contracts_path.exists():
+            return _fail(
+                logger,
+                EXIT_PRECONDITION,
+                f"ibkr-state=CONTRACTS_EXIST {contracts_path} exists; --init never overwrites",
+                f"{contracts_path} exists; check it, then use resolve --rebaseline TICKER",
+            )
+        contracts = None
+    else:
+        mode = contracts_mod.MODE_REBASELINE if args.rebaseline else contracts_mod.MODE_RUN
+        try:
+            contracts = contracts_mod.load_contracts_file(contracts_path)
+        except contracts_mod.ContractsFileMissing:
+            return _fail(
+                logger,
+                EXIT_PRECONDITION,
+                f"ibkr-state=CONTRACTS_MISSING {contracts_path}; create it with resolve --init",
+                f"{contracts_path} not found; create it with: resolve --init AAPL MSFT NVDA",
+            )
+        except contracts_mod.ContractsFileError as exc:
+            return _fail(
+                logger, EXIT_CONFIG, f"ibkr-state=CONTRACTS_INVALID {exc}", f"contracts file: {exc}"
+            )
+        if args.rebaseline and args.rebaseline not in contracts:
+            return _fail(
+                logger,
+                EXIT_PRECONDITION,
+                f"ibkr-state=REBASELINE_UNKNOWN {args.rebaseline!r} has no stored contract",
+                f"{args.rebaseline!r} has no stored contract to re-baseline",
+            )
+
+    anchor = broker_mod.PROBE_CON_ID if args.init else None
+    common = {
+        "contracts": contracts,
+        "now_utc": now_utc,
+        "logger": logger,
+        "mode": mode,
+        "rebaseline": args.rebaseline,
+        "anchor_con_id": anchor,
+    }
+    try:
+        if not contracts_mod.needs_broker(args.tickers):
+            outcome = contracts_mod.resolve_all(args.tickers, broker=None, **common)
+        else:
+            raw = read_settings(args.env_file)
+            host, port, _account = validate_settings(raw, broker_mod.EXPECTED_ACCOUNT)
+            adapter = broker_factory(host, port, logger)
+            progress["connecting"] = True
+            with adapter as broker:
+                progress["connected"] = True
+                health = broker.health()
+                if not health.ok:
+                    line = f'ibkr-state={health.state} code=- detail="{health.detail}"'
+                    logger.error(line)
+                    print(f"error: {line}", file=sys.stderr)
+                    return EXIT_GATEWAY
+                outcome = contracts_mod.resolve_all(args.tickers, broker=broker, **common)
+    except contracts_mod.AnchorMismatch as exc:
+        return _fail(
+            logger,
+            EXIT_PRECONDITION,
+            f"ibkr-state=ANCHOR_MISMATCH expected={exc.expected} seen={exc.seen}",
+            str(exc),
+        )
+
+    for result in outcome.results:
+        print(_result_line(result, contracts_mod.SESSION_BUFFER_MINUTES))
+    return EXIT_PRECONDITION if outcome.rejected else EXIT_OK
+
+
 # --- command line -------------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ibkr_executor.py",
-        description="IBKR paper executor for DUQ634065 (read-only in phase 2).",
+        description="IBKR paper executor for DUQ634065 (read-only in phases 2-3).",
     )
     sub = parser.add_subparsers(dest="command")
     account = sub.add_parser("account", help="read positions and cash into a portfolio JSON")
     account.add_argument("--out", type=Path, default=None, help="portfolio JSON (required)")
     account.add_argument("--log-file", type=Path, default=default_log_file())
     account.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
+
+    resolve = sub.add_parser("resolve", help="resolve tickers to contracts and check tradability")
+    resolve.add_argument("tickers", nargs="*", metavar="TICKER")
+    resolve.add_argument("--contracts", type=Path, default=None, help="contracts.json path")
+    mode = resolve.add_mutually_exclusive_group()
+    mode.add_argument("--init", action="store_true", help="create contracts.json (anchor AAPL)")
+    mode.add_argument("--rebaseline", metavar="TICKER", help="accept a changed contract")
+    resolve.add_argument("--out", type=Path, default=None, help="write the results as JSON")
+    resolve.add_argument("--log-file", type=Path, default=default_log_file())
+    resolve.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     return parser
 
 
-def main(argv: list[str] | None = None, *, broker_factory=None) -> int:
+def main(argv: list[str] | None = None, *, broker_factory=None, clock=None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         # argparse exits on a usage error and on --help; return a code instead.
         return EXIT_CONFIG if exc.code else EXIT_OK
+    clock = clock or (lambda: datetime.now(UTC))
 
     if not args.command:
         parser.print_usage(sys.stderr)
-        print("error: ibkr_executor.py needs a subcommand: account", file=sys.stderr)
+        print("error: ibkr_executor.py needs a subcommand: account, resolve", file=sys.stderr)
         return EXIT_CONFIG
-    if args.out is None:
+    if args.command == "account" and args.out is None:
         print("error: account needs --out PATH", file=sys.stderr)
         return EXIT_CONFIG
+    if args.command == "resolve":
+        if not args.tickers:
+            parser.print_usage(sys.stderr)
+            print("error: resolve needs at least one TICKER (no default list)", file=sys.stderr)
+            return EXIT_CONFIG
+        if args.rebaseline and args.rebaseline not in args.tickers:
+            print(
+                f"error: --rebaseline {args.rebaseline} must be one of the tickers", file=sys.stderr
+            )
+            return EXIT_CONFIG
+        if args.init and "AAPL" not in args.tickers:
+            print(
+                "error: --init needs AAPL among the tickers: it is the anchor checked "
+                "against PROBE_CON_ID",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
 
     try:
         logger = setup_logging(args.log_file)
@@ -383,7 +564,9 @@ def main(argv: list[str] | None = None, *, broker_factory=None) -> int:
         print(f"error: log file not writable: {args.log_file} ({exc})", file=sys.stderr)
         return EXIT_CONFIG
     try:
-        return _account(args, broker_factory, logger)
+        if args.command == "account":
+            return _account(args, broker_factory, logger)
+        return _resolve(args, broker_factory, logger, clock)
     finally:
         close_logging()
 
@@ -399,6 +582,48 @@ def _discard_previous(out: Path, logger: logging.Logger) -> None:
     except FileNotFoundError:
         return
     logger.info("previous portfolio removed: %s", out)
+
+
+def _guarded(logger, broker_mod, progress, run, output_what: str) -> int:
+    """Run ``run()`` and map every failure to its exit code; shared by both commands."""
+    try:
+        return run()
+    except MissingSettings as exc:
+        return _fail(logger, EXIT_NO_CREDENTIALS, f"ibkr-state=SETTINGS_MISSING {exc}", str(exc))
+    except ConfigError as exc:
+        return _fail(logger, EXIT_CONFIG, f"ibkr-state=CONFIG_INVALID {exc}", str(exc))
+    except broker_mod.AccountGuardViolation as exc:
+        line = f"ibkr-state=ACCOUNT_GUARD_VIOLATED accounts_seen={exc.accounts_seen}"
+        return _fail(logger, EXIT_ACCOUNT_GUARD, line, line)
+    except broker_mod.ReadOnlyViolation as exc:
+        # The barrier held: a write was refused before it reached the gateway.
+        # The most safety-relevant event of a read-only run gets its own state.
+        line = f'ibkr-state=WRITE_REFUSED code=- detail="{exc}"'
+        return _fail(logger, EXIT_GATEWAY, line, line)
+    except broker_mod.GatewayUnavailable as exc:
+        return _fail(logger, EXIT_GATEWAY, str(exc), str(exc))
+    except ImportError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=LIBRARY_MISSING {type(exc).__name__}: {exc}",
+            'the IBKR client library is missing - pip install -e ".[ibkr]"',
+        )
+    except OutputError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=OUTPUT_INVALID {exc}",
+            f"{output_what} not written: {exc}",
+        )
+    except Exception as exc:
+        # The traceback goes to the log file only; the console gets one line.
+        logger.exception("ibkr-state=UNEXPECTED %s: %s", type(exc).__name__, exc)
+        print(
+            f"error: unexpected {type(exc).__name__}: {exc} (details in {_log_path()})",
+            file=sys.stderr,
+        )
+        return EXIT_GATEWAY if progress["connecting"] else EXIT_CONFIG
 
 
 def _account(args, broker_factory, logger) -> int:
@@ -428,18 +653,19 @@ def _account(args, broker_factory, logger) -> int:
             return broker_mod.IbkrBroker(host, port, logger=logger)
 
     progress = {"connecting": False, "connected": False}
+    return _guarded(
+        logger,
+        broker_mod,
+        progress,
+        lambda: run_account(args, settings, broker_mod, broker_factory, logger, progress),
+        "portfolio JSON",
+    )
+
+
+def _resolve(args, broker_factory, logger, clock) -> int:
     try:
-        return run_account(args, settings, broker_mod, broker_factory, logger, progress)
-    except broker_mod.AccountGuardViolation as exc:
-        line = f"ibkr-state=ACCOUNT_GUARD_VIOLATED accounts_seen={exc.accounts_seen}"
-        return _fail(logger, EXIT_ACCOUNT_GUARD, line, line)
-    except broker_mod.ReadOnlyViolation as exc:
-        # The barrier held: a write was refused before it reached the gateway.
-        # The most safety-relevant event of a read-only run gets its own state.
-        line = f'ibkr-state=WRITE_REFUSED code=- detail="{exc}"'
-        return _fail(logger, EXIT_GATEWAY, line, line)
-    except broker_mod.GatewayUnavailable as exc:
-        return _fail(logger, EXIT_GATEWAY, str(exc), str(exc))
+        broker_mod = load_broker_module()
+        contracts_mod = load_contracts_module()
     except ImportError as exc:
         return _fail(
             logger,
@@ -447,21 +673,21 @@ def _account(args, broker_factory, logger) -> int:
             f"ibkr-state=LIBRARY_MISSING {type(exc).__name__}: {exc}",
             'the IBKR client library is missing - pip install -e ".[ibkr]"',
         )
-    except OutputError as exc:
-        return _fail(
-            logger,
-            EXIT_CONFIG,
-            f"ibkr-state=OUTPUT_INVALID {exc}",
-            f"portfolio JSON not written: {exc}",
-        )
-    except Exception as exc:
-        # The traceback goes to the log file only; the console gets one line.
-        logger.exception("ibkr-state=UNEXPECTED %s: %s", type(exc).__name__, exc)
-        print(
-            f"error: unexpected {type(exc).__name__}: {exc} (details in {_log_path()})",
-            file=sys.stderr,
-        )
-        return EXIT_GATEWAY if progress["connecting"] else EXIT_CONFIG
+    if broker_factory is None:
+
+        def broker_factory(host, port, logger):
+            return broker_mod.IbkrBroker(host, port, logger=logger)
+
+    progress = {"connecting": False, "connected": False}
+    return _guarded(
+        logger,
+        broker_mod,
+        progress,
+        lambda: run_resolve(
+            args, contracts_mod, broker_mod, broker_factory, logger, progress, clock()
+        ),
+        "resolve output",
+    )
 
 
 if __name__ == "__main__":
