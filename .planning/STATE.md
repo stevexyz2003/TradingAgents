@@ -3,14 +3,15 @@ gsd_state_version: 1.0
 milestone: M2
 milestone_name: IBKR Paper Execution
 status: ready_to_plan
-last_updated: "2026-10-12T17:51:17.449Z"
+last_updated: 2026-10-12T19:04:11.168Z
 last_activity: 2026-10-12 -- Phase 03 execution started
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 12
-  completed_plans: 6
+  completed_plans: 12
   percent: 13
+stopped_at: Phase 03 complete (6/6) — ready to discuss Phase 4
 ---
 
 # Project State — TradingEngineX (TradingAgents)
@@ -21,8 +22,8 @@ progress:
 
 ## Current Position
 
-Phase: 03 (symbol-aufl-sung-handelbarkeit-und-handelszeiten) — EXECUTING
-Plan: 1 of 6
+Phase: 4
+Plan: Not started
 **Nächster Schritt: M2 Phase 3 — Symbol-Auflösung, Handelbarkeit und Handelszeiten
 (`/gsd:discuss-phase 3` oder direkt `/gsd:plan-phase 3`).**
 Phase 2 ist abgeschlossen: 6/6 Pläne, Code-Review mit 9/9 behobenen Befunden
@@ -32,7 +33,7 @@ Wichtigster Recherchebefund bleibt: `readonly=True` sperrt in `ib_async` 2.1.0
 **keine** Orders, die Schreibsperre baut der Adapter selbst auf `ib.client`
 (Methoden- und Drahtebene).
 
-Last activity: 2026-10-12 - Completed quick task 261012-sg6: Jev decision model wired in as global skill
+Last activity: 2026-10-12
 
 Davor: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
 
