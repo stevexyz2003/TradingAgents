@@ -301,7 +301,11 @@ class IbkrBroker:
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
             self._owns_loop = True
-        handles = self._ib_factory()
+        try:
+            handles = self._ib_factory()
+        except BaseException:  # e.g. the ibkr extra is missing: close the loop anyway
+            self._disconnect()
+            raise
         ib = handles.ib
         self._handles, self._ib = handles, ib
         # Subscribed first: a 326 arrives before the handshake completes.
@@ -570,12 +574,25 @@ class IbkrBroker:
             self.port_changed = True
 
     def _disconnect(self) -> None:
+        """Close the session, let its socket close, and drop a loop this adapter owns.
+
+        ``transport.close()`` only schedules ``connection_lost`` with ``call_soon``;
+        one loop pass runs it before the loop closes, so the socket handle does
+        not stay half open until garbage collection. An own loop is closed and
+        unset as the current loop, so later code never finds a closed one there.
+        """
         ib, self._ib = self._ib, None
-        if ib is not None:
-            with contextlib.suppress(ValueError, AttributeError):
-                ib.errorEvent -= self._on_error
-            ib.disconnect()
-        if self._owns_loop and self._loop is not None:
-            self._loop.close()
-            self._loop = None
-            self._owns_loop = False
+        try:
+            if ib is not None:
+                with contextlib.suppress(ValueError, AttributeError):
+                    ib.errorEvent -= self._on_error
+                ib.disconnect()
+                loop = self._loop
+                if loop is not None and not loop.is_closed() and not loop.is_running():
+                    loop.run_until_complete(asyncio.sleep(0))
+        finally:
+            if self._owns_loop and self._loop is not None:
+                self._loop.close()
+                asyncio.set_event_loop(None)
+                self._loop = None
+                self._owns_loop = False

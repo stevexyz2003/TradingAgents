@@ -597,3 +597,96 @@ def test_context_manager_disconnects(loop):
         assert isinstance(adapter, broker.IbkrBroker)
     assert "disconnect" in fake.calls
     assert not loop.is_closed()
+
+
+# --- own event loop: closed, unset, and drained (WR-06) -------------------------------
+
+
+class _OwnLoop:
+    """A loop the adapter believes it created; runs on the session loop.
+
+    A real new loop opens a loopback socket pair on Windows, which the
+    suite-wide network block refuses inside a test.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.closed = False
+
+    def run_until_complete(self, awaitable):
+        assert not self.closed, "run on a closed loop"
+        return self._inner.run_until_complete(awaitable)
+
+    def call_soon(self, *args):
+        return self._inner.call_soon(*args)
+
+    def is_running(self):
+        return self._inner.is_running()
+
+    def is_closed(self):
+        return self.closed
+
+    def close(self):
+        self.closed = True
+
+
+class _LoopRecorder:
+    """Records the loops the adapter creates and sets, without touching the real policy."""
+
+    def __init__(self, monkeypatch, inner):
+        self.created = []
+        self.set_calls = []
+
+        def new_event_loop():
+            created = _OwnLoop(inner)
+            self.created.append(created)
+            return created
+
+        monkeypatch.setattr(broker.asyncio, "new_event_loop", new_event_loop)
+        monkeypatch.setattr(broker.asyncio, "set_event_loop", self.set_calls.append)
+
+
+class _ClosesLikeATransport(FakeIB):
+    """disconnect() schedules connection_lost via call_soon, as transport.close() does."""
+
+    adapter_loop = None
+
+    def disconnect(self):
+        super().disconnect()
+        self.adapter_loop.call_soon(self.calls.append, "connection_lost")
+
+
+def test_own_loop_is_closed_and_unset_after_the_session(monkeypatch, loop):
+    loops = _LoopRecorder(monkeypatch, loop)
+    fake = FakeIB()
+    adapter = broker.IbkrBroker("127.0.0.1", 7497, ib_factory=make_handles(fake), **FAST)
+    with adapter:
+        pass
+    (own,) = loops.created
+    assert own.is_closed()
+    assert loops.set_calls == [own, None]
+
+
+def test_own_loop_is_closed_when_the_library_is_missing(monkeypatch, loop):
+    loops = _LoopRecorder(monkeypatch, loop)
+
+    def no_library():
+        raise ModuleNotFoundError("No module named the IBKR client library")
+
+    adapter = broker.IbkrBroker("127.0.0.1", 7497, ib_factory=no_library, **FAST)
+    with pytest.raises(ModuleNotFoundError):
+        adapter.connect()
+    (own,) = loops.created
+    assert own.is_closed()
+    assert loops.set_calls == [own, None]
+
+
+def test_disconnect_lets_connection_lost_run_before_the_loop_closes(monkeypatch, loop):
+    loops = _LoopRecorder(monkeypatch, loop)
+    fake = _ClosesLikeATransport()
+    adapter = broker.IbkrBroker("127.0.0.1", 7497, ib_factory=make_handles(fake), **FAST)
+    adapter.connect()
+    fake.adapter_loop = loops.created[0]
+    adapter.__exit__(None, None, None)
+    assert fake.calls[-2:] == ["disconnect", "connection_lost"]
+    assert loops.created[0].is_closed()
