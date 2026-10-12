@@ -31,6 +31,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL":   "google_thinking_level",
     "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
     "TRADINGAGENTS_ANTHROPIC_EFFORT":        "anthropic_effort",
+    "TRADINGAGENTS_JEV_ENABLED":             "jev_enabled",
+    "TRADINGAGENTS_JEV_MIN_CONFIDENCE":      "jev_min_confidence",
+    "TRADINGAGENTS_JEV_TIMEOUT":             "jev_timeout",
 }
 
 
@@ -133,6 +136,11 @@ def build_default_config() -> dict:
         # Checkpoint/resume: when True, LangGraph saves state after each node
         # so a crashed run can resume from the last successful step.
         "checkpoint_enabled": False,
+        # Jev (TypeSafe) fallback/shadow classification, fork-only; opt-in, needs
+        # JEV_API_KEY in env. Timeout is per attempt (max 1 retry).
+        "jev_enabled": False,
+        "jev_min_confidence": 0.9,
+        "jev_timeout": 5.0,
         # Output language for analyst reports and final decision
         # Internal agent debate stays in English for reasoning quality
         "output_language": "English",
