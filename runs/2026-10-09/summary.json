@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "started_at": "2026-10-11T12:22:46.050904+00:00",
-  "finished_at": "2026-10-11T12:24:58.587229+00:00",
+  "started_at": "2026-10-12T19:57:09.452172+00:00",
+  "finished_at": "2026-10-12T20:00:01.313892+00:00",
   "trade_date": "2026-10-09",
   "provider": "anthropic",
   "deep_think_llm": "claude-sonnet-5-5",
   "quick_think_llm": "claude-haiku-5-5",
   "max_cost_per_run_usd": 1.5,
   "max_total_cost_usd": 1.5,
-  "commit": "07f4e67bf65d8751ad212c1c35da5e8b74e06115",
+  "commit": "6287dff091c2bb47ea1c1a505187ad4ebff35274",
   "status": "ok",
   "totals": {
     "tickers": 1,
-    "cost_usd": 0.180013,
-    "tokens_in": 123305,
-    "tokens_out": 32004,
+    "cost_usd": 0.21773,
+    "tokens_in": 139787,
+    "tokens_out": 42082,
     "ok": 1,
     "failed": 0,
     "budget_aborted": 0,
@@ -25,12 +25,16 @@
       "ticker": "AAPL",
       "status": "ok",
       "signal": "Hold",
-      "cost_usd": 0.18001300000000003,
-      "tokens_in": 123305,
-      "tokens_out": 32004,
-      "duration_s": 130.807182942,
+      "cost_usd": 0.21773,
+      "tokens_in": 139787,
+      "tokens_out": 42082,
+      "duration_s": 170.19065501999998,
       "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AAPL/complete_report.md",
-      "error": null
+      "error": null,
+      "jev": {
+        "error": "UnicodeEncodeError: 'latin-1' codec can't encode character '\\ufeff' in position 7: ordinal not in range(256)"
+      },
+      "rating_source": "engine"
     }
   ]
 }
