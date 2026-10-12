@@ -1,7 +1,8 @@
 """The IBKR client library stays an optional, exactly pinned extra, and no credential leaks.
 
-These guards read pyproject.toml, the git index and the CI workflow files only.
-They never read the real .env and never reach the IBKR gateway.
+These guards read pyproject.toml, the git index, the CI workflow files, the IBKR
+scripts and their operating manual only. They never read the real .env and never
+reach the IBKR gateway.
 """
 
 import ast
@@ -98,3 +99,50 @@ def test_adapter_hard_codes_no_order_id():
     source = ADAPTER.read_text(encoding="utf-8")
     assert "orderId=" not in source
     assert ".orderId =" not in source
+
+
+# --- the handbook stays in step with the code -----------------------------------------
+
+HANDBOOK = ROOT / "scripts" / "IBKR_EXECUTION.md"
+EXECUTOR = ROOT / "scripts" / "ibkr_executor.py"
+
+
+def _handbook_text() -> str:
+    return HANDBOOK.read_text(encoding="utf-8")
+
+
+def _load_executor():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ibkr_executor", EXECUTOR)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.unit
+def test_client_id_is_documented_in_the_handbook():
+    from tests import ibkr_fakes
+
+    broker = ibkr_fakes.load_broker()
+    assert str(broker.EXECUTOR_CLIENT_ID) in _handbook_text()
+    assert broker.EXECUTOR_CLIENT_ID > 9999
+
+
+@pytest.mark.unit
+def test_handbook_does_not_name_the_client_library():
+    assert CLIENT_LIBRARY not in _handbook_text()
+
+
+@pytest.mark.unit
+def test_handbook_exit_table_matches_executor():
+    executor = _load_executor()
+    text = _handbook_text()
+    codes = {
+        name: getattr(executor, name)
+        for name in dir(executor)
+        if name.startswith("EXIT_") and isinstance(getattr(executor, name), int)
+    }
+    assert len(codes) == 10
+    for name, value in codes.items():
+        assert re.search(rf"^\| {value} \| `{name}` \|", text, re.M), f"{name}={value} not in table"
