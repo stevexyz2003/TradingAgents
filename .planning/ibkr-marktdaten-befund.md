@@ -1,15 +1,17 @@
 # IBKR-Marktdaten- und Währungsbefund (Messung, M2 Vorarbeit)
 
 **Gemessen:** 2026-10-11, Sonntagabend (**Markt geschlossen** — das ist für
-Befund 4 wesentlich) · Gateway **10.50.1** · Konto `DUQ634065` · `ib_async` 2.1.0
+Befund 1 wesentlich, siehe die Korrektur dort) · **nachgemessen:** 2026-10-12 bei
+offener US-Kassasitzung · Gateway **10.50.1** · Konto `DUQ634065` · `ib_async` 2.1.0
 
 Ergänzt [ibkr-konto-befund.md](./ibkr-konto-befund.md). Beantwortet die Frage,
 ob die Mengenrechnung aus Phase 4 überhaupt rechnen kann: Woher kommt ein Preis,
 und wie verträgt sich ein **EUR**-Konto mit **USD**-Aktien?
 
-## 1. Aktienkurse: verfügbar, aber nur verzögert und ohne Bid/Ask
+## 1. Aktienkurse: verfügbar, aber nur verzögert
 
-Mit `reqMarketDataType(3)` (delayed, kein Abo nötig):
+Mit `reqMarketDataType(3)` (delayed, kein Abo nötig). Erste Messung
+**2026-10-11, Sonntagabend, Markt geschlossen**:
 
 ```text
 AAPL  last=336.08 close=340.42 bid=-1 ask=-1 marketDataType=3
@@ -18,13 +20,36 @@ NVDA  last=229.33 close=230.48 bid=-1 ask=-1 marketDataType=3
 ```
 
 IBKR meldet dazu **10167** („Sie haben die angeforderten Marktdaten nicht
-abonniert. Es werden verzögerte Marktdaten angezeigt"). Nutzbar sind `last` und
-`close`; **`bid`/`ask` sind `-1`**, also nicht vorhanden.
+abonniert. Es werden verzögerte Marktdaten angezeigt").
 
-**Folge für Phase 4:** Eine Limit-Order darf ihren Preis nicht aus dem Spread
-ableiten — den gibt es hier nicht. Als Referenz bleibt `last` bzw. `close`, und
-der ist verzögert. Wer einen Limit-Abstand in Prozent rechnet, rechnet ihn gegen
-einen veralteten Kurs; das gehört in die Begründung des Limit-Verfahrens.
+### Korrigiert 2026-10-12: Bid/Ask sind vorhanden — das `-1` war der geschlossene Markt
+
+Dieselbe Abfrage bei **offener US-Kassasitzung** (15:26 UTC, NY 11:26 EDT,
+Montag), `clientId=20099` neben dem Executor, `readonly=True`, Paper-Guard
+(`managedAccounts == ['DUQ634065']`) vorher geprüft:
+
+```text
+Symbol    last     close      bid      ask   mdType
+AAPL    340.81    336.64   340.80   340.85        3
+MSFT    540.54    535.07   540.52   540.56        3
+NVDA    225.90    229.28   225.90   225.91        3
+SPY     778.31    778.57   778.30   778.33        3
+TSLA    379.83    382.70   379.79   379.84        3
+```
+
+Bid und Ask kommen also auch ohne Abo, mit Spreads von 0,01 bis 0,05 $. Die
+ursprüngliche Aussage „`bid`/`ask` sind nicht vorhanden" galt allein
+für den geschlossenen Markt — wie bei Befund 4 lag die Ursache am Sonntagstermin
+der Messung und nicht an der Berechtigung, nur dass sie hier wirklich daran lag.
+
+**Folge für Phase 4** (ersetzt die ursprüngliche): Ein Spread ist vorhanden, ein
+Limit-Preis darf ihn als Referenz nehmen. Die Einschränkung ist nicht das Fehlen,
+sondern das **Alter** der Quotes. Wie groß die Verzögerung ist, ist hier *nicht*
+gemessen: `ticker.time` gibt den Anfragezeitpunkt zurück, nicht den Zeitpunkt des
+Quotes. Wer einen Limit-Abstand rechnet, rechnet ihn also gegen einen veralteten
+Kurs — das gehört weiter in die Begründung des Limit-Verfahrens, jetzt aber als
+Alters- und nicht als Verfügbarkeitsproblem. Die Instanz, die den Preis vor der
+Order tatsächlich prüft, bleibt das `whatIf`-Preview aus Befund 4.
 
 ## 2. Wechselkurs EUR/USD: über Marktdaten **nicht** verfügbar
 
@@ -123,7 +148,9 @@ bekommen ist (Befund 2). Kein Marktdaten-Abo nötig.
 
 1. Entscheiden, ob verzögerte Kurse für das Limit-Verfahren genügen oder ob ein
    Marktdaten-Abo nötig wird — Letzteres ist eine Kostenentscheidung des
-   Operators, keine technische.
+   Operators, keine technische. Seit der Korrektur zu Befund 1 geht es dabei nur
+   noch um das **Alter** der Quotes, nicht mehr um fehlendes Bid/Ask. Dafür fehlt
+   die Messung, wie alt sie wirklich sind.
 3. Nach der ersten USD-Position prüfen, ob `ExchangeRate` dann im Kontobericht
    erscheint; damit wäre die Umrechnung für Auswertungen (nicht für die
    Order-Erzeugung) verfügbar.
