@@ -381,3 +381,189 @@ def test_old_format_is_rejected_by_ib_async_but_parsed_here(ny):
     window = c.parse_liquid_hours(OLD_FORMAT, ZONE).windows[0]
     assert (window.start.hour, window.start.minute) == (7, 0)
     assert (window.end.hour, window.end.minute) == (18, 30)
+
+
+# --- persistence (D-11, D-12, D-14, D-18, D-22) ------------------------------------------
+
+import json  # noqa: E402
+import os  # noqa: E402
+
+_AT = "2026-10-12T17:00:00+00:00"
+
+
+def _stored(con_id=265598, symbol="AAPL"):
+    return c.StoredContract(c.Identity(con_id, "NASDAQ", "USD", symbol), _AT)
+
+
+def _event(event="init", ticker="AAPL", old=None, con_id=265598):
+    return c.HistoryEvent(
+        event, ticker, old, c.Identity(con_id, "NASDAQ", "USD", ticker), "test reason", _AT
+    )
+
+
+def _write_raw(path, data):
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _good_entry():
+    return {
+        "conId": 265598,
+        "primaryExchange": "NASDAQ",
+        "currency": "USD",
+        "localSymbol": "AAPL",
+        "learned_at": _AT,
+    }
+
+
+def test_persist_roundtrip_and_exact_schema(tmp_path):
+    p = tmp_path / "contracts.json"
+    c.commit_contracts(p, {"AAPL": _stored()}, [_event()])
+    assert c.load_contracts_file(p) == {"AAPL": _stored()}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert set(data) == {"schema_version", "contracts"}
+    assert data["schema_version"] == 1
+    assert set(data["contracts"]["AAPL"]) == {
+        "conId",
+        "primaryExchange",
+        "currency",
+        "localSymbol",
+        "learned_at",
+    }
+
+
+def test_contracts_file_missing_has_path(tmp_path):
+    p = tmp_path / "nope.json"
+    with pytest.raises(c.ContractsFileMissing) as ei:
+        c.load_contracts_file(p)
+    assert ei.value.path == p
+    assert "resolve --init" in str(ei.value)
+
+
+def test_contracts_file_not_utf8(tmp_path):
+    p = tmp_path / "contracts.json"
+    p.write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(c.ContractsFileError) as ei:
+        c.load_contracts_file(p)
+    assert str(p) in str(ei.value)
+
+
+def test_contracts_file_not_json(tmp_path):
+    p = tmp_path / "contracts.json"
+    p.write_text("{nope", encoding="utf-8")
+    with pytest.raises(c.ContractsFileError):
+        c.load_contracts_file(p)
+
+
+def _bad_payloads():
+    good = _good_entry()
+    yield "toplevel-list", []
+    yield "no-version", {"contracts": {}}
+    yield "version-2", {"schema_version": 2, "contracts": {}}
+    yield "version-bool", {"schema_version": True, "contracts": {}}
+    yield "contracts-list", {"schema_version": 1, "contracts": []}
+    yield "extra-toplevel", {"schema_version": 1, "contracts": {}, "x": 1}
+    yield "conid-str", {"schema_version": 1, "contracts": {"AAPL": {**good, "conId": "1"}}}
+    yield "conid-zero", {"schema_version": 1, "contracts": {"AAPL": {**good, "conId": 0}}}
+    yield "conid-neg", {"schema_version": 1, "contracts": {"AAPL": {**good, "conId": -1}}}
+    yield "conid-bool", {"schema_version": 1, "contracts": {"AAPL": {**good, "conId": True}}}
+    yield (
+        "empty-primary",
+        {"schema_version": 1, "contracts": {"AAPL": {**good, "primaryExchange": ""}}},
+    )
+    missing = dict(good)
+    del missing["currency"]
+    yield "missing-field", {"schema_version": 1, "contracts": {"AAPL": missing}}
+    yield (
+        "extra-field",
+        {"schema_version": 1, "contracts": {"AAPL": {**good, "liquidHours": "x"}}},
+    )
+    yield "entry-not-object", {"schema_version": 1, "contracts": {"AAPL": 5}}
+
+
+@pytest.mark.parametrize("name,payload", list(_bad_payloads()))
+def test_contracts_file_schema_violations(tmp_path, name, payload):
+    p = tmp_path / "contracts.json"
+    _write_raw(p, payload)
+    with pytest.raises(c.ContractsFileError) as ei:
+        c.load_contracts_file(p)
+    assert str(p) in str(ei.value)
+
+
+def test_history_lines_after_two_commits(tmp_path):
+    p = tmp_path / "contracts.json"
+    c.commit_contracts(p, {"AAPL": _stored()}, [_event()])
+    old = c.Identity(265598, "NASDAQ", "USD", "AAPL")
+    c.commit_contracts(p, {"AAPL": _stored(1)}, [_event("rebaseline", old=old, con_id=1)])
+    h = c.contracts_history_path(p)
+    assert h == tmp_path / "contracts-history.jsonl"
+    raw = h.read_bytes()
+    assert raw.endswith(b"\n")
+    lines = raw.decode("utf-8").splitlines()
+    assert len(lines) == 2
+    rows = [json.loads(x) for x in lines]
+    for row in rows:
+        assert {"at", "event", "ticker", "old", "new", "reason"} <= set(row)
+    assert rows[0]["old"] is None
+    assert set(rows[1]["old"]) == {"conId", "primaryExchange", "currency", "localSymbol"}
+    assert rows[1]["event"] == "rebaseline"
+
+
+def test_history_row_written_before_replace(tmp_path, monkeypatch):
+    p = tmp_path / "contracts.json"
+    seen = {}
+    real = os.replace
+
+    def spy(src, dst):
+        seen["history"] = c.contracts_history_path(p).read_text(encoding="utf-8")
+        return real(src, dst)
+
+    monkeypatch.setattr(c.os, "replace", spy)
+    c.commit_contracts(p, {"AAPL": _stored()}, [_event()])
+    assert '"event": "init"' in seen["history"]
+
+
+def test_atomic_replace_failure_keeps_old_file_and_logs_aborted(tmp_path, monkeypatch):
+    p = tmp_path / "contracts.json"
+    c.commit_contracts(p, {"AAPL": _stored()}, [_event()])
+    before = p.read_bytes()
+
+    def boom(src, dst):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(c.os, "replace", boom)
+    with pytest.raises(PermissionError):
+        c.commit_contracts(p, {"AAPL": _stored(2)}, [_event("learn", con_id=2)])
+    assert p.read_bytes() == before
+    assert not list(tmp_path.glob("*.tmp"))
+    text = c.contracts_history_path(p).read_text(encoding="utf-8")
+    rows = [json.loads(x) for x in text.splitlines()]
+    assert [r["event"] for r in rows] == ["init", "learn", "learn-aborted"]
+    assert "PermissionError" in rows[-1]["reason"]
+
+
+def test_write_json_atomic_check_failure_leaves_target(tmp_path):
+    p = tmp_path / "out.json"
+    p.write_text("old", encoding="utf-8")
+
+    def bad(temp):
+        raise ValueError("no")
+
+    with pytest.raises(ValueError):
+        c.write_json_atomic(p, {"a": 1}, check=bad)
+    assert p.read_text(encoding="utf-8") == "old"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_commit_without_events_writes_no_history_and_makes_dir(tmp_path):
+    p = tmp_path / "sub" / "contracts.json"
+    c.commit_contracts(p, {}, [])
+    assert p.exists()
+    assert not c.contracts_history_path(p).exists()
+
+
+def test_persisted_files_carry_no_session_values(tmp_path):
+    p = tmp_path / "contracts.json"
+    c.commit_contracts(p, {"AAPL": _stored()}, [_event()])
+    text = p.read_text(encoding="utf-8") + c.contracts_history_path(p).read_text(encoding="utf-8")
+    assert "liquid" not in text.lower()
+    assert "tradinghours" not in text.lower()
