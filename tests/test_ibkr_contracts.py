@@ -48,7 +48,9 @@ def test_table_has_exactly_the_decided_keys():
 
 @pytest.mark.parametrize("ticker", ["AAPL", "MSFT", "NVDA"])
 def test_table_stock_entries(ticker):
-    assert c.CONTRACT_TABLE[ticker] == c.ContractSpec(ticker, "STK", "SMART", "USD", "NASDAQ")
+    assert c.CONTRACT_TABLE[ticker] == c.ContractSpec(
+        ticker, "STK", "SMART", "USD", "NASDAQ", block_qty=1
+    )
 
 
 def test_table_non_stock_entries_carry_their_real_sec_type():
@@ -75,7 +77,14 @@ def test_table_is_read_only():
 def test_table_has_no_con_id_or_local_symbol_field():
     names = {f.name for f in dataclasses.fields(c.ContractSpec)}
     assert "con_id" not in names and "local_symbol" not in names
-    assert names == {"symbol", "sec_type", "exchange", "currency", "primary_exchange"}
+    assert names == {
+        "symbol",
+        "sec_type",
+        "exchange",
+        "currency",
+        "primary_exchange",
+        "block_qty",
+    }
 
 
 def test_table_covers_the_paper_run_ticker_default():

@@ -77,14 +77,17 @@ class ContractSpec:
     exchange: str
     currency: str
     primary_exchange: str
+    block_qty: int = 0
 
 
 def _stock(ticker: str) -> ContractSpec:
-    return ContractSpec(ticker, "STK", SMART, "USD", "NASDAQ")
+    return ContractSpec(ticker, "STK", SMART, "USD", "NASDAQ", block_qty=1)
 
 
 #: Source: .planning/ibkr-konto-befund.md section 4. Lookup is exact and
 #: case-sensitive; there are no aliases (D-03, D-05).
+#: block_qty is the operator's fixed share count per block (D-09, REQ-IBKR-22); it is
+#: never derived from a price (REQ-IBKR-68); changing it is a commit.
 CONTRACT_TABLE: Mapping[str, ContractSpec] = MappingProxyType(
     {
         "AAPL": _stock("AAPL"),
@@ -95,6 +98,18 @@ CONTRACT_TABLE: Mapping[str, ContractSpec] = MappingProxyType(
         "XAUUSD+": ContractSpec("XAUUSD", "CMDTY", SMART, "USD", ""),
     }
 )
+
+
+def table_problems(table: Mapping[str, ContractSpec] = CONTRACT_TABLE) -> tuple[str, ...]:
+    """Findings for tradable entries without a positive integer ``block_qty`` (T-04-11)."""
+    problems: list[str] = []
+    for key, spec in table.items():
+        if spec.sec_type not in ALLOWED_SEC_TYPES:
+            continue
+        qty = spec.block_qty
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
+            problems.append(f"{key!r}: block_qty must be a positive integer, got {qty!r}")
+    return tuple(problems)
 
 
 @dataclass(frozen=True)
@@ -213,6 +228,7 @@ class SessionVerdict:
     window: SessionWindow | None
     next_open: datetime | None
     detail: str
+    session_day: bool | None = None
 
 
 _STAMP = "%Y%m%d:%H%M"
@@ -291,29 +307,27 @@ def evaluate_session(
     usable = [w for w in parsed.windows if w.start + buffer <= w.end - buffer]
     for window in usable:
         if window.start + buffer <= now_utc <= window.end - buffer:
-            return SessionVerdict(OK, window, None, "inside a liquid window")
+            return SessionVerdict(OK, window, None, "inside a liquid window", True)
 
     upcoming = [w.start + buffer for w in usable if w.start + buffer > now_utc]
     next_open = min(upcoming) if upcoming else None
 
     zone = ZoneInfo(time_zone_id)
     today = now_utc.astimezone(zone).date()
-    covered = today in parsed.closed_dates or any(
-        w.start.date() <= today <= w.end.date() for w in parsed.windows
-    )
+    has_window_today = any(w.start.date() <= today <= w.end.date() for w in parsed.windows)
+    covered = today in parsed.closed_dates or has_window_today
     if not covered:
         return SessionVerdict(
             SESSION_UNKNOWN, None, next_open, f"no liquid-hours entry for {today.isoformat()}"
         )
-    if today in parsed.closed_dates and not any(
-        w.start.date() <= today <= w.end.date() for w in parsed.windows
-    ):
+    session_day = has_window_today
+    if today in parsed.closed_dates and not has_window_today:
         detail = "closed today"
     elif any(w.start <= now_utc <= w.end for w in parsed.windows):
         detail = "inside the opening or closing buffer"
     else:
         detail = "outside every liquid window"
-    return SessionVerdict(CLOSED, None, next_open, detail)
+    return SessionVerdict(CLOSED, None, next_open, detail, session_day)
 
 
 # --- persistence (D-11, D-12, D-14, D-18, D-22) ------------------------------------------
@@ -574,6 +588,7 @@ class ResolveResult:
     long_name: str = ""
     window: SessionWindow | None = None
     next_open: datetime | None = None
+    session_day: bool | None = None
 
     @property
     def rejected(self) -> bool:
@@ -841,6 +856,7 @@ def resolve_all(
                 long_name=detail_info.long_name,
                 window=session.window,
                 next_open=session.next_open,
+                session_day=session.session_day,
             )
         )
 
