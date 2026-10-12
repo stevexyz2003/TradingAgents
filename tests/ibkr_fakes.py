@@ -149,7 +149,8 @@ class FakeIB:
         self.accounts = list(accounts)
         self.refuse = refuse
         self.emit_on_connect = list(emit_on_connect)
-        #: call name ("positions", "account_summary", "probe") -> error events emitted
+        #: call name ("positions", "account_summary", "probe", "qualify",
+        #: "contract_details") -> error events emitted
         #: while that request is in flight; the answer still comes back well formed.
         self.emit_during = dict(emit_during or {})
         self._positions = [] if positions is None else positions

@@ -110,6 +110,7 @@ PROBE_FAILED = "PROBE_FAILED"
 SNAPSHOT_INCOMPLETE = "SNAPSHOT_INCOMPLETE"
 HEALTHY = "HEALTHY"
 UNKNOWN = "UNKNOWN"
+REQUEST_FAILED = "REQUEST_FAILED"
 
 
 def state_for_code(code: int) -> str:
@@ -341,6 +342,8 @@ class IbkrBroker:
         self.server_link_broken = False
         self.port_changed = False
         self._seen_codes: list[int] = []
+        #: Codes of errors tied to a request id (``reqId >= 0``), in order.
+        self._request_errors: list[int] = []
         #: Every LINK_CODES event of the session, in order; read windows compare its length.
         self._link_codes: list[int] = []
 
@@ -602,6 +605,12 @@ class IbkrBroker:
             return ()
         slot = slots[0]
         found = slot if isinstance(slot, list) else [slot]
+        if any(c is None for c in found):
+            raise GatewayUnavailable(
+                REQUEST_FAILED,
+                None,
+                "qualifyContracts returned an incomplete candidate list",
+            )
         return tuple(_info_from_contract(c) for c in found if c is not None)
 
     def contract_details(self, con_id: int, exchange: str) -> tuple[ContractInfo, ...]:
@@ -626,6 +635,7 @@ class IbkrBroker:
         if opened is not None:
             raise GatewayUnavailable(opened[0], None, f"{opened[1]}; no {name} sent")
         mark = len(self._link_codes)
+        code_mark = len(self._request_errors)
         result = self._request(name, make_awaitable)
         event = self._link_event_since(mark)
         if event is not None:
@@ -633,7 +643,26 @@ class IbkrBroker:
             raise GatewayUnavailable(
                 state, code, f"link event {code} while {name} was in flight; answer discarded"
             )
+        request_error = self._request_error_since(code_mark)
+        if request_error is not None:
+            state, code = request_error
+            raise GatewayUnavailable(
+                REQUEST_FAILED,
+                code,
+                f"{name} failed with gateway code {code} ({state}); answer discarded",
+            )
         return result
+
+    def _request_error_since(self, mark: int) -> tuple[str, int] | None:
+        """First request-scoped error after ``mark``, except code 200.
+
+        Only errors carrying a request id count: system and farm notices
+        (``reqId == -1``, e.g. 2107) are session state, not an answer to this read.
+        """
+        for code in self._request_errors[mark:]:
+            if code not in INFO_CODES and code != 200:
+                return state_for_code(code), code
+        return None
 
     def _request(self, name: str, make_awaitable):
         """One read request under the request timeout; a hang becomes a named state."""
@@ -687,6 +716,8 @@ class IbkrBroker:
         level = logging.INFO if errorCode in INFO_CODES else logging.WARNING
         self._log.log(level, 'ibkr-state=%s code=%s detail="%s"', state, errorCode, errorString)
         self._seen_codes.append(errorCode)
+        if isinstance(reqId, int) and reqId >= 0:
+            self._request_errors.append(errorCode)
         if errorCode in LINK_CODES:
             self._link_codes.append(errorCode)
         if errorCode == 1100:

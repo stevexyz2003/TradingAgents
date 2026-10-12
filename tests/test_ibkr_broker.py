@@ -698,6 +698,18 @@ def test_search_contract_many_matches(loop):
     assert {r.con_id for r in result} == {1000 + i for i in range(21)}
 
 
+class _QualifyWithNone(FakeIB):
+    async def qualifyContractsAsync(self, *contracts, returnAll=False):
+        self.calls.append("qualify")
+        return [[stk_contract("AAPL", 265598), None]]
+
+
+def test_search_contract_refuses_incomplete_candidate_list(loop):
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _connected(_QualifyWithNone(), loop).search_contract(Spec())
+    assert info.value.state == "REQUEST_FAILED"
+
+
 def test_search_contract_builds_a_fresh_contract_per_call(loop):
     fake = FakeIB(qualify={"AAPL": [stk_contract("AAPL", 265598)]})
     adapter = _connected(fake, loop)
@@ -730,6 +742,34 @@ def test_contract_details_maps_session_fields(loop):
 
 def test_contract_details_unknown_con_id(loop):
     assert _connected(FakeIB(), loop).contract_details(1, "SMART") == ()
+
+
+def test_resolution_request_error_code_is_not_reported_as_empty_result(loop):
+    detail = contract_detail(stk_contract("AAPL", 265598), liquid_hours="20261012:0930-1600")
+    fake = FakeIB(
+        details={265598: [detail]},
+        emit_during={"contract_details": [(17, 162, "pacing violation", None)]},
+    )
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _connected(fake, loop).contract_details(265598, "SMART")
+    assert (info.value.state, info.value.code) == ("REQUEST_FAILED", 162)
+
+
+@pytest.mark.parametrize("code", [2103, 2105, 2107, 2108])
+def test_system_notice_without_request_id_does_not_fail_the_read(loop, code):
+    # Farm notices arrive with reqId -1 at any time; they are not this read's answer.
+    detail = contract_detail(stk_contract("AAPL", 265598), liquid_hours="20261012:0930-1600")
+    fake = FakeIB(
+        details={265598: [detail]},
+        emit_during={"contract_details": [(-1, code, "farm notice", None)]},
+    )
+    result = _connected(fake, loop).contract_details(265598, "SMART")
+    assert [r.con_id for r in result] == [265598]
+
+
+def test_contract_not_found_code_200_stays_an_empty_result(loop):
+    fake = FakeIB(emit_during={"contract_details": [(17, 200, "No security definition", None)]})
+    assert _connected(fake, loop).contract_details(265598, "SMART") == ()
 
 
 @pytest.mark.parametrize(
