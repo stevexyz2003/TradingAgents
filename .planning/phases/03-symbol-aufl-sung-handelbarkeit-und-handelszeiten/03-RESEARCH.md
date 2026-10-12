@@ -354,16 +354,19 @@ Probe-Skripte (nur lesend, `clientId=20098`, Paper-Guard vorher): `…\scratchpa
 | A4 | Halbtag-Fixture `20261127:0930-20261127:1300` entspricht dem realen Server-Format | Code Examples | Parser-Test belegt nur Struktur; Format ist identisch zum gemessenen Neu-Format, Risiko gering |
 | A5 | Samstag-`liquidHours` enthält einen Eintrag für „heute" | Pitfall 7 | `session-unknown` statt `closed` am Wochenende (Exit 2 statt 0) — **vor Planabschluss messen** |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Wie sieht `liquidHours` am Samstag aus (Eintrag für „heute" vorhanden?)**
    - Bekannt: Sonntag-Messung zeigt `20261011:CLOSED` als erstes Segment; Horizont beginnt am Messtag.
    - Unklar: Samstag, Feiertag (z. B. Thanksgiving) — fehlt der Tag oder steht `CLOSED`?
    - Empfehlung: Operator/Agent führt am Samstag eine Lese-Probe aus und sichert den Rohstring als Test-Fixture; Regel „kein Eintrag für heute = `session-unknown`" bleibt dann streng. Bis dahin Fixture aus Befund verwenden und den Fall als UAT-Punkt führen. Alternative (nur mit Operator-Freigabe): „fehlt heute, aber ein späterer Tag ist belegt, und `now` liegt in keinem Fenster" => `closed`. Das lockert D-24; deshalb nicht ohne Rückfrage.
+   - RESOLVED: bleibt UAT-Punkt, D-24 strikt. Orchestrator-Entscheidung: keine Lockerung; „kein Eintrag für heute“ ergibt `session-unknown` (03-01 Task 2). Der Samstagslauf (erwartet `closed` + nächstes Fenster, Exit 0) ist Manual-Only-Verifikation in `03-VALIDATION.md`; A5 bleibt bis dahin ungemessen. Zeigt der Samstagslauf `session-unknown`, ist das ein Befund für den Operator, keine stille Codeänderung.
 2. **Soll `resolve` ohne Gateway-Verbindung für `not-mapped`/`not-allowed` laufen?**
    - Bekannt: beide Abweisungen brauchen kein IBKR (SC2 „vor jeder Anfrage").
    - Unklar: Executor verbindet heute immer zuerst. Empfehlung: erst alle Ticker lokal klassifizieren; Verbindung nur, wenn mindestens ein Ticker `ok`-Kandidat ist. Vorteil: SC2 in CI/Offline ohne Gateway testbar und ein Tippfehler braucht kein Gateway. Planner entscheidet (Discretion).
+   - RESOLVED: Connect-on-demand. `needs_broker(tickers)` in `ibkr_contracts.py` (03-03); `run_resolve` verbindet nur, wenn mindestens ein Ticker gemappt und in der Allow-List ist; sonst weder Settings noch Verbindung (03-05 Task 1, SC2-Test ohne `.env` und mit 0 Factory-Aufrufen).
 3. **Zeitzone der Eingabe:** `now` ist UTC-aware (Executor: `datetime.now(UTC)`); `--now` als Test-/Operator-Override ist nicht beschlossen und sollte **nicht** als CLI-Option eingeführt werden (ein Override der Uhr wäre ein Weg um die Sitzungsprüfung). Test-Injection nur über die Python-Funktion.
+   - RESOLVED: kein `--now`-Schalter. Einzige Uhr-Stelle ist der Default von `clock` in `main` (`datetime.now(UTC)`, 03-05 Task 1); `ibkr_contracts.py` bekommt den Zeitpunkt injiziert, abgesichert durch den Guard `test_resolver_takes_the_clock_as_a_parameter` (03-04 Task 1).
 
 ## Environment Availability
 

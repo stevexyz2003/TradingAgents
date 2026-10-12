@@ -155,7 +155,26 @@ Plans:
 - Keine Marktdaten über den delayed-Default hinaus; kein Limitpreis, keine Preisabfrage im Order-Pfad.
 - Keine Erweiterung der Allow-List über `STK` hinaus — die breitere Liste ist dokumentierter Erweiterungspfad.
 
-**Plans:** TBD
+**Plans:** 6 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — Bibliotheksfreies Modul `ibkr_contracts.py`: Tabelle, Allow-List, Zustände, Handelbarkeit, Identität, Sitzungs-Parser (Wave 1)
+- [ ] 03-02-PLAN.md — Adapter: `search_contract`/`contract_details`, `reqMarketDataType(3)` nach Guard, 10167 + Delayed-Codes auf INFO, Fakes (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 03-03-PLAN.md — Persistenz `contracts.json` + History, `resolve_all` (Lernen, Gegenprobe, Drift, init-Anker, rebaseline) (Wave 2)
+- [ ] 03-04-PLAN.md — Guards D-07/SC7/Uhr-Injektion, REQ-IBKR-31 nach D-19 umformuliert (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 03-05-PLAN.md — Subkommando `ibkr_executor.py resolve` mit Exit 2, Connect-on-demand, `--init`/`--rebaseline`/`--out` (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 03-06-PLAN.md — Handbuch `resolve`/neuer Ticker, echter Gateway-Lauf, Operator-Abnahme (Wave 4)
 
 ---
 
