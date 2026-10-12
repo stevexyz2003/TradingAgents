@@ -23,7 +23,7 @@
 
 ## Lesehilfe
 
-Jede Anforderung ist **ein prüfbarer Satz**. Wo der Satz allein nicht sagt, wie man ihn testet, folgt eine Zeile „**Nachweis:**". IDs sind stabil und werden nicht neu vergeben, auch wenn eine Anforderung später entfällt. Die Zuordnung zu Phasen steht in [ROADMAP.md](./ROADMAP.md), inklusive einer Coverage-Tabelle über alle 60 IDs.
+Jede Anforderung ist **ein prüfbarer Satz**. Wo der Satz allein nicht sagt, wie man ihn testet, folgt eine Zeile „**Nachweis:**". IDs sind stabil und werden nicht neu vergeben, auch wenn eine Anforderung später entfällt. Die Zuordnung zu Phasen steht in [ROADMAP.md](./ROADMAP.md), inklusive einer Coverage-Tabelle über alle 68 IDs.
 
 ---
 
@@ -243,6 +243,33 @@ Die vier Pflicht-Leitplanken sind markiert: `[L1]` Positionsgröße · `[L2]` Ki
 > Begründung: IBKR legt die Obergrenze der Unbeaufsichtigtheit auf **eine Woche** fest — Auto-Restart trägt „from Sunday to Sunday without re-authenticating", aber *„After the nightly server reset on Saturday night it will be necessary to again enter security credentials"*, und der Wochenzyklus beginnt montags. Das Fehlerbild eines vergessenen Logins ist `Soft token=0 received instead of expected permanent`, Fehler 1100 oder 502 — nicht „nicht eingeloggt". IBC ist seit 2026-09-01 archiviert (letztes Release 3.24.2); der Maintainer begründet es selbst mit dem nativen Auto-Restart. IBC 3.24.2 wird nur dann nachgerüstet, wenn die Messung aus REQ-IBKR-01a zeigt, dass der Paper-Login ohne Zweitfaktor geht.
 
 **REQ-IBKR-60** — Es existiert ein Betriebshandbuch `scripts/IBKR_EXECUTION.md` nach dem Muster von `scripts/PAPER_RUN.md`: Einrichtung, Gateway- und Scheduler-Einstellungen, Exit-Code-Tabelle, Bedienung des Kill-Switch, Wochenlogin-Ritual, die typischen Fehlerbilder mit ihrer üblichen Behebung, und wie man den Soll-Ist-Bericht erzeugt und liest.
+
+---
+
+## 7. Redundante Absicherung (Fail-closed)
+
+> **Grundregel:** Eine Freigabe braucht einen positiven Beweis. Das Ausbleiben eines Fehlers ist kein Beweis.
+> Übernommen am 2026-10-12 aus `.planning/quick/261012-ap2-*/261012-ap2-SICHERUNGSPRINZIP.md` (Kandidaten S-01 … S-08); die Begründungen und die vier Messungen, aus denen die Regel stammt, stehen dort.
+
+**REQ-IBKR-61** (S-01) — Liefert `whatIfOrder()` keine Margin- und Kommissionswerte — leere Liste, `None`, fehlende Felder —, gilt das als **abgelehnte** Vorschau: keine Order, benannter Zustand, eigener Exit-Code.
+> **Nachweis:** Test mit gestubbtem Leer-Rückgabewert; es erfolgt kein `placeOrder`.
+
+**REQ-IBKR-62** (S-02) — Jeder API-Aufruf hat ein Timeout, und ein Timeout ist ein benannter Fehlerzustand, kein stilles Weiterlaufen.
+> **Nachweis:** Test mit nicht antwortender Gegenstelle endet im Fehlerpfad, nicht im Hänger. Gilt ab Phase 2 für jeden späteren Aufruf weiter.
+
+**REQ-IBKR-63** (S-03) — Kein sicherheitskritischer Fakt stützt sich auf nur eine Quelle: Paper-Konto (`managedAccounts` **und** Kontofeld der Order), aktuelle Position (Ledger **und** `reqPositions()`), „schon ausgeführt?" (Ledger-Eintrag **und** `orderRef`-Suche über offene/erledigte Orders), Handelbarkeit (`tradingSessions()` **und** Order-Status nach Platzierung, 399 = geparkt). Widersprechen sich die Quellen, gilt der vorsichtigere Wert, und der Lauf meldet den Widerspruch.
+> **Nachweis:** je ein Test, der beide Quellen auseinanderlaufen lässt und zeigt, dass keine Order entsteht.
+
+**REQ-IBKR-64** (S-04) — Der Kill-Switch ist fail-closed: Gehandelt wird nur, wenn eine ausdrückliche Freigabe **vorhanden und lesbar** ist **und** die Kill-Datei fehlt; geprüft wird unmittelbar vor **jeder** Order, nicht einmal beim Start. `reqGlobalCancel` bleibt der scharfe Arm für bereits liegende Orders.
+> **Nachweis:** Test mit unlesbarer Freigabedatei → keine Order.
+
+**REQ-IBKR-65** (S-05) — Nach jeder Order wird der tatsächliche Zustand bei IBKR gelesen (Status, Stückzahl, `orderRef`) und mit der Absicht verglichen; eine Abweichung ist ein Alarm, kein stilles Fortfahren.
+
+**REQ-IBKR-66** (S-06) — Zu jeder Schutzmaßnahme gehört eine **Negativ-Kontrolle**: ein Test, in dem sie auslösen muss und der Durchlauf scheitert. Eine Sicherung ohne Negativ-Kontrolle gilt als nicht erbracht.
+
+**REQ-IBKR-67** (S-07) — Fehlercodes, auf die ein Test oder eine Sicherung baut, sind am realen Gateway gemessen, bevor der Test auf sie baut; die Messung ist mit Datum belegt (Vorbild: 321 statt 10015, `ibkr-konto-befund.md`).
+
+**REQ-IBKR-68** (S-08) — Ohne verfügbaren Wechselkurs wird in Stückzahlen gerechnet; fehlt ein Kurs oder Preis, wird die Größe **nicht geschätzt** — der Lauf meldet und hält an. `bid`/`ask` = `-1` (verzögerte Daten) sind keine Zahl für ein Limitverfahren.
 
 ---
 

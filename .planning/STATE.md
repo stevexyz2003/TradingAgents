@@ -15,7 +15,7 @@ progress:
 
 # Project State — TradingEngineX (TradingAgents)
 
-**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 60 Anforderungen, Phase 1 abgeschlossen (Gate G1 zu seit 8f4b6ea), Phase 2 geplant
+**Milestone:** M2 — IBKR Paper Execution (siehe [ROADMAP.md](./ROADMAP.md) + [REQUIREMENTS.md](./REQUIREMENTS.md)), 8 Phasen / 68 Anforderungen, Phase 1 abgeschlossen (Gate G1 zu seit 8f4b6ea), Phase 2 geplant
 **Vorgänger:** Produktionsreife v0.2.x → v0.2.5 — **abgeschlossen 2026-10-11** (siehe [MILESTONE.md](./MILESTONE.md)); bewusst offen geblieben: P2 #6 Observability (von M2 Phase 8 teilweise mitbedient) und P2 #8 Provider-Ausfall-Policy
 **Branch:** main
 

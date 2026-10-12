@@ -1,6 +1,6 @@
 # Roadmap — TradingEngineX (TradingAgents)
 
-**Aktueller Meilenstein:** `M2 — IBKR Paper Execution` · Anforderungen in [REQUIREMENTS.md](./REQUIREMENTS.md) (60 IDs)
+**Aktueller Meilenstein:** `M2 — IBKR Paper Execution` · Anforderungen in [REQUIREMENTS.md](./REQUIREMENTS.md) (68 IDs)
 **Abgeschlossen:** Meilenstein „Produktionsreife v0.2.x → v0.2.5" — [MILESTONE.md](./MILESTONE.md). Bewusst offen geblieben: P2 #6 (Observability/Alerting, von M2 **teilweise** mitbedient) und P2 #8 (Provider-Ausfall-Policy, von M2 **nicht** berührt).
 
 **Ziel von M2 in einem Satz:** Die Entscheidungen, die der tägliche Paper-Lauf heute protokolliert, werden gegen das IBKR-Paper-Konto `DUQ634065` tatsächlich ausgeführt, mit nachvollziehbarer Soll-Ist-Zusammenführung.
@@ -42,11 +42,11 @@ Vier Regeln haben den Zuschnitt bestimmt:
 | Phase | Anforderungen | Status |
 |---|---|---|
 | 1. Konto-Messung | 2 | offen |
-| 2. Verbindung & Kontolesen | 10 | offen |
+| 2. Verbindung & Kontolesen | 12 | offen |
 | 3. Symbol & Handelszeiten | 7 | offen |
-| 4. Entscheidung & Trockenlauf | 14 | offen |
-| 5. Leitplanken | 12 | offen |
-| 6. Erste echte Order | 4 | offen |
+| 4. Entscheidung & Trockenlauf | 16 | offen |
+| 5. Leitplanken | 15 | offen |
+| 6. Erste echte Order | 5 | offen |
 | 7. Rückkanal | 4 | offen |
 | 8. Unbeaufsichtigter Betrieb | 7 | offen |
 
@@ -84,7 +84,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 
 **Ziel:** Ein lokaler Prozess verbindet sich reproduzierbar gegen `DUQ634065`, beweist beim Verbinden, dass es das Paper-Konto ist, und legt Bestand und freies Kapital als `PortfolioContext`-JSON ab — ohne Schreibrecht.
 **Depends on:** Phase 1 (Gate G1)
-**Requirements:** REQ-IBKR-03, -04, -05, -06, -07, -08, -09, -11, -12, -55
+**Requirements:** REQ-IBKR-03, -04, -05, -06, -07, -08, -09, -11, -12, -55, -62, -67
 
 **Success Criteria:**
 
@@ -163,7 +163,7 @@ Plans:
 
 **Ziel:** Aus der Entscheidung auf `paper-log` entsteht eine vollständig geprüfte, von IBKR vorab bewertete Order-Absicht — die der Lauf nachweislich nicht sendet.
 **Depends on:** Phase 3
-**Requirements:** REQ-IBKR-13, -14, -15, -16, -17, -18, -19, -20, -21, -22, -23, -24, -25, -38
+**Requirements:** REQ-IBKR-13, -14, -15, -16, -17, -18, -19, -20, -21, -22, -23, -24, -25, -38, -61, -68
 
 **Success Criteria:**
 
@@ -191,7 +191,7 @@ Plans:
 
 **Ziel:** Die vier Pflicht-Leitplanken sind scharf und ohne eine einzige Order bewiesen.
 **Depends on:** Phase 4 (Gate G2)
-**Requirements:** REQ-IBKR-32, -33, -34, -35, -36, -39, -40, -41, -42, -43, -44, -46
+**Requirements:** REQ-IBKR-32, -33, -34, -35, -36, -39, -40, -41, -42, -43, -44, -46, -63, -64, -66
 **Warum eigene Phase:** Alle Nachweise dieser Phase sind **ohne** Gateway führbar (Stub nach dem Muster von `scripts/smoke/stub_llm.py`) bzw. read-only. Eine Leitplanke, die erst nach der ersten echten Order geprüft wird, ist keine Leitplanke.
 
 **Success Criteria:**
@@ -220,7 +220,7 @@ Plans:
 
 **Ziel:** Eine echte Markt-Order gegen `DUQ634065` wird platziert, gefüllt und vollständig im Ledger wiedergefunden — und ein zweiter Lauf am selben Tag erzeugt keine zweite.
 **Depends on:** Phase 5 (Gate G3)
-**Requirements:** REQ-IBKR-10, -45, -47, -48
+**Requirements:** REQ-IBKR-10, -45, -47, -48, -65
 **Diese Phase ist bewusst klein: sie schaltet um, sie baut nicht.** Dass hier nur vier Anforderungen liegen, ist das Ergebnis des Zuschnitts und kein Versehen — alles, was eine Order riskant macht, ist in den Phasen 2 bis 5 abgeschlossen.
 
 **Success Criteria:**
@@ -298,7 +298,7 @@ Plans:
 
 ## Coverage: REQ-ID → Phase
 
-Alle 60 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer Phase zugeordnet. Keine ID fehlt, keine ist doppelt.
+Alle 68 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer Phase zugeordnet. Keine ID fehlt, keine ist doppelt.
 
 | REQ-ID | Kurztitel | Phase |
 |---|---|---|
@@ -362,8 +362,16 @@ Alle 60 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer 
 | REQ-IBKR-58 | Task-History aktiviert und dokumentiert | 8 |
 | REQ-IBKR-59 | Gateway-Dauerbetrieb + Wochenlogin als Betriebsaufgabe | 8 |
 | REQ-IBKR-60 | Betriebshandbuch `scripts/IBKR_EXECUTION.md` | 8 |
+| REQ-IBKR-61 | Leere/unvollständige `whatIf`-Antwort = Ablehnung | 4 |
+| REQ-IBKR-62 | Timeout auf jedem API-Aufruf, benannter Fehlerzustand | 2 |
+| REQ-IBKR-63 | Zwei unabhängige Quellen je sicherheitskritischem Fakt | 5 |
+| REQ-IBKR-64 | Kill-Switch fail-closed, vor jeder Order geprüft | 5 |
+| REQ-IBKR-65 | Nach der Order gegen IBKR verifizieren | 6 |
+| REQ-IBKR-66 | Negativ-Kontrolle je Schutzmaßnahme | 5 |
+| REQ-IBKR-67 | Fehlercodes gemessen, nicht angenommen | 2 |
+| REQ-IBKR-68 | Stückzahlen statt geschätzter Größen ohne Kurs | 4 |
 
-**Gegenprobe:** 60 IDs vergeben (`REQ-IBKR-01` … `REQ-IBKR-60`), 60 Zeilen in dieser Tabelle, Summe über die Phasenspalte 2 + 10 + 7 + 14 + 12 + 4 + 4 + 7 = **60**. Keine Anforderung ohne Phase, keine Phase ohne Anforderung.
+**Gegenprobe:** 68 IDs vergeben (`REQ-IBKR-01` … `REQ-IBKR-68`; -61 … -68 am 2026-10-12 aus dem Sicherungsprinzip `quick/261012-ap2` übernommen), 68 Zeilen in dieser Tabelle, Summe über die Phasenspalte 2 + 12 + 7 + 16 + 15 + 5 + 4 + 7 = **68**. Keine Anforderung ohne Phase, keine Phase ohne Anforderung. REQ-IBKR-62, -66 und -67 stehen bei der Phase, in der sie zuerst nachgewiesen werden, gelten aber in jeder späteren Phase weiter.
 
 **Zwei Anforderungen wirken über ihre Phase hinaus** — das ist Absicht und keine Doppelzuordnung:
 
