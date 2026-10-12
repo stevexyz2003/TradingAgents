@@ -44,6 +44,7 @@ repository. Its state is recorded here whenever it changes.
 |---|---|---|---|
 | 2026-10-11 20:27 | off | operator | turned off again after the 321 proof (ibkr-konto-befund.md) |
 | 2026-10-12 08:45 | on | operator | before the first real Phase-2 run (D-02); paper user login confirmed |
+| 2026-10-12 | off | operator | after D-14 measurement 2: the switch blocks whatIf (321); phase 4 is protected by the socket barrier |
 
 Localhost only: the gateway process listens on `:::7497`, i.e. on all
 interfaces, not only on `127.0.0.1`. That is expected - the gateway refuses
