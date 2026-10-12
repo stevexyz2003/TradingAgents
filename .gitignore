@@ -255,3 +255,11 @@ uv.lock
 # oeffentlichen Fork nichts verloren. Befunde gehoeren als Text nach
 # .planning/, wo man sie lesen und pruefen kann.
 docs/screenshots/
+
+# Lokaler Paper-Lauf mit --portfolio (scripts/IBKR_EXECUTION.md, "Commands"):
+# Reports, Archiv (runs/<datum>/<ticker>.md), Decision-Log und Summaries tragen
+# Kassenbestand, Positionen und Durchschnittspreise des Paper-Kontos. Die
+# Verzeichnisse liegen relativ zum Repo; in einem oeffentlichen Fork darf sie
+# kein `git add -A` mitnehmen. tests/test_ibkr_isolation.py prueft das.
+/results/paper-local/
+/paper-state/

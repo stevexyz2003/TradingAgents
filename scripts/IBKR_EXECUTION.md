@@ -256,6 +256,16 @@ python scripts/ibkr_executor.py account --out "%LOCALAPPDATA%\TradingEngineX\ibk
 budget are described in `scripts/PAPER_RUN.md`. `--portfolio` is local only;
 the CI run never passes it.
 
+With `--portfolio` the reports, the archived copies under
+`paper-state/runs/<date>/`, the decision log and the summaries carry cash,
+positions and average prices of the paper account. The two relative
+directories of the command above, `results/paper-local/` and `paper-state/`,
+are therefore listed in `.gitignore`, and `tests/test_ibkr_isolation.py`
+checks with `git check-ignore` that every `--out`/`--state` directory of
+this section stays ignored. Pointing them elsewhere inside the repository
+needs a matching ignore rule first; outside the tree (like the log under
+`%LOCALAPPDATA%`) needs none.
+
 Never run the paper run on its own against an older book. Two barriers keep a
 stale book out, either one enough by itself:
 

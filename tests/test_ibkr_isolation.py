@@ -45,6 +45,40 @@ def test_env_file_is_not_tracked():
     assert result.stdout.strip() == ""
 
 
+def _handbook_paper_run_dirs() -> list[str]:
+    """The --out and --state values of the paper-run command in the IBKR handbook."""
+    text = (ROOT / "scripts" / "IBKR_EXECUTION.md").read_text(encoding="utf-8")
+    runs = [line for line in text.splitlines() if "daily_paper_run.py" in line and "--out" in line]
+    assert runs, "the handbook shows no paper-run command, so this guard would check nothing"
+    dirs = []
+    for line in runs:
+        tail = line.split("daily_paper_run.py", 1)[1]
+        dirs += re.findall(r"--(?:out|state) (\S+)", tail)
+    return dirs
+
+
+@pytest.mark.unit
+def test_local_paper_run_output_is_ignored_by_git():
+    # WR-07: with --portfolio the reports carry cash, positions and average
+    # prices. The handbook's relative --out/--state dirs sit inside this public
+    # fork, so a `git add -A` must not pick them up.
+    if not (ROOT / ".git").exists():
+        pytest.skip("not a git checkout")
+    relative = [d.replace("\\", "/") for d in _handbook_paper_run_dirs() if "%" not in d]
+    assert relative, "expected the handbook to use repo-relative dirs; update this guard"
+    # What daily_paper_run.py writes there: the archived complete report
+    # (_archive), the decision log, the summaries and the graph logs. The
+    # reports/ tree alone is already covered by the generic `reports/` rule.
+    names = ("runs/2026-10-12/AAPL.md", "decision-log.md", "summary.json", "logs/state.json")
+    for directory in relative:
+        for name in names:
+            probe = f"{directory}/{name}"
+            result = subprocess.run(
+                ["git", "check-ignore", "-q", probe], cwd=ROOT, capture_output=True, text=True
+            )
+            assert result.returncode == 0, f"{probe} is not ignored by git"
+
+
 @pytest.mark.unit
 def test_ci_workflows_reference_no_ibkr_secret():
     files = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
