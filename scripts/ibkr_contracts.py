@@ -14,10 +14,14 @@ ticker into a futures symbol (D-07).
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Mapping
+import os
+import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
@@ -310,3 +314,193 @@ def evaluate_session(
     else:
         detail = "outside every liquid window"
     return SessionVerdict(CLOSED, None, next_open, detail)
+
+
+# --- persistence (D-11, D-12, D-14, D-18, D-22) ------------------------------------------
+
+HISTORY_FILE_NAME = "contracts-history.jsonl"
+_ENTRY_KEYS = frozenset({"conId", "primaryExchange", "currency", "localSymbol", "learned_at"})
+
+
+@dataclass(frozen=True)
+class StoredContract:
+    """A persisted identity plus the moment it was learned. No session values (D-22)."""
+
+    identity: Identity
+    learned_at: str
+
+
+@dataclass(frozen=True)
+class HistoryEvent:
+    """One append-only history line: ``init``, ``learn`` or ``rebaseline`` (D-18)."""
+
+    event: str
+    ticker: str
+    old: Identity | None
+    new: Identity
+    reason: str
+    at: str
+
+
+class ContractsFileMissing(FileNotFoundError):
+    """The contracts file does not exist; it is never recreated silently (D-12)."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        super().__init__(f"{self.path} not found - create it with: resolve --init AAPL ...")
+
+
+class ContractsFileError(ValueError):
+    """The contracts file exists but is unreadable or violates the schema (D-14)."""
+
+
+def contracts_history_path(path: Path) -> Path:
+    return Path(path).with_name(HISTORY_FILE_NAME)
+
+
+def _identity_json(identity: Identity) -> dict:
+    return {
+        "conId": identity.con_id,
+        "primaryExchange": identity.primary_exchange,
+        "currency": identity.currency,
+        "localSymbol": identity.local_symbol,
+    }
+
+
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _parse_contracts(path: Path, data) -> dict[str, StoredContract]:
+    def fail(reason: str):
+        raise ContractsFileError(f"{path}: {reason}")
+
+    if not isinstance(data, dict):
+        fail("top level is not a JSON object")
+    if set(data) != {"schema_version", "contracts"}:
+        fail(f"top-level keys must be exactly schema_version and contracts, got {sorted(data)}")
+    version = data["schema_version"]
+    if not _is_int(version) or version != SCHEMA_VERSION:
+        fail(f"schema_version must be {SCHEMA_VERSION}, got {version!r}")
+    raw = data["contracts"]
+    if not isinstance(raw, dict):
+        fail("contracts is not a JSON object")
+    out: dict[str, StoredContract] = {}
+    for ticker, entry in raw.items():
+        if not isinstance(entry, dict):
+            fail(f"entry {ticker!r} is not a JSON object")
+        if set(entry) != _ENTRY_KEYS:
+            fail(f"entry {ticker!r} must have exactly {sorted(_ENTRY_KEYS)}, got {sorted(entry)}")
+        con_id = entry["conId"]
+        if not _is_int(con_id) or con_id <= 0:
+            fail(f"entry {ticker!r}: conId must be an integer > 0, got {con_id!r}")
+        for key in ("primaryExchange", "currency", "localSymbol", "learned_at"):
+            value = entry[key]
+            if not isinstance(value, str) or not value:
+                fail(f"entry {ticker!r}: {key} must be a non-empty string, got {value!r}")
+        out[ticker] = StoredContract(
+            Identity(con_id, entry["primaryExchange"], entry["currency"], entry["localSymbol"]),
+            entry["learned_at"],
+        )
+    return out
+
+
+def load_contracts_file(path: Path) -> dict[str, StoredContract]:
+    """Read and strictly validate the contracts file; never fall back to relearning."""
+    path = Path(path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ContractsFileMissing(path) from exc
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ContractsFileError(f"{path}: unreadable ({type(exc).__name__})") from exc
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ContractsFileError(f"{path}: not valid JSON ({type(exc).__name__})") from exc
+    return _parse_contracts(path, data)
+
+
+def contracts_payload(contracts: Mapping[str, StoredContract]) -> dict:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "contracts": {
+            ticker: {**_identity_json(stored.identity), "learned_at": stored.learned_at}
+            for ticker, stored in sorted(contracts.items())
+        },
+    }
+
+
+def _temp_for(path: Path) -> Path:
+    return path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+
+
+def _dump(payload: dict) -> str:
+    return json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def write_json_atomic(path: Path, payload: dict, check=None) -> None:
+    """Write through a uniquely named temp file beside ``path``, then move it into place."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = _temp_for(path)
+    try:
+        temp.write_text(_dump(payload), encoding="utf-8")
+        if check is not None:
+            check(temp)
+        os.replace(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def _history_line(event: HistoryEvent, name: str | None = None, reason: str | None = None) -> str:
+    row = {
+        "at": event.at,
+        "event": name or event.event,
+        "ticker": event.ticker,
+        "old": None if event.old is None else _identity_json(event.old),
+        "new": _identity_json(event.new),
+        "reason": event.reason if reason is None else reason,
+    }
+    return json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def _append_history(history: Path, lines: Sequence[str]) -> None:
+    with open(history, "a", encoding="utf-8", newline="\n") as fh:
+        fh.writelines(lines)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def commit_contracts(
+    path: Path, contracts: Mapping[str, StoredContract], events: Sequence[HistoryEvent]
+) -> None:
+    """Persist the table. History is fsynced BEFORE the replace (D-18).
+
+    If the replace fails, an ``<event>-aborted`` line follows and the error is
+    re-raised; nothing is swallowed.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    history = contracts_history_path(path)
+    temp = _temp_for(path)
+    wrote_history = False
+    try:
+        temp.write_text(_dump(contracts_payload(contracts)), encoding="utf-8")
+        load_contracts_file(temp)
+        if events:
+            _append_history(history, [_history_line(e) for e in events])
+            wrote_history = True
+        os.replace(temp, path)
+    except BaseException as exc:
+        if wrote_history:
+            reason = f"replace failed: {type(exc).__name__}"
+            try:
+                _append_history(
+                    history, [_history_line(e, f"{e.event}-aborted", reason) for e in events]
+                )
+            except Exception:  # best effort; the original error is what matters
+                log.exception("could not record the aborted history lines")
+        temp.unlink(missing_ok=True)
+        raise
