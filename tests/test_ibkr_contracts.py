@@ -924,3 +924,63 @@ def test_resolve_learned_payload_has_no_session_values():
     out = _resolve(["AAPL"])
     text = json.dumps(c.contracts_payload(out.contracts)).lower()
     assert "liquid" not in text and "trading_hours" not in text and "tradinghours" not in text
+
+
+# --- block_qty (D-09, D-10, REQ-IBKR-22, REQ-IBKR-68) -------------------------------------
+
+
+@pytest.mark.parametrize("ticker", ["AAPL", "MSFT", "NVDA"])
+def test_block_qty_is_one_for_the_tradable_stocks(ticker):
+    assert c.CONTRACT_TABLE[ticker].block_qty == 1
+
+
+@pytest.mark.parametrize("key", ["^GSPC", "XAUUSD+"])
+def test_block_qty_is_zero_for_untradable_entries(key):
+    assert c.CONTRACT_TABLE[key].block_qty == 0
+
+
+def test_block_qty_positive_for_every_tradable_entry():
+    tradable = [k for k in c.CONTRACT_TABLE if c.classify(k).state == c.OK]
+    assert tradable
+    for key in tradable:
+        qty = c.CONTRACT_TABLE[key].block_qty
+        assert isinstance(qty, int) and qty > 0
+    assert c.table_problems() == ()
+
+
+def test_block_qty_zero_on_a_tradable_entry_is_reported():
+    bad = {"AAPL": dataclasses.replace(c.CONTRACT_TABLE["AAPL"], block_qty=0)}
+    problems = c.table_problems(bad)
+    assert len(problems) == 1 and "AAPL" in problems[0]
+
+
+# --- session_day (D-05) -------------------------------------------------------------------
+
+
+def test_session_day_true_inside_the_window(ny):
+    verdict = c.evaluate_session(NEW_FORMAT, ZONE, _utc(ny, 2026, 10, 12, 12, 0))
+    assert verdict.state == c.OK and verdict.session_day is True
+
+
+def test_session_day_true_when_closed_outside_the_window(ny):
+    verdict = c.evaluate_session(NEW_FORMAT, ZONE, _utc(ny, 2026, 10, 12, 17, 0))
+    assert verdict.state == c.CLOSED and verdict.session_day is True
+
+
+def test_session_day_false_on_a_closed_entry(ny):
+    verdict = c.evaluate_session(NEW_FORMAT, ZONE, _utc(ny, 2026, 10, 11, 12, 0))
+    assert verdict.state == c.CLOSED and verdict.session_day is False
+
+
+def test_session_day_none_without_an_entry_for_today(ny):
+    raw = "20261013:0930-20261013:1600"
+    verdict = c.evaluate_session(raw, ZONE, _utc(ny, 2026, 10, 12, 12, 0))
+    assert verdict.state == c.SESSION_UNKNOWN and verdict.session_day is None
+
+
+def test_resolve_passes_session_day_through():
+    out = _resolve(["AAPL"])
+    assert _by(out)["AAPL"].session_day is True
+    closed = _resolve(["AAPL"], broker=_good_broker(now=_CLOSED_NOW), now_utc=_CLOSED_NOW)
+    assert _by(closed)["AAPL"].state == "closed"
+    assert _by(closed)["AAPL"].session_day is True
