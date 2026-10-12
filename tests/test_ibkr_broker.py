@@ -170,7 +170,7 @@ def test_contract_details_and_market_data_type_heads_match_the_installed_library
         source = inspect.getsource(getattr(ib_async.client.Client, name))
         assert re.search(rf"(?:send\(|\[)\s*{head}", source), name
         assert head not in broker._WRITE_MESSAGE_IDS
-    assert broker._WRITE_MESSAGE_IDS == frozenset({3, 4, 19, 21, 58})
+    assert frozenset({3, 4, 19, 21, 58}) == broker._WRITE_MESSAGE_IDS
 
 
 # --- delayed market data type ---------------------------------------------------------

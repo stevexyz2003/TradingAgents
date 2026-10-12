@@ -90,11 +90,17 @@ STATE_BY_CODE: dict[int, str] = {
     10015: "TRADING_NOT_ALLOWED",
     10089: "MARKET_DATA_NOT_SUBSCRIBED",
     10090: "MARKET_DATA_NOT_SUBSCRIBED",
+    # Measured on paper gateway 10.50.1 for delayed stock quotes (03-RESEARCH.md).
+    10167: "MARKET_DATA_DELAYED",
+    # Measured for an unknown symbol (XYZQ): no contract matches.
+    200: "CONTRACT_NOT_FOUND",
     2172: "GATEWAY_VERSION_EXPIRING",
 }
 
-#: Farm-OK notices: logged at INFO, never as a warning.
-INFO_CODES = frozenset({2104, 2106, 2158})
+#: Farm-OK and delayed-market-data notices: expected states, logged at INFO.
+#: The halt code 154 stays unmapped here; it is measured at the whatIf preview
+#: in phase 4 (REQ-IBKR-67).
+INFO_CODES = frozenset({2104, 2106, 2158, 10089, 10090, 10167})
 
 # Named states without a gateway code.
 CONNECT_TIMEOUT = "CONNECT_TIMEOUT"
@@ -384,6 +390,13 @@ class IbkrBroker:
             EXPECTED_ACCOUNT,
             self._client_id,
         )
+        # D-25: delayed data (3), asked for only after the paper guard passed.
+        try:
+            ib.reqMarketDataType(3)
+        except BaseException:
+            self._disconnect()
+            raise
+        self._log.info('ibkr-state=MARKET_DATA_TYPE code=- detail="delayed (3)"')
 
     def health(self) -> Health:
         """Liveness from a real server answer, not from the socket (REQ-IBKR-09).
