@@ -155,13 +155,13 @@ Plans:
 - Keine Marktdaten über den delayed-Default hinaus; kein Limitpreis, keine Preisabfrage im Order-Pfad.
 - Keine Erweiterung der Allow-List über `STK` hinaus — die breitere Liste ist dokumentierter Erweiterungspfad.
 
-**Plans:** 6 plans
+**Plans:** 2/6 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Bibliotheksfreies Modul `ibkr_contracts.py`: Tabelle, Allow-List, Zustände, Handelbarkeit, Identität, Sitzungs-Parser (Wave 1)
-- [ ] 03-02-PLAN.md — Adapter: `search_contract`/`contract_details`, `reqMarketDataType(3)` nach Guard, 10167 + Delayed-Codes auf INFO, Fakes (Wave 1)
+- [x] 03-01-PLAN.md — Bibliotheksfreies Modul `ibkr_contracts.py`: Tabelle, Allow-List, Zustände, Handelbarkeit, Identität, Sitzungs-Parser (Wave 1)
+- [x] 03-02-PLAN.md — Adapter: `search_contract`/`contract_details`, `reqMarketDataType(3)` nach Guard, 10167 + Delayed-Codes auf INFO, Fakes (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
