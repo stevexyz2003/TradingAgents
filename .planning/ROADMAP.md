@@ -203,7 +203,7 @@ Plans:
 - Das Trockenlauf-Protokoll ist **noch nicht** der Ledger, auf den sich Idempotenz stützt: es gibt in dieser Phase keine Write-Ahead-Disziplin und keinen Lock.
 - Kein Push auf irgendeinen Branch, kein Heartbeat.
 
-**Plans:** 4/9 plans executed
+**Plans:** 6/9 plans executed
 
 Plans:
 **Wave 1**
@@ -215,8 +215,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-05-PLAN.md — Adapter: `preview_order`, `open_orders`, `conId`, `AvailableFunds`, Codes 154/10349 (D-11..D-15)
-- [ ] 04-06-PLAN.md — Aktualität in XNYS-Sitzungen, `weekend_gap`, Kalender vs. `liquidHours` (SC4, D-05..D-08)
+- [x] 04-05-PLAN.md — Adapter: `preview_order`, `open_orders`, `conId`, `AvailableFunds`, Codes 154/10349 (D-11..D-15)
+- [x] 04-06-PLAN.md — Aktualität in XNYS-Sitzungen, `weekend_gap`, Kalender vs. `liquidHours` (SC4, D-05..D-08)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
