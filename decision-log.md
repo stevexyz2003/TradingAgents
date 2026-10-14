@@ -144,3 +144,114 @@ This is research for discussion, not personalized investment advice. Portfolio h
 
 <!-- ENTRY_END -->
 
+[2026-10-13 | AAPL | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold AAPL at its current allocation and add nothing at 341.27. Add a starter tranche (about 1/4 of the intended increment) only on a pullback to roughly 336–338 with the MACD histogram turning up and RSI holding above the mid-50s. Add a second tranche only on a daily close above 345.34 on above-average volume. Treat a daily close below the 50 SMA (~323.77) as the thesis-break and reduce toward Underweight. Size for gap risk: a ~6–7% gap, which would take the stock to about 317, must be affordable at the portfolio level. If AAPL is already a large share of the book, trim toward neutral weight instead of adding.
+
+**Investment Thesis**: The Hold rests on three points: the fundamentals and trend are strong, the near-term setup is neutral, and the price is not measurable against earnings. I weighed the three analysts on their merits and concluded that neither the Aggressive nor the Conservative side wins decisively.
+
+**What favors the Aggressive side.** Revenue growth is about 16% year over year, gross margin has expanded to 50.1%, nine-month free cash flow is about $110B, and the price is above the 10 EMA, 50 SMA and 200 SMA. The MACD histogram has narrowed from -1.07 to -0.03 and RSI is 60.5, which is not overbought. The options-flow point is thin: one unverified StockTwits post, small against roughly $13B of daily dollar volume. The Conservative analyst concedes it is a caution marker and not a signal.
+
+**Where the Aggressive case fails.**
+- It calls earnings "accelerating 20–30%". The 28.7% EPS growth is a single quarter, and revenue growth is flat across three quarters (15.7%, 16.6%, 16.3%). Buybacks, with about $94.6B of nine-month financing outflows, likely contribute to EPS growth.
+- It treats the missing macro and valuation data as neutral. We have no verified P/E and no rates or Fed data, so we cannot say whether a ~$5T valuation is cheap or expensive. Missing data argues for smaller size, not larger.
+- The 10/13 candle ran to 348.15 and closed at 341.27, a rejection near the $5T level where the price has failed before.
+- RSI is lower than on 9/22 (60.5 vs 66.9) at a higher close, which is a bearish divergence. The MACD is still below its signal line.
+- Calling the 323 stop a "planned loss" is wrong. A stop does not protect against a gap, and the 7/31 gap was about 7.4%, or roughly 3.6 ATR.
+
+**Where the Conservative case overreaches.**
+- It cites a 2.6x liabilities-to-equity ratio and a ~1.0 current ratio as capital risk. The Neutral analyst correctly notes these are structural for Apple.
+- Nothing presented shows fundamental deterioration. The bear case is about timing and risk/reward, which does not justify Underweight or Sell while the trend and margins are intact.
+- The reward-to-risk is roughly 2% to the recent high against 1.3% to the 10 EMA and ~5% to the 50 SMA. That is unattractive for new money but not a reason to cut existing exposure.
+
+**Decision.** The Neutral synthesis holds up best. Keep existing exposure and add on confirmation, not on prediction. Its sizing rule is weight = acceptable gap loss ÷ gap percentage. For example, a 1% capital loss on a ~6% gap implies at most about 1/6 of capital in total, and less if the book is already concentrated. The stop should mark thesis failure (a close below ~323.77, then the 9/09 swing low near ~315), while gap risk is managed through position size.
+
+**What would change the view.**
+- Upgrade toward Overweight if price closes above 345.34 on clearly above-average volume with a MACD re-cross, or if a pullback to the 336–338 zone holds with RSI and MACD stabilizing.
+- Upgrade further if verified P/E data, the buyback share of EPS growth, and the drivers of the gross margin gain come back supportive.
+- Downgrade toward Underweight on a close below the 50 SMA, sharply slowing revenue growth, a gross margin reversal, or an adverse rates and Fed picture once that data is available.
+
+**Price Target**: 348.0
+
+**Time Horizon**: 1-3 months
+
+<!-- ENTRY_END -->
+
+[2026-10-13 | MSFT | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold existing MSFT exposure at target allocation. Do not add at 543.45, and do not trim aggressively, because the trend is intact. Underweight holders should scale in by thirds: the first on a hold near the 10 EMA (~528), the second near ~514 if the 50 SMA (~503) holds, and the last only after the next earnings report shows margin stabilization. Treat a close below ~514 on rising volume as the trigger to reduce toward Underweight. Trim back to target if the position has drifted above it.
+
+**Investment Thesis**: The evidence is balanced after weighing, and the debate converges on Hold.
+
+**Trend and quality (Aggressive's strongest points).**
+- The 543.45 close sits above a rising 10 EMA (528.44), 50 SMA (502.87) and 200 SMA (433.28).
+- MACD is positive and its histogram is re-expanding.
+- Revenue is growing about 18% year over year.
+- Operating cash flow was $36–47B per quarter.
+- Equity is about $442B against about $316B of liabilities.
+- Nothing in the evidence shows deteriorating demand, so Underweight or Sell is not justified.
+
+**Why not add (Conservative's strongest points).**
+- Operating margin fell from 48.9% to 47.1% to 46.3%, and gross margin fell from 69.0% to 67.6%. Operating income grew only about 1% sequentially on about 6.7% revenue growth.
+- Quarterly capex rose from about $19B to about $31B, and the $130B lease commitments may not be fully captured in capex. Cash is only about $20.9B.
+- RSI is 70.78 and price is near the upper Bollinger band (546.25). Price is 15 points above the 10 EMA and 29 points above the Bollinger middle.
+- The October 13 bar faded from 551.15 to 543.45.
+- October volume of 17–27M is far below the July breakout volume of about 110M.
+- No valuation data (P/E, EV/EBITDA, historical range) or macro data was provided, so a bullish call would rest on momentum alone.
+
+**Why Aggressive's rebuttals did not carry the case.**
+- "Overbought is normal in a trend" only holds while new highs keep coming.
+- Reading light volume as institutional holding is unsupported by the data.
+- A 528 stop is only about 1.3 ATR away (ATR is 11.43), so routine noise would trigger it.
+- Buying a breakout above 546–551 on thin volume and with margins soft is a poor risk-reward entry. The Neutral analyst's compromise is to accept it only at reduced size, and I would not act on it before confirmation.
+
+**Stops.** The Neutral analyst's framing is the most useful. Use ~528 as a trim-and-reassess line, and a close below ~514 on rising volume as the exit line for the full position. A close below the 50 SMA (~503) means the trend has broken.
+
+**What would change the call.**
+- Upgrade to Overweight if the next quarter shows operating margin stabilizing at or above 46% with gross margin no longer falling, if a new high above 551 comes on expanding volume, or if management gives an explicit capex and lease return framework.
+- Downgrade if there is a third consecutive quarter of margin decline, if revenue growth falls below about 15%, if the unconfirmed single-source Azure cost-cut report is confirmed to affect capacity, or if the lease commitments are renegotiated or cancelled.
+
+**Data gaps.** Valuation, earnings date, yields and CPI, and Azure confirmation are all missing. These argue against sizing up, not for selling.
+
+**Price Target**: not provided
+
+**Time Horizon**: 3-6 months, reassess at the next earnings report
+
+<!-- ENTRY_END -->
+
+[2026-10-13 | NVDA | Overweight | pending]
+
+DECISION:
+**Rating**: Overweight
+
+**Executive Summary**: Favor owning NVDA, but build the position in stages and size it to what is verified, not to the full 1.25x yet. Start with a small starter, or place a limit order near the 50-day (about 222.90) instead of chasing at about 228.5. Add on a reclaim and hold above the 10 EMA (about 230) with the MACD histogram turning positive. Move toward 1.25x only after valuation, the liability jump and the earnings date are checked. Use a closing-basis risk line at about 218-220, and cut back to standard weight or lower if it breaks and the 50-day is not reclaimed within a few sessions. Time horizon is 3-6 months, with a re-evaluation after the next earnings report.
+
+**Investment Thesis**: The business evidence favors owning the stock. Nobody in the debate disputes the July-quarter figures: revenue of about $96.2B (+106% year over year, about +18% sequentially), gross margin near 75%, operating margin near 66%. Price is above the rising 50-day (about 222.90) and 200-day (about 202) averages. The pullback is about 4.5% from the 239.24 closing high. RSI reset to 52 and ATR is declining, which describes a shallow pullback in an intact uptrend, not a breakdown. The aggressive analyst is right on the thesis.
+
+The conservative and neutral analysts land real blows on sizing and execution, and I weight them on those points:
+- No verified P/E, market cap or EV/EBITDA is available. The FRED data (10-year yield, real rates, Fed funds, CPI) is also missing. For a long-duration growth stock, that argues against going above standard weight now.
+- The cash-flow period labels are flagged as unreliable. April net income exceeded operating income, so some earnings were non-operating. The aggressive claim of "real cash, not accounting" is overstated, though large positive operating cash flow is still clear.
+- Total liabilities rose 43% in one quarter, from $64B to $91B, and the composition is unchecked. Customer financing that NVDA backstops would be a different risk from deferred revenue. The SpaceX $40B order is unverified and reportedly debt-funded, so it is not demand evidence.
+- The short-term technicals are soft. Price is below the 10 EMA, and the MACD histogram is negative after falling from 4.94 to 2.92. The 10-08 drop of about 2.9% was the largest one-day decline in the window. Low volume on the pullback can be read either way.
+- The plan contradicts itself. The entry is 222.90, but the first tranche executes at market near 228.52. From 228.5, the stop at 218 is about 10.5 points away and the 239 high is about 10.7 points away, roughly 1:1. From 222.9, the risk is about 5 points against about 16 points of reward, roughly 3:1. The pullback entry is clearly the better trade, so I would not chase.
+- The earnings date is unconfirmed, and it is a gap risk that a closing-basis stop does not protect against.
+
+The weighing is decisively in favor of owning NVDA, but only modestly in favor of sizing up. That calls for Overweight, not Buy. The neutral analyst's execution is the most defensible: a starter below the full add, limit entries near the 50-day, and confirmation-based adds. The final stage above standard weight waits for evidence.
+
+What would change the call:
+- Upgrade toward Buy and a full 1.25x or more if valuation is verified as reasonable, the liabilities prove benign (for example deferred revenue), and price closes through 239 on volume.
+- Reduce to standard weight or below on a decisive close under about 218-220 that does not reclaim the 50-day.
+- Reduce if sequential revenue falls, gross margin drops below the mid-70s, the liabilities prove to be backstopped customer financing, or hyperscaler capex commentary turns down.
+
+**Price Target**: 240.0
+
+**Time Horizon**: 3-6 months
+
+<!-- ENTRY_END -->
+
