@@ -255,3 +255,97 @@ What would change the call:
 
 <!-- ENTRY_END -->
 
+[2026-10-14 | AAPL | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold the standard allocation in AAPL. Do not add at about 342.96, just under the upper Bollinger band at 344.35. Add only a small tranche (about a quarter to a third of standard weight) if price closes above 344.35 on volume at or above the 50-day average. Trim about 25% on a close below the 10 EMA (338.39) with the MACD histogram negative. Cut to about half weight on a close below the 50 SMA (324.44). Treat 330 as a review level, not an automatic exit, because it sits between the two trim levels and a gap would skip it anyway. Review over the next 1–3 months, once valuation, cash flow and rate data are verified.
+
+**Investment Thesis**: The evidence is balanced after weighing, and the data gaps are large. That supports Hold, not a directional call.
+
+**What favors the bulls**
+- Price is above the rising 10 EMA, 50 SMA and 200 SMA, and the 10-14 close of 342.96 is the highest close since January.
+- Revenue is up about 16% and EPS about 29%. Equity has rebuilt from $57B to $107.5B.
+- The aggressive analyst is right that missing valuation data is a gap, not proof the stock is expensive. The neutral analyst made the same point.
+
+**What favors the bears**
+- Momentum is fading as price rises. MACD has fallen from 6.27 to 4.00, and RSI made a lower high (62.08 against 66.92 on 09-22).
+- The histogram has been positive for only one session, at +0.137.
+- The 348.15 intraday high on 10-13 did not hold. Price has been range-bound at roughly 329–343 since late September.
+- The 29% EPS figure comes from one quarter and is partly helped by buybacks and weak comparison quarters. The duplicated gross profit row and the unverified operating cash flow weaken the margin and cash-flow claims.
+- Rate and inflation headlines are unconfirmed because FRED data was unavailable. That is a reason for caution. It is not evidence of safety.
+
+**Where the analysts erred**
+- The conservative analyst said price "closed lower the next session." The neutral analyst correctly noted that 10-14 was the highest close since January.
+- The conservative analyst also treated the $5T market cap as a valuation signal. It is not one.
+- The aggressive analyst's claim of a 3.8% stop risk breaks down once you add at 344.35.
+
+**Why Hold wins**
+- The bullish evidence is real, but the verified inputs are too thin to justify paying up at the top of the range.
+- The bearish evidence is also unconfirmed and has not yet broken the trend, so a cut is not justified either.
+- The neutral analyst's point about the stop is the most useful. A 7.3% gap, like the one on 07-31, bypasses any stop, so position size is the real protection. The 330 stop also conflicts with the 338.39 and 324.44 trims. I therefore let the trims govern and treat 330 as a review level.
+
+**What would change the call**
+- *Upgrade to Overweight:* a close above 344.35 on above-average volume with an expanding MACD histogram. This should come with a verified, reasonable P/E relative to EPS growth, and corrected gross profit and operating cash flow data.
+- *Downgrade to Underweight or Sell:* a close below the 10 EMA with a negative histogram, or a close below the 50 SMA. A verified multiple that outruns EPS growth, or confirmed rising rates, would also trigger a downgrade.
+- *Still to verify:* the CPI and Fed calendar, the status of the $5.7B verdict, and the China AI launch.
+
+No portfolio context was provided, so apply all weights relative to the existing position.
+
+**Price Target**: not provided
+
+**Time Horizon**: 1-3 months, with review at the defined trigger levels
+
+<!-- ENTRY_END -->
+
+[2026-10-14 | MSFT | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold the existing MSFT position at its current weight and add nothing at 533.69. Trim only the excess if the position has drifted above its target band, ideally into strength near 543–551. For new money, use a small starter (about 40% of the shares a full add at 516.37 would buy, so dollar risk to the 503.71 stop is equal). Stage the rest on a closing hold of 503.71–516.37 or a close above 551.15 on expanding volume. A close below 516.37 means stop adding. A close below 503.71 means cut exposure toward underweight.
+
+**Investment Thesis**: The trend and fundamentals rule out Underweight or Sell. Revenue grew 18.3% to $82.9B and operating margin is near 46%. Operating cash flow hit a record $46.7B. The 50 SMA (503.71) has risen for a month and sits well above the 200 SMA (433.53). Price is above the 10 EMA, 50 SMA and VWMA, and MACD is still positive. The Aggressive analyst is right that one soft close is a pause, not a top. He is also right that a trend should not be cut on thin evidence.
+
+The Conservative and Neutral analysts won the entry-price argument, which rules out Overweight or Buy. Buying at 533.69 with a stop at 503.71 risks about 30 points. Nearby resistance at 551.15 is only about 17 points away, which is roughly 1.8 of risk per 1 of reward. From the 516.37 zone, risk is about 12.7 points against about 35 points of reward. The Aggressive analyst offered no data showing a move well beyond 551.
+
+Momentum is also fading. The last session opened at 545.27 and closed at 533.69 near the low, and its high of 545.75 was a lower high than 551.15. The MACD histogram fell from 2.17 to 1.48 and RSI fell from 70.78 to 62.49. The advance came on modest volume of 17–27M shares a day.
+
+The fundamental risks are real and unresolved. Capex is up about 84% and absorbs roughly two-thirds of operating cash flow, and implied FCF is down about 22%. Cash fell to $20.9B, the current ratio slid from 1.35 to 1.23, and current liabilities rose about 23.5% for reasons we can't see.
+
+The Aggressive analyst's supports are weak. The BofA 5.9% yield threshold says nothing about multiple compression, and the current 10-year level is unavailable. The "defensive" label comes from a headline. The custom-chip and AI-lab revenue claims are unverified.
+
+Missing data keeps the evidence balanced: valuation, Azure growth, the earnings date and guidance, current yields and CPI, and what drove the liability jump. Unknown earnings timing argues against building size. A gap through 503.71 would bypass the stop, so consider a put or collar if the position is large and earnings are near.
+
+Upgrade to Overweight if Azure re-accelerates, liquidity data proves clean, valuation is acceptable and yields are stable, or on a confirmed close above 551.15 on volume. Raise the stop toward the 10 EMA or the breakout level after that close. Downgrade if revenue growth falls below about 15% for two quarters while capex keeps rising, if operating cash flow turns negative year over year, or if the 50 SMA breaks on a close.
+
+**Price Target**: 551.15
+
+**Time Horizon**: 1-3 months, reassess at the next earnings print
+
+<!-- ENTRY_END -->
+
+[2026-10-14 | NVDA | Overweight | pending]
+
+DECISION:
+**Rating**: Overweight
+
+**Executive Summary**: Stay constructive on NVDA but build the tilt in phases. Open a starter of about 25-33% of the intended overweight increment now (near 221), which is the Neutral analyst's sizing and sits between the Conservative's one-fifth and the plan's 40-50%. Add a second tranche on a daily close above the 10 EMA (~228.67) or a closing hold of the lower Bollinger band (~217.82). Hold the final tranche until the next filing and call have been checked. Treat a sustained daily close below the 200 SMA (~202.37) as thesis invalidation and cut back to standard weight or below. Size each tranche so that weight times roughly 8.5% is an affordable loss. Target total tilt is about 1.1-1.25x standard weight.
+
+**Investment Thesis**: Business quality is the strongest evidence. Reported quarterly revenue was about $96B, up roughly 106% year over year and about 18% sequentially. Operating margin was about 66%, gross margin held near 75%, and free cash flow was about $70B over six months. The current ratio is about 4.6x and leverage is low. The long-term trend is intact: the 200 SMA and 50 SMA are both rising, and price is about 9% above the 200 SMA. The Aggressive analyst is right that waiting has a real cost and that RSI at 44 is a reset rather than a breakdown.
+
+The Conservative analyst landed real punches that argue for phasing, not for sitting out. The 22x multiple is a single quarter annualized, and the Neutral analyst puts the trailing multiple in the mid-20s. That is still reasonable for this growth rate but means the multiple is not compressing as fast as the Aggressive case claims. The short-term tape is negative: price is below the 10 EMA, the 50 SMA and the middle band, MACD has crossed down, and VWMA overhead supply sits at 231. The macro backdrop (hike bets, hot inflation, rising yields) is a genuine headwind that could not be quantified because the FRED data was missing. A $27B rise in liabilities is unexplained, and operating cash flow was only about 63% of net income. The Reddit sentiment sample is eight posts and should not drive sizing in either direction.
+
+Overall, the reported fundamentals outweigh the open questions, but the open questions and the weak tape rule out a full Buy. The Conservative's "wait entirely" case is weaker, since earnings-season information may arrive before a confirmation trigger fires. The Aggressive analyst's larger starter is also too big given the unverified items. The Neutral path therefore wins: a smaller starter, adds earned by price confirmation, and the final tranche gated by verification.
+
+Items missing from the evidence: the exact earnings date, consensus and guidance, hyperscaler capex data, the composition of the liability increase, the receivables and inventory explanation for weak cash conversion, and current CPI and 10-year yield data. The 202.37 stop does not protect against gap risk.
+
+Downgrade to Hold or Underweight if any of these occur: a daily close below 202.37; sequential revenue growth fading to the low teens; operating margin trending toward the high 50s; cash conversion staying below about 70% of net income for another quarter; or the liability increase proving to be debt unrelated to existing capacity. A close below 217.82 is a review trigger, meaning no automatic averaging down and a reassessment of the starter. Existing large holders should not add. They should avoid trimming into weakness and consider trimming only into a bounce toward 228-231 if they are above target weight. Decide in advance whether the starter is allowed to run through earnings.
+
+**Price Target**: not provided
+
+**Time Horizon**: 6-12 months, with checkpoints at the next earnings filing and call
+
+<!-- ENTRY_END -->
+
