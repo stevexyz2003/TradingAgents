@@ -1,7 +1,7 @@
 ---
 phase: 3
 slug: symbol-aufl-sung-handelbarkeit-und-handelszeiten
-status: draft
+status: audited
 nyquist_compliant: true
 wave_0_complete: false
 created: 2026-10-12
@@ -42,17 +42,17 @@ Task-IDs `03-PP-TT` = Plan PP, Task TT. Kommandos sind die `<automated>`-Befehle
 
 | Task ID | Plan | Wave | Requirement | Behavior (Kern) | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------------|-----------|-------------------|-------------|--------|
-| 03-01-01 | 01 | 1 | REQ-IBKR-27, -28, -31 | Tabelle, Allow-List, `classify`, `check_tradable`, `identity_diff`, D-07-Verhaltenstest | unit (TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_contracts.py -q -k "table or classify or mapped or allow or tradable or identity or symbols or rejected"` | ❌ W0 (RED-Schritt legt an) | ⬜ pending |
-| 03-01-02 | 01 | 1 | REQ-IBKR-37, SC6, SC7 | Parser beide Formate, CLOSED, Halbtag, Mitternacht, `;`, Puffer, `session-unknown`, Gegentest ib_async | unit (TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_contracts.py -q` + `! grep` auf Uhrzeit-/Uhr-Strings | ❌ W0 | ⬜ pending |
-| 03-02-01 | 02 | 1 | REQ-IBKR-26 | Fakes erweitert, 10167/200, INFO-Level, `reqMarketDataType(3)` nach Guard | unit (FakeIB, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_broker.py tests/test_ibkr_executor.py -q` | ✅ (erweitert) | ⬜ pending |
-| 03-02-02 | 02 | 1 | REQ-IBKR-29, -30 | `ContractInfo`, `search_contract`, `contract_details` mit Timeout; Methodenmenge | unit (FakeIB, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_broker.py tests/test_ibkr_isolation.py tests/test_ibkr_executor.py -q` | ✅ (erweitert) | ⬜ pending |
-| 03-03-01 | 03 | 2 | REQ-IBKR-30 | `contracts.json` laden/schreiben, History append-only, Atomarität, Schema | unit (tmp_path, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_contracts.py -q -k "persist or contracts_file or history or atomic or schema or commit"` | ❌ W0 | ⬜ pending |
-| 03-03-02 | 03 | 2 | REQ-IBKR-29, -30, -31, -37 | `resolve_all`: Lernen, Gegenprobe, Drift, Mehrdeutigkeit, Anker, rebaseline, Handelbarkeit, Sitzung | unit (Fake-Broker, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_contracts.py -q` + `! grep` auf Uhrzeit-/Uhr-Strings | ❌ W0 | ⬜ pending |
-| 03-04-01 | 04 | 2 | REQ-IBKR-27, SC5, SC7 | AST-Guard ohne `symbols`/`tradingagents`, SC7-Uhrzeiten-Guard, Uhr-Injektion | unit/AST | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_isolation.py -q -k "library_free or normalizer or hard_coded_times or clock or client_library or public_methods"` | ✅ (erweitert) | ⬜ pending |
-| 03-04-02 | 04 | 2 | REQ-IBKR-31, -37 | REQ-31 nach D-19; Halt-Teil REQ-37 an Phase 4 übergeben; keine Selbstabnahme | doc/grep | `grep`-Kette aus 03-04 Task 2 (`orderTypes`, `ibkr-konto-befund.md`, `D-20`, `Übergabe aus Phase 3`, keine `03-VERIFICATION.md`) | n/a | ⬜ pending |
-| 03-05-01 | 05 | 3 | REQ-IBKR-28, D-12, D-14, D-26, D-27, SC2 | `resolve`-Parser, Argumentprüfung, Contracts-Datei, Connect-on-demand, `_guarded` | unit (FakeIB, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_resolve.py tests/test_ibkr_executor.py -q` | ❌ W0 | ⬜ pending |
-| 03-05-02 | 05 | 3 | REQ-IBKR-26, -29, -30, -31, -37, D-28..D-30 | init, Lernen, Drift, Mehrdeutigkeit, rebaseline, Sitzung, Persistenz, `--out` | unit (FakeIB, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_resolve.py tests/test_ibkr_executor.py tests/test_ibkr_contracts.py tests/test_ibkr_broker.py tests/test_ibkr_isolation.py -q && .venv/Scripts/python.exe -m ruff check .` | ❌ W0 | ⬜ pending |
-| 03-06-01 | 06 | 4 | REQ-IBKR-26, -28, -30, -37 | Handbuch `resolve`, neuer Ticker, Codes; Handbuch-Tests | unit + grep | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_isolation.py -q` + `grep` auf Handbuch | ✅ (erweitert) | ⬜ pending |
+| 03-01-01 | 01 | 1 | REQ-IBKR-27, -28, -31 | Tabelle, Allow-List, `classify`, `check_tradable`, `identity_diff`, D-07-Verhaltenstest | unit (TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_contracts.py -q -k "table or classify or mapped or allow or tradable or identity or symbols or rejected"` | ❌ W0 (RED-Schritt legt an) | ✅ green |
+| 03-01-02 | 01 | 1 | REQ-IBKR-37, SC6, SC7 | Parser beide Formate, CLOSED, Halbtag, Mitternacht, `;`, Puffer, `session-unknown`, Gegentest ib_async | unit (TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_contracts.py -q` + `! grep` auf Uhrzeit-/Uhr-Strings | ❌ W0 | ✅ green |
+| 03-02-01 | 02 | 1 | REQ-IBKR-26 | Fakes erweitert, 10167/200, INFO-Level, `reqMarketDataType(3)` nach Guard | unit (FakeIB, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_broker.py tests/test_ibkr_executor.py -q` | ✅ (erweitert) | ✅ green |
+| 03-02-02 | 02 | 1 | REQ-IBKR-29, -30 | `ContractInfo`, `search_contract`, `contract_details` mit Timeout; Methodenmenge | unit (FakeIB, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_broker.py tests/test_ibkr_isolation.py tests/test_ibkr_executor.py -q` | ✅ (erweitert) | ✅ green |
+| 03-03-01 | 03 | 2 | REQ-IBKR-30 | `contracts.json` laden/schreiben, History append-only, Atomarität, Schema | unit (tmp_path, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_contracts.py -q -k "persist or contracts_file or history or atomic or schema or commit"` | ❌ W0 | ✅ green |
+| 03-03-02 | 03 | 2 | REQ-IBKR-29, -30, -31, -37 | `resolve_all`: Lernen, Gegenprobe, Drift, Mehrdeutigkeit, Anker, rebaseline, Handelbarkeit, Sitzung | unit (Fake-Broker, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_contracts.py -q` + `! grep` auf Uhrzeit-/Uhr-Strings | ❌ W0 | ✅ green |
+| 03-04-01 | 04 | 2 | REQ-IBKR-27, SC5, SC7 | AST-Guard ohne `symbols`/`tradingagents`, SC7-Uhrzeiten-Guard, Uhr-Injektion | unit/AST | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_isolation.py -q -k "library_free or normalizer or hard_coded_times or clock or client_library or public_methods"` | ✅ (erweitert) | ✅ green |
+| 03-04-02 | 04 | 2 | REQ-IBKR-31, -37 | REQ-31 nach D-19; Halt-Teil REQ-37 an Phase 4 übergeben; keine Selbstabnahme | doc/grep | `grep`-Kette aus 03-04 Task 2 (`orderTypes`, `ibkr-konto-befund.md`, `D-20`, `Übergabe aus Phase 3`, keine `03-VERIFICATION.md`) | n/a | ✅ green |
+| 03-05-01 | 05 | 3 | REQ-IBKR-28, D-12, D-14, D-26, D-27, SC2 | `resolve`-Parser, Argumentprüfung, Contracts-Datei, Connect-on-demand, `_guarded` | unit (FakeIB, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_resolve.py tests/test_ibkr_executor.py -q` | ❌ W0 | ✅ green |
+| 03-05-02 | 05 | 3 | REQ-IBKR-26, -29, -30, -31, -37, D-28..D-30 | init, Lernen, Drift, Mehrdeutigkeit, rebaseline, Sitzung, Persistenz, `--out` | unit (FakeIB, TDD) | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_resolve.py tests/test_ibkr_executor.py tests/test_ibkr_contracts.py tests/test_ibkr_broker.py tests/test_ibkr_isolation.py -q && .venv/Scripts/python.exe -m ruff check .` | ❌ W0 | ✅ green |
+| 03-06-01 | 06 | 4 | REQ-IBKR-26, -28, -30, -37 | Handbuch `resolve`, neuer Ticker, Codes; Handbuch-Tests | unit + grep | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_isolation.py -q` + `grep` auf Handbuch | ✅ (erweitert) | ✅ green |
 | 03-06-02 | 06 | 4 | REQ-IBKR-29, -30, SC1 | Erster `resolve`-Lauf gegen das echte Paper-Gateway, Protokoll | integration (Gateway) | Python-Einzeiler aus 03-06 Task 2 (prüft `contracts.json`, Log `learned conId=`, keine Order-Spuren) | n/a | ⬜ pending |
 | 03-06-03 | 06 | 4 | SC1..SC4 | Operator nimmt den Lauf ab | checkpoint:human-verify | `grep -q "## First resolve run" scripts/IBKR_EXECUTION.md` | n/a | ⬜ pending |
 
@@ -91,7 +91,9 @@ Requirement-Abdeckung (Rückwärtsblick):
 | Echte Auflösung + conId-Lernen | REQ-IBKR-30 / SC1 | braucht Paper-Gateway | `resolve --init AAPL MSFT NVDA`, dann zweiter Lauf `resolve AAPL MSFT NVDA` |
 | Abweisung realer Sperr-Ticker | REQ-IBKR-28 / SC2 | Gateway-Lauf als Evidenz | `resolve XYZQ ^GSPC XAUUSD+` → Exit 2 |
 | Drift real | REQ-IBKR-30 / SC4 | Datei manipulieren | conId in `contracts.json` ändern, `resolve AAPL` → drift, Exit 2 |
-| Wochenend-/Feiertagslauf | REQ-IBKR-37 / D-24 vs D-29 (A5; RESEARCH Q1 RESOLVED: D-24 strikt) | nur am Wochenende messbar | Samstag `resolve AAPL` → erwartet `closed` + nächstes Fenster, Exit 0; zeigt er `session-unknown` (Exit 2), ist das ein Befund für den Operator, keine stille Codeänderung |
+| Wochenend-/Feiertagslauf | REQ-IBKR-37 / D-24 vs D-29 (A5; RESEARCH Q1 RESOLVED: D-24 strikt) | nur am Wochenende messbar | Samstag `resolve AAPL` → erwartet `closed` + nächstes Fenster, Exit 0; zeigt er `session-unknown` (Exit 2), ist das ein Befund für den Operator, keine stille Codeänderung. Teilweise automatisiert: `tests/test_ibkr_resolve.py::TestRealWeekendLiquidHours` (echte Sonntags-Strings aus dem Befund 2026-10-11); der Live-Lauf am Samstag bleibt manuell |
+| Anforderungstext-Änderung REQ-IBKR-31 (D-19) | REQ-IBKR-31 | Operator-Abnahme einer Textänderung, kein Verhalten | Operator liest die geänderte Anforderung in REQUIREMENTS.md und bestätigt sie |
+| Anforderungstext-Änderung REQ-IBKR-37 (D-20, Halt-Teil an Phase 4) | REQ-IBKR-37 | Operator-Abnahme einer Textänderung, kein Verhalten | Operator bestätigt die Übergabe des Halt-Teils an Phase 4 |
 
 ---
 
@@ -106,3 +108,24 @@ Requirement-Abdeckung (Rückwärtsblick):
 - [ ] `wave_0_complete: true` — erst nach den RED-Commits während der Ausführung
 
 **Approval:** pending
+
+---
+
+## Validation Audit 2026-10-16
+
+Quelle der Lücken: Codex-Audit `03-CODEX-REVIEW.md` sowie `03-VERIFICATION.md` (Human-Item 1, Samstagslauf, D-24 vs D-29).
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 3 |
+| Resolved | 2 |
+| Escalated | 0 |
+| Manual-only | 1 |
+
+| Gap | Requirement | Ergebnis |
+|-----|-------------|----------|
+| 1. Echter `liquidHours`-String eines Nicht-Sitzungstags | REQ-IBKR-37 / D-24 vs D-29 | FILLED: `tests/test_ibkr_resolve.py::TestRealWeekendLiquidHours` (2 Tests, grün). Sonntag 2026-10-11 mit dem verbatim gemessenen AAPL-String (US/Eastern) ergibt `closed`, nächstes Fenster 2026-10-12T09:45-04:00 (09:30 plus 15 min Puffer), Exit 0, nicht `session-unknown`. Samstag 2026-10-10 steht nicht im String; dokumentiertes D-24-Verhalten ist `session-unknown`, Exit 2 (als Test festgehalten). Live-Samstagslauf bleibt manuell. |
+| 2. Halt-Teil REQ-IBKR-37 (D-20) | REQ-IBKR-37 | Covered-by-Phase-4: `tests/test_ibkr_broker.py::test_preview_halted_code_154_is_its_own_state`, `tests/test_ibkr_preview.py::test_code_154_is_halted`. Kein neuer Test. |
+| 3. Textänderungen D-19 / D-20 | REQ-IBKR-31, REQ-IBKR-37 | Manual-only (Operator-Abnahme), siehe Manual-Only. |
+
+Lauf: 494 Tests der IBKR-Dateien grün, `ruff check .` sauber. Hinweis: Der Test fixiert das 15-Minuten-Puffer-Verhalten (09:45 statt 09:30 als „nächstes Fenster"). Offen bleiben 03-06-02/-03 (Gateway-Lauf, Operator-Abnahme).
