@@ -1138,11 +1138,20 @@ def _summary_reader(ctx, source):
             else:
                 text = paperlog_mod.decode_utf8(blob, path)
                 try:
-                    cache[day] = decision_mod.read_summary(text)
+                    summary = decision_mod.read_summary(text)
                 except decision_mod.SummarySchemaError as exc:
                     raise _RunAbort(decision_mod.SUMMARY_SCHEMA, f"{path}: {exc}") from None
                 except decision_mod.SummaryContractError as exc:
                     raise _RunAbort(decision_mod.SUMMARY_CONTRACT, f"{path}: {exc}") from None
+                # The path picks the file, the field dates the run: both must
+                # name the same day, or a copied summary would pass as another
+                # day's and the supersede check would read the wrong date.
+                if summary.trade_date != day:
+                    raise _RunAbort(
+                        decision_mod.SUMMARY_CONTRACT,
+                        f"{path}: trade_date {summary.trade_date} does not match the path date {day}",
+                    )
+                cache[day] = summary
         return cache[day]
 
     return read

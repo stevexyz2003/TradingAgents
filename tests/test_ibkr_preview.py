@@ -506,6 +506,19 @@ class TestSchema:
         assert _payload(out)["run_state"] == "summary-contract"
 
 
+    def test_a_summary_dated_differently_from_its_path_is_exit_1(self, tmp_path):
+        """WR-05: a copied summary must not stand in for another day's run."""
+        source = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy")],
+            {"2026-10-09": _summary("2026-10-08", ("AAPL", "ok", "Buy"))},
+        )
+        code, out, log = _local(tmp_path, source)
+        assert code == executor.EXIT_CONFIG
+        assert _payload(out)["run_state"] == "summary-contract"
+        assert "does not match the path date" in _log_text(log)
+
+
 class TestDivergence:
     def test_log_and_summary_disagree(self, tmp_path):
         source = _paper(
