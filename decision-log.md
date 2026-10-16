@@ -349,3 +349,87 @@ Downgrade to Hold or Underweight if any of these occur: a daily close below 202.
 
 <!-- ENTRY_END -->
 
+[2026-10-15 | AAPL | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold the existing AAPL exposure at standard allocation and do not add before the fiscal Q4 report in late October. Set the size with a loss budget: apply a -7% gap (342 to about 317) to your current position, and trim only as far as needed to fit your single-name limit. Don't rely on the 328.70 stop to cover an earnings gap. Add in tranches only after a close above 344.95 on rising volume or a strong print. Cut exposure on a close below 328.70 followed by a loss of the 50-day SMA (about 325), or on a weak report. Review right after earnings.
+
+**Investment Thesis**: The debate agrees on the core facts. The trend is intact: price is above the 10 EMA (339.05), 50 SMA (325.07) and 200 SMA (291.79). Fundamentals are strong: revenue growth of about 16%, gross margin up from 48.2% to 50.1%, and free cash flow of about 109% of net income. That rules out Underweight or Sell. Nothing verified is negative, and the evidence for distribution rests on one session (10/15) and one heavy-volume day (9/18).
+
+The Aggressive case for a starter add before the print is weaker. It claimed AAPL "recovered to new highs within weeks" after the 7/31 drop of about 7.3% (333.14 to 308.64) on 132.5M shares. The Conservative and Neutral analysts showed this is wrong: the stock consolidated at roughly 303-320 for about two months. Momentum is also fading. The 10/15 bar rejected at 347.85 and closed at 342.00. RSI is off its 66.92 peak, the MACD histogram is only +0.14, and the MACD line is well below its 6.27 peak. Valuation is unverified, since we have no P/E, no consensus and no debt or segment detail. The OpenAI allegation is unread. Macro (rising yields, hot inflation) is a headwind for long-duration mega-caps. Adding into a binary event with no verified valuation cushion has an unfavorable payoff. A missed first few percent of an upside gap is a small, known cost. A full-size loss on a gap down is much larger.
+
+The Conservative case for a fixed quarter trim is also not clearly better. The Neutral analyst's point holds that trimming is a directional bet, and that the rebuild after the print is the same confirmed-breakout purchase the Conservative analyst criticized. So the Neutral loss-budget framing decides the sizing. Hold the core, size to survive a gap, and pre-commit the responses.
+
+Pre-committed triggers:
+- **Move to Overweight:** a post-report close above 344.95, ideally above 348, on volume above the recent 26M-50M range. Q4 revenue growth near 16% or better with gross margin near 50%. A widening MACD histogram. Scale in over several tranches.
+- **Move to Underweight:** a close below 328.70, then a loss of the 50-day SMA (about 325). Revenue deceleration or gross margin compression. A substantiated negative from OpenAI or from regulatory pressure on services. After a gap down toward 317, reassess at the open against the 329.17 lower Bollinger band and the 50 SMA, since the stop will not execute usefully.
+
+Missing data: P/E, consensus estimates, the debt schedule, segment margins, year-over-year operating income, the equity bridge, the substance of the OpenAI headline, and your actual holdings. Treat the foldable iPhone preorders as a possible sell-the-news event and do not trade on them.
+
+**Price Target**: not provided
+
+**Time Horizon**: Through the late-October fiscal Q4 earnings release, then reassess (about 2-4 weeks)
+
+<!-- ENTRY_END -->
+
+[2026-10-15 | MSFT | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold MSFT at your current standard weight and don't add at about $539, which is just under the $550 resistance and the upper Bollinger band at $549.89. For new money, build at most half a standard position, in two tranches. Put roughly a third of a standard position on a retest of the 10 EMA (about $531), and the rest near the Bollinger middle (about $518), only while the 50 SMA (about $505) holds. Use a daily close below about $504 as the exit and reassessment trigger instead of an intraday stop, and size the position so a roughly 10% overnight gap stays within your loss budget. Existing holders may optionally trim 10–20% into strength near $550 if volume stays light.
+
+**Investment Thesis**: The evidence is balanced after weighing, so Hold is a real conclusion and not a default. The aggressive analyst is right that the trend is intact. Price is above the 10 EMA, 50 SMA and 200 SMA, the 50 SMA has risen from about 457.65 to about 504.76, and RSI shows no bearish divergence. Revenue grew about 18% year over year and operating cash flow was about $46.7B. That rules out Underweight or Sell. His case for buying up to a full position on a breakout is weaker, for four reasons:
+- Volume is thin, at roughly 16–28M shares a day. The technical report itself says to be skeptical of a breakout without volume.
+- A $504 stop is not a cap on loss. A 10% gap from about $550 opens near $495, below the stop. The neutral analyst made this point, and the aggressive analyst did not answer it.
+- Operating income has been flat near $38B for about three quarters while capex roughly doubled to about $31B a quarter. Free cash flow fell from about $20–26B to about $16B, and gross margin slipped from about 69% to 67.6%. The claim that the build-out is already paying off in profit is not supported yet.
+- Valuation is unverified, and the December EPS of 5.16 was flattered by non-operating gains. The March figure of 4.27 is the better run-rate.
+
+The conservative analyst is right on entry price and gap risk. The neutral analyst correctly pointed out two weak spots in his case. Operating cash flow comfortably covers financing outflows, so a shrinking cash balance is not distress. And "wait for earnings" has no deadline, because the earnings date is not in the data. The neutral analyst's arithmetic on entry risk is more precise. Risk to $504 is about 46 points from a $550 entry, about 27 from $531 and about 14 from $518, so staged pullback entries carry much less downside than a single breakout entry.
+
+Several inputs are missing or weak. They are the earnings date, Azure growth, capex guidance, live valuation multiples, and macro data (FRED returned nothing). Sentiment is a thin sample, and the analyst target raises such as TD Cowen's $625 likely follow the price. That is too little to support a directional call at this price.
+
+What would change the call:
+- Upgrade to Overweight if earnings show operating income growing with revenue, sequential growth re-accelerating, supportive Azure and capex guidance, and stable free cash flow. A close above $549.89 on expanding volume would also support adding.
+- Downgrade to Underweight if operating income stays flat or falls while capex keeps rising, free cash flow falls further, or sequential growth drops below about 2%.
+- Downgrade if there is a daily close below about $504–505 (the 50 SMA). A move toward the 200 SMA (about $434) would invalidate the bull case.
+- Add a time limit to the wait. If the earnings date is still unconfirmed, or price runs above $550 without a pullback or volume confirmation, revisit the framework instead of leaving it open-ended.
+
+**Price Target**: not provided
+
+**Time Horizon**: Through the next earnings report, roughly 1–3 months. Revisit sooner if the earnings date is confirmed or price closes below about $504.
+
+<!-- ENTRY_END -->
+
+[2026-10-15 | NVDA | Overweight | pending]
+
+DECISION:
+**Rating**: Overweight
+
+**Executive Summary**: Overweight NVDA, built gradually. Start with a small tranche near 217, about 0.25–0.33x of a standard allocation and no more than the Research Manager's one-third of the intended add. Use one exit rule: a daily close below the 200 SMA (202.52) cuts the position to or below standard weight. Add the second tranche on a hold of the 211–213 swing-low area or a confirmed 10 EMA reclaim near 226.6 with a MACD recross. Hold the final tranche until the Q2 balance sheet, the Q1 net income gap, and forward multiple and consensus checks are done. If you already hold NVDA, keep your size and don't chase.
+
+**Investment Thesis**: Fundamentals decide the direction. No analyst disputed them: Q2 FY27 revenue was $96.2B (+~106% YoY), gross margin held near 75%, operating margin was ~66%, and six-month free cash flow was ~$70B. Operating income grew in line with revenue sequentially, so operating leverage is intact. The Aggressive analyst's run-rate multiple (~22x on annualized $9.84 EPS) is a shortcut, as Conservative and Neutral correctly said. It is still not a demanding number for this growth, and no one showed the stock is expensive.
+
+Conservative and Neutral are right on timing and risk control, and I adopted these points:
+- Price is below the 10 EMA and 50 SMA and at the lower Bollinger band.
+- The MACD histogram worsened from -0.44 to -1.86, and RSI at 40 is not oversold.
+- The 10 EMA (226.6) and 50 SMA (223.1) form a resistance band, so pre-committing to buy into it is weak.
+- The stop (202.0) and the invalidation (closing break of 202.5) were two triggers. They should be one rule.
+- Gap risk is real, so the starter must be small enough that a gap below 202 is affordable.
+- Macro (hot inflation, rising yields) and AI-financing risk to NVDA's customers' capex are unverified, because FRED data was unavailable and yield reports conflicted.
+- The Reddit sentiment evidence is thin and shouldn't be used as a contrarian signal.
+
+Conservative's call to stay flat overreaches. The business is verified through SEC-sourced income and cash flow statements, the long-term structure is intact (50 SMA above 200 SMA, price ~6.8% above the 200 SMA), and waiting for a 10 EMA reclaim risks missing the rebound. Neutral's middle path is the best synthesis: a smaller starter, one exit rule, and preferring to add on weakness near 211–213 over adding into 226. I rate this Overweight rather than Buy because the Q2 balance sheet, the unexplained Q1 net income, the forward multiple and consensus, and event dates are all missing.
+
+What would change the view:
+- Upgrade toward Buy if the verification items come back clean (working capital normalizing, Q1 net income explained, forward multiple reasonable) and the price reclaims the 10 EMA with MACD confirmation.
+- Move to Hold or Underweight on a daily close below 202.5, hyperscaler capex cuts or guide-downs, gross margin below about 72%, or net income lagging operating income again.
+
+**Price Target**: 248.0
+
+**Time Horizon**: 6-12 months
+
+<!-- ENTRY_END -->
+
