@@ -437,6 +437,7 @@ texts: the order state of the client library has no reject-reason field.
 | `not-resolved-yet` | 2 | the ticker has no stored contract yet |
 | `foreign-open-order` | 2 | an open order exists; phase 4 never sends, so it is foreign |
 | `fractional-position` | 2 | the held quantity is fractional |
+| `short-position` | 2 | the held quantity is negative (short); the plan is long-only, so no order |
 | `within-tolerance` | 0 | target and holding differ by less than one block |
 | `long-only-noop` | 0 | sell or underweight without a holding; no short |
 | `preview-ok` | 0 | whatIf ok, within budget |

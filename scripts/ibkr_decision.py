@@ -50,6 +50,7 @@ CALENDAR_CONFLICT = "calendar-conflict"
 NOT_RESOLVED_YET = "not-resolved-yet"
 FOREIGN_OPEN_ORDER = "foreign-open-order"
 FRACTIONAL_POSITION = "fractional-position"
+SHORT_POSITION = "short-position"
 WITHIN_TOLERANCE = "within-tolerance"
 LONG_ONLY_NOOP = "long-only-noop"
 PREVIEW_OK = "preview-ok"
@@ -73,7 +74,7 @@ ALL_STATES = frozenset(
         SUMMARY_MISSING, SUMMARY_SCHEMA, SUMMARY_CONTRACT, NO_DECISION, LOG_MISSING_ENTRY,
         INVALID_TRADE_DATE, LOG_FINDING, PAPER_LOG_UNAVAILABLE, STALE_DECISION,
         FUTURE_DECISION, CALENDAR_CONFLICT, NOT_RESOLVED_YET, FOREIGN_OPEN_ORDER,
-        FRACTIONAL_POSITION, WITHIN_TOLERANCE, LONG_ONLY_NOOP, PREVIEW_OK, PREVIEW_EMPTY,
+        FRACTIONAL_POSITION, SHORT_POSITION, WITHIN_TOLERANCE, LONG_ONLY_NOOP, PREVIEW_OK, PREVIEW_EMPTY,
         PREVIEW_REJECTED, PREVIEW_READ_ONLY, TIF_OVERRIDDEN, TIF_UNCONFIRMED, OVER_BUDGET,
         CURRENCY_MISMATCH, HALTED,
     }
@@ -93,6 +94,7 @@ EXIT_BY_STATE: Mapping[str, int] = MappingProxyType(
                 SUMMARY_MISSING, NO_DECISION, LOG_MISSING_ENTRY, INVALID_TRADE_DATE,
                 LOG_FINDING, PAPER_LOG_UNAVAILABLE, STALE_DECISION, FUTURE_DECISION,
                 CALENDAR_CONFLICT, NOT_RESOLVED_YET, FOREIGN_OPEN_ORDER, FRACTIONAL_POSITION,
+                SHORT_POSITION,
             ),
             _EXIT_PRECONDITION,
         ),
@@ -310,6 +312,10 @@ def plan_order(rating: str, *, held_qty: float, open_orders: int, block_qty: int
             held=held_qty,
             detail="phase 4 never sends, every open order is foreign; nothing planned for this ticker",
         )
+    if held_qty < 0:
+        # Long-only: a short is somebody else's state. Netting it would turn a
+        # Sell signal into a BUY (cover), and a small short into within-tolerance.
+        return Plan(SHORT_POSITION, held=held_qty, detail=f"held {held_qty:g} is short; long-only, nothing planned")
     target = BLOCKS[rating] * block_qty
     if held_qty != int(held_qty):
         return Plan(FRACTIONAL_POSITION, target=target, held=held_qty, detail=f"held {held_qty} is fractional")
@@ -325,8 +331,8 @@ def plan_order(rating: str, *, held_qty: float, open_orders: int, block_qty: int
     diff = target - held_qty
     side = "BUY" if diff > 0 else "SELL"
     quantity = int(abs(diff))
-    if side == "SELL" and quantity > held_qty:
-        raise AssertionError(f"SELL {quantity} exceeds holding {held_qty}")
+    # held_qty >= 0 and target >= 0 here, so a SELL of target - held never
+    # exceeds the holding: the long-only invariant holds by construction.
     return Plan(INTENT, side, quantity, target, held_qty, f"{side} {quantity}: target {target}, held {held_qty:g}")
 
 

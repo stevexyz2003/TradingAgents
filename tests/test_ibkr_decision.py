@@ -212,6 +212,20 @@ def test_plan_fractional_position():
     assert _plan("Buy", held=1.5).state == "fractional-position"
 
 
+@pytest.mark.parametrize("rating", ["Buy", "Overweight", "Underweight", "Sell"])
+@pytest.mark.parametrize("held, block", [(-3, 1), (-1, 5), (-3, 10), (-0.5, 1)])
+def test_plan_short_position_never_orders(rating, held, block):
+    """WR-04: a short is rejected; no BUY to cover, no within-tolerance."""
+    plan = _plan(rating, held=held, block=block)
+    assert plan.state == "short-position"
+    assert plan.side is None and plan.quantity == 0
+    assert dec.EXIT_BY_STATE["short-position"] == 2
+
+
+def test_plan_hold_still_wins_over_short():
+    assert _plan("Hold", held=-3).state == "skipped-hold"
+
+
 def test_plan_bad_block_qty():
     with pytest.raises(ValueError):
         _plan("Buy", block=0)
