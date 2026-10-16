@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import uuid
 from pathlib import Path
 
 _REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -109,6 +110,13 @@ class GitPaperLog:
         return (proc.stderr or b"").decode("utf-8", errors="replace").strip()
 
     def fetch(self) -> str:
+        # Forget a previous sha first: a failed re-fetch must not leave the
+        # reader on a stale view (D-02).
+        self.sha = None
+        # Fetch into a ref of this run's own and resolve that: FETCH_HEAD is
+        # repo-wide and any other fetch (IDE background fetch, a second run)
+        # would overwrite it between the fetch and the rev-parse.
+        ref = f"refs/tengx/paper-log-preview/{uuid.uuid4().hex}"
         try:
             proc = self._git(
                 [
@@ -116,15 +124,15 @@ class GitPaperLog:
                     "--no-tags",
                     "--quiet",
                     self._remote,
-                    f"+refs/heads/{self._branch}",
+                    f"+refs/heads/{self._branch}:{ref}",
                 ],
                 self._fetch_timeout,
             )
             if proc.returncode != 0:
                 raise PaperLogUnavailable(f"git fetch failed: {self._err(proc)}")
-            rev = self._git(
-                ["rev-parse", "--verify", "FETCH_HEAD^{commit}"], self._read_timeout
-            )
+            rev = self._git(["rev-parse", "--verify", f"{ref}^{{commit}}"], self._read_timeout)
+            # The sha is resolved; the ref only served to pin it. Best effort.
+            self._git(["update-ref", "-d", ref], self._read_timeout)
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise PaperLogUnavailable(f"git unavailable: {exc}") from exc
         if rev.returncode != 0:

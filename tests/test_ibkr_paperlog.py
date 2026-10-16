@@ -39,7 +39,8 @@ class FakeRunner:
 
 
 def _ok_fetch():
-    return [(0, b"", b""), (0, (SHA + "\n").encode(), b"")]
+    # fetch into the private ref, resolve it, drop the ref again
+    return [(0, b"", b""), (0, (SHA + "\n").encode(), b""), (0, b"", b"")]
 
 
 def _log(runner):
@@ -50,11 +51,35 @@ def test_fetch_commands_and_env():
     r = FakeRunner(_ok_fetch())
     assert _log(r).fetch() == SHA
     argv0, kw0 = r.calls[0]
-    assert argv0 == ["git", "fetch", "--no-tags", "--quiet", "fork", "+refs/heads/paper-log"]
+    ref = r.calls[1][0][-1][: -len("^{commit}")]
+    assert ref.startswith("refs/tengx/paper-log-preview/")
+    assert argv0 == [
+        "git", "fetch", "--no-tags", "--quiet", "fork", f"+refs/heads/paper-log:{ref}"
+    ]
     assert kw0["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert kw0["timeout"] == 60.0
     assert "shell" not in kw0
-    assert r.calls[1][0] == ["git", "rev-parse", "--verify", "FETCH_HEAD^{commit}"]
+    assert r.calls[1][0] == ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"]
+    assert r.calls[2][0] == ["git", "update-ref", "-d", ref]
+    assert all("FETCH_HEAD" not in a for argv, _ in r.calls for a in argv)
+
+
+def test_fetch_resolves_a_private_ref_not_the_shared_fetch_head():
+    """WR-02: a concurrent fetch rewriting FETCH_HEAD must not change the pinned sha."""
+    r1, r2 = FakeRunner(_ok_fetch()), FakeRunner(_ok_fetch())
+    _log(r1).fetch()
+    _log(r2).fetch()
+    ref1 = r1.calls[0][0][-1].split(":", 1)[1]
+    ref2 = r2.calls[0][0][-1].split(":", 1)[1]
+    assert ref1 != ref2  # two runs never share a ref either
+
+
+def test_second_failed_fetch_forgets_the_old_sha():
+    log = _log(FakeRunner(_ok_fetch() + [(128, b"", b"fatal: offline")]))
+    assert log.fetch() == SHA
+    with pytest.raises(pl.PaperLogUnavailable):
+        log.fetch()
+    assert log.sha is None
 
 
 def test_fetch_failure_no_fallback():
@@ -74,7 +99,7 @@ def test_fetch_exceptions(exc):
 
 
 def test_fetch_bad_sha():
-    r = FakeRunner([(0, b"", b""), (0, b"not-a-sha\n", b"")])
+    r = FakeRunner([(0, b"", b""), (0, b"not-a-sha\n", b""), (0, b"", b"")])
     with pytest.raises(pl.PaperLogUnavailable):
         _log(r).fetch()
 
@@ -89,7 +114,7 @@ def test_read_blob_and_missing():
     log = _log(r)
     log.fetch()
     assert log.read("decision-log.md") == b"a\r\nb"
-    assert r.calls[2][0] == ["git", "cat-file", "blob", f"{SHA}:decision-log.md"]
+    assert r.calls[3][0] == ["git", "cat-file", "blob", f"{SHA}:decision-log.md"]
     with pytest.raises(pl.BlobMissing):
         log.read("runs/2026-01-01/summary.json")
 
@@ -111,7 +136,7 @@ def test_list_run_dates():
     log = _log(r)
     log.fetch()
     assert log.list_run_dates() == ("2026-09-24", "2026-10-09")
-    assert r.calls[2][0] == ["git", "ls-tree", "--name-only", SHA, "runs/"]
+    assert r.calls[3][0] == ["git", "ls-tree", "--name-only", SHA, "runs/"]
 
 
 @pytest.mark.parametrize("bad", ["-upload-pack=x", "a..b", "a b", ""])
