@@ -43,7 +43,7 @@ audited: 2026-10-16
 | Req / SC | Plan/Task | Verhalten | Typ | Automatisierter Befehl | Datei existiert | Status |
 |----------|-----------|-----------|-----|------------------------|-----------------|--------|
 | SC1 / REQ-21 | 04-07 T2, 04-09 T2 | Echter Branchstand (AAPL Hold 10-09, eingefrorene Kopie von `71df89d`) → `skipped-hold`, kein Gateway-Kontakt | unit/E2E-Fake | `pytest tests/test_ibkr_preview.py -k real_branch_hold -x` | ✅ | ✅ |
-| SC2 / REQ-38, -25 (MKT/DAY; Sitzungsfenster → Phase 6) | 04-07 T3 | Buy + flache Position → „BUY 2", `whatIf` MKT/DAY, Log Margin/Kommission/Ablehnungsgrund, nichts gesendet | unit | `pytest tests/test_ibkr_preview.py -k buy_flat -x` | ✅ | ✅ |
+| SC2 / REQ-38, -25 (MKT/DAY; Sitzungsfenster → Phase 5) | 04-07 T3 | Buy + flache Position → „BUY 2", `whatIf` MKT/DAY, Log Margin/Kommission/Ablehnungsgrund, nichts gesendet | unit | `pytest tests/test_ibkr_preview.py -k buy_flat -x` | ✅ | ✅ |
 | SC2 / D-13 | 04-02 T1/T2 | Schreibsperre: nur Id 3 mit `whatIf` passiert; `placeOrder` ohne `whatIf` → `ReadOnlyViolation` (echte `Client`-Klasse) | unit | `pytest tests/test_ibkr_broker.py -k "whatif_barrier or place_order_refused" -x` | ✅ | ✅ |
 | SC3 / REQ-17 | 04-01 T1, 04-07 T2 | Divergenz Log vs. Summary → Exit 2, `signal-divergence`, Log-Fassung gelesen | unit | `pytest tests/test_ibkr_decision.py -k divergence -x` | ✅ | ✅ |
 | SC4 / REQ-19, -20 | 04-06 T1 | Vier Gegenproben in XNYS-Sitzungen mit injizierter Uhr | unit | `pytest tests/test_ibkr_decision.py -k freshness -x` | ✅ | ✅ |
@@ -110,4 +110,4 @@ Quellen: `04-CODEX-REVIEW.md` (Codex, statisch; Sandbox blockte pytest), `04-REV
 | Escalated | 0 |
 | Manual-only | 4 (davon 2 erledigt) |
 
-REQ-IBKR-25: Sitzungsfenster per Operator-Entscheid 2026-10-16 nach Phase 6 verschoben (ROADMAP-Traceability); Phase 4 deckt MKT/`DAY` und die Differenz mit offenen Orders.
+REQ-IBKR-25: Sitzungsfenster per Operator-Entscheid 2026-10-16 nach Phase 5 verschoben (ROADMAP-Traceability); Phase 4 deckt MKT/`DAY` und die Differenz mit offenen Orders.

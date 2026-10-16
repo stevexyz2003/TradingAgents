@@ -262,7 +262,7 @@ Plans:
 
 **Ziel:** Eine echte Markt-Order gegen `DUQ634065` wird platziert, gefüllt und vollständig im Ledger wiedergefunden — und ein zweiter Lauf am selben Tag erzeugt keine zweite.
 **Depends on:** Phase 5 (Gate G3)
-**Requirements:** REQ-IBKR-10, -45, -47, -48, -65, -25 (nur das konfigurierte Fenster der regulären Sitzung, nicht Auktion, nicht Schlussminuten; MKT/`DAY` und die Differenz mit offenen Orders liefert Phase 4. Verschoben per Operator-Entscheid 2026-10-16, weil das Fenster erst beim echten Senden wirkt)
+**Requirements:** REQ-IBKR-10, -45, -47, -48, -65
 **Diese Phase ist bewusst klein: sie schaltet um, sie baut nicht.** Dass hier nur vier Anforderungen liegen, ist das Ergebnis des Zuschnitts und kein Versehen — alles, was eine Order riskant macht, ist in den Phasen 2 bis 5 abgeschlossen.
 
 **Success Criteria:**
@@ -368,7 +368,7 @@ Alle 70 Anforderungen aus [REQUIREMENTS.md](./REQUIREMENTS.md) sind genau einer 
 | REQ-IBKR-22 | Block = konfigurierte feste Stückzahl, kein Kurs | 4 |
 | REQ-IBKR-23 | `Ziel − Ist − offen` mit Toleranzband | 4 |
 | REQ-IBKR-24 | long-only, `Sell` ohne Bestand ist Nulloperation | 4 |
-| REQ-IBKR-25 | Markt-Order im Sitzungsfenster; Limit nur mit TIF `DAY` | 4 (MKT/`DAY`, offene Orders in der Differenz), 6 (konfiguriertes Sitzungsfenster, Operator-Entscheid 2026-10-16) |
+| REQ-IBKR-25 | Markt-Order im Sitzungsfenster; Limit nur mit TIF `DAY` | 4 (MKT/`DAY`, offene Orders in der Differenz), 5 (konfiguriertes Sitzungsfenster, Operator-Entscheid 2026-10-16) |
 | REQ-IBKR-26 | Marktdaten außerhalb des Order-Pfads, `reqMarketDataType(3)` | 3 |
 | REQ-IBKR-27 | Auflösung vom Roh-Ticker, nicht über `normalize_symbol()` | 3 |
 | REQ-IBKR-28 | Allow-List `{STK}`, Unbekanntes wird abgewiesen | 3 |
