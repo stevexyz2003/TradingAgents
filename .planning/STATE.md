@@ -134,6 +134,12 @@ Betriebszweck statt nur Framework-Zulieferer zu sein.
   wird. Der Track-Record ist weiter eine 5-Tages-Renditereihe;
   `scripts/PAPER_RUN.md` ist entsprechend korrigiert.
 
+### Pending Todos
+
+1 offen (`.planning/todos/pending/`):
+
+- **Phase 04:** Jev-Fallback-Ratings in der IBKR-Vorschau markieren oder ausschließen. Im `decision-log.md` ist ein Jev-Rating nicht von einem Engine-Rating unterscheidbar, `ibkr_executor.py:1122` würde es als normale Entscheidung lesen. ([2026-10-16-mark-or-exclude-jev-fallback-ratings-in-ibkr-preview](./todos/pending/2026-10-16-mark-or-exclude-jev-fallback-ratings-in-ibkr-preview.md))
+
 ### Quick Tasks Completed
 
 | # | Description | Date | Commit | Status | Directory |
