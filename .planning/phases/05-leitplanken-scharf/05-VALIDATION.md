@@ -2,7 +2,7 @@
 phase: 5
 slug: leitplanken-scharf
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-10-16
 ---
@@ -38,25 +38,25 @@ created: 2026-10-16
 
 ## Verifikationszuordnung pro Anforderung
 
-> Task-IDs ergänzt der Planer; die Zeilen sind nach Anforderung/Erfolgskriterium vorbelegt.
+> Plan/Task-IDs vom Planer ergänzt (2026-10-16). Status pflegt der Executor.
 
 | Req / SC | Plan/Task | Verhalten | Typ | Automatisierter Befehl | Datei existiert | Status |
 |----------|-----------|-----------|-----|------------------------|-----------------|--------|
-| SC1 / REQ-33, -64, D-17, D-20 | tbd | Freigabe fehlt · unlesbar · UTF-16 · abgelaufen · > 90 Tage · falsches Konto · Kill vorhanden · State nicht prüfbar → je Exit 4, kein Platzierungsaufruf, Schalterzustand im Ledger; Storno nur bei `KILL` | unit | `pytest tests/test_ibkr_guards.py tests/test_ibkr_execute.py -k "release or kill or fail_closed" -x` | ❌ W0 | ⬜ |
-| SC2 / REQ-34, -66 | tbd | `KILL` zwischen zwei Orders → zweite Order entsteht nicht, kein `intent` für Ticker 2, Exit 4 | unit | `pytest tests/test_ibkr_execute.py -k "g3 and kill_between" -x` | ❌ W0 | ⬜ |
-| SC3 / REQ-35, D-17 | tbd | Kill aktiv → `cancel_all` genau 1×, Nachlese `open_orders`, Exit 4; ohne `KILL` kein `reqGlobalCancel`; echte `Client`-Klasse: 58 nur im Permit | unit | `pytest tests/test_ibkr_broker.py tests/test_ibkr_execute.py -k "cancel_all or global_cancel" -x` | ❌ W0 | ⬜ |
-| SC4 / REQ-32 | tbd | Menge 3 abgelehnt (`size_cap`, Exit 5), nicht gekürzt; kein `whatIf`/`intent` | unit | `pytest tests/test_ibkr_guards.py tests/test_ibkr_execute.py -k "g3 and size" -x` | ❌ W0 | ⬜ |
-| SC5 / REQ-46 | tbd | JSONL; State nicht in Git-Baum; `.lock` neben Ledger; `git status` vor = nach; Negativ-Kontrolle State im Git-Baum | unit | `pytest tests/test_ibkr_ledger.py tests/test_ibkr_isolation.py -k "ledger or git" -x` | ❌ W0 | ⬜ |
-| SC6 / REQ-42, -43, D-19 | tbd | abgebrochener Lauf hinterlässt `intent`; Folgelauf löst über offene/erledigte/Executions auf; unauflösbar → Exit 6 mit eindeutiger Meldung, keine neue Order; torn tail toleriert | unit | `pytest tests/test_ibkr_ledger.py tests/test_ibkr_execute.py -k "g3 and reconcil or write_ahead" -x` | ❌ W0 | ⬜ |
-| SC7 / REQ-44 | tbd | zweiter gleichzeitiger Lauf → Exit 7, kein Ledger-Eintrag; `OSError` beim Sperren → Exit 7 ohne Traceback; `OSError` im Lauf bleibt Nicht-7 | unit | `pytest tests/test_ibkr_execute.py -k "lock" -x` | ❌ W0 | ⬜ |
-| SC8 / REQ-39, -40, -41 | tbd | `orderRef == decision_key` an der `whatIf`-Order, `paper_log_sha` im `intent`; `decision_changed`; `already_attempted` | unit | `pytest tests/test_ibkr_execute.py tests/test_ibkr_broker.py -k "order_ref or decision_key or decision_changed or already_attempted" -x` | ❌ W0 | ⬜ |
-| REQ-25 (Fenster) | tbd | außerhalb Fenster / erste 15 min / letzte 15 min / Halbtag / geschlossener Tag → `skipped outside_session` vor `whatIf`; `session-unknown` bleibt Ablehnung | unit | `pytest tests/test_ibkr_execute.py -k "g3 and session" -x` | ❌ W0 | ⬜ |
-| REQ-36, D-21 | tbd | jeder Lauf schreibt Schalterzustand ins Ledger (Preflight nach Lock), auch bei Exit 0 und 4 | unit | `pytest tests/test_ibkr_execute.py -k "switch_state or preflight" -x` | ❌ W0 | ⬜ |
-| REQ-63, D-18, D-22 | tbd | je ein Test mit auseinanderlaufenden Quellen: Konto (Lauf stoppt), Position (enge Regel), „schon ausgeführt?", Handelbarkeit (nur Ticker) | unit | `pytest tests/test_ibkr_guards.py tests/test_ibkr_execute.py -k "source_conflict" -x` | ❌ W0 | ⬜ |
-| REQ-66 | tbd | je Schutz eine Negativ-Kontrolle (siehe RESEARCH-Tabelle) | unit | `pytest tests/test_ibkr_execute.py tests/test_ibkr_broker.py -k "negative_control" -x` | ❌ W0 | ⬜ |
-| D-07 | tbd | `execute` zwangsweise trocken: nie `placeOrder`/`cancelOrder`; `ledger.jsonl` entsteht nie | unit | `pytest tests/test_ibkr_execute.py -k "nothing_sent or forced_dry" -x` | ❌ W0 | ⬜ |
-| D-08 | tbd | Dry-Lauf schreibt `ledger-dryrun.jsonl`; echte Datei mit `mode:"dryrun"`-Zeile → Exit 6 | unit | `pytest tests/test_ibkr_ledger.py tests/test_ibkr_execute.py -k "dryrun" -x` | ❌ W0 | ⬜ |
-| Wächter | tbd | Adapter ≤ 10 öffentliche Methoden (exakte Menge); `cancel_all(` nur an einer Stelle; `ibkr_market_data.py` ohne `cancel_all`/`reqGlobalCancel`; neue Module bibliotheksfrei; Handbuch Exit 4/6/7 ohne „reserved" | unit | `pytest tests/test_ibkr_isolation.py -x` | ✅ (anpassen) | ⬜ |
+| SC1 / REQ-33, -64, D-17, D-20 | 05-01 T1, 05-05 T1 | Freigabe fehlt · unlesbar · UTF-16 · abgelaufen · > 90 Tage · falsches Konto · Kill vorhanden · State nicht prüfbar → je Exit 4, kein Platzierungsaufruf, Schalterzustand im Ledger; Storno nur bei `KILL` | unit | `pytest tests/test_ibkr_guards.py tests/test_ibkr_execute.py -k "release or kill or fail_closed" -x` | ❌ W0 | ⬜ |
+| SC2 / REQ-34, -66 | 05-05 T1/T2 | `KILL` zwischen zwei Orders → zweite Order entsteht nicht, kein `intent` für Ticker 2, Exit 4 | unit | `pytest tests/test_ibkr_execute.py -k "g3 and kill_between" -x` | ❌ W0 | ⬜ |
+| SC3 / REQ-35, D-17 | 05-03 T2, 05-05 T2, 05-10 | Kill aktiv → `cancel_all` genau 1×, Nachlese `open_orders`, Exit 4; ohne `KILL` kein `reqGlobalCancel`; echte `Client`-Klasse: 58 nur im Permit | unit | `pytest tests/test_ibkr_broker.py tests/test_ibkr_execute.py -k "cancel_all or global_cancel" -x` | ❌ W0 | ⬜ |
+| SC4 / REQ-32 | 05-01 T2, 05-06 T1 | Menge 3 abgelehnt (`size_cap`, Exit 5), nicht gekürzt; kein `whatIf`/`intent` | unit | `pytest tests/test_ibkr_guards.py tests/test_ibkr_execute.py -k "g3 and size" -x` | ❌ W0 | ⬜ |
+| SC5 / REQ-46 | 05-02 T1, 05-04 T1, 05-09 T1 | JSONL; State nicht in Git-Baum; `.lock` neben Ledger; `git status` vor = nach; Negativ-Kontrolle State im Git-Baum | unit | `pytest tests/test_ibkr_ledger.py tests/test_ibkr_isolation.py -k "ledger or git" -x` | ❌ W0 | ⬜ |
+| SC6 / REQ-42, -43, D-19 | 05-02 T2, 05-04 T2, 05-07 T1 | abgebrochener Lauf hinterlässt `intent`; Folgelauf löst über offene/erledigte/Executions auf; unauflösbar → Exit 6 mit eindeutiger Meldung, keine neue Order; torn tail toleriert | unit | `pytest tests/test_ibkr_ledger.py tests/test_ibkr_execute.py -k "g3 and reconcil or write_ahead" -x` | ❌ W0 | ⬜ |
+| SC7 / REQ-44 | 05-05 T1 | zweiter gleichzeitiger Lauf → Exit 7, kein Ledger-Eintrag; `OSError` beim Sperren → Exit 7 ohne Traceback; `OSError` im Lauf bleibt Nicht-7 | unit | `pytest tests/test_ibkr_execute.py -k "lock" -x` | ❌ W0 | ⬜ |
+| SC8 / REQ-39, -40, -41 | 05-03 T1, 05-04 T2, 05-06 T2 | `orderRef == decision_key` an der `whatIf`-Order, `paper_log_sha` im `intent`; `decision_changed`; `already_attempted` | unit | `pytest tests/test_ibkr_execute.py tests/test_ibkr_broker.py -k "order_ref or decision_key or decision_changed or already_attempted" -x` | ❌ W0 | ⬜ |
+| REQ-25 (Fenster) | 05-06 T1 | außerhalb Fenster / erste 15 min / letzte 15 min / Halbtag / geschlossener Tag → `skipped outside_session` vor `whatIf`; `session-unknown` bleibt Ablehnung | unit | `pytest tests/test_ibkr_execute.py -k "g3 and session" -x` | ❌ W0 | ⬜ |
+| REQ-36, D-21 | 05-05 T1 | jeder Lauf schreibt Schalterzustand ins Ledger (Preflight nach Lock), auch bei Exit 0 und 4 | unit | `pytest tests/test_ibkr_execute.py -k "switch_state or preflight" -x` | ❌ W0 | ⬜ |
+| REQ-63, D-18, D-22 | 05-01 T2, 05-07 T2 | je ein Test mit auseinanderlaufenden Quellen: Konto (Lauf stoppt), Position (enge Regel), „schon ausgeführt?", Handelbarkeit (nur Ticker) | unit | `pytest tests/test_ibkr_guards.py tests/test_ibkr_execute.py -k "source_conflict" -x` | ❌ W0 | ⬜ |
+| REQ-66 | 05-01..05-07 | je Schutz eine Negativ-Kontrolle (siehe RESEARCH-Tabelle) | unit | `pytest tests/test_ibkr_execute.py tests/test_ibkr_broker.py -k "negative_control" -x` | ❌ W0 | ⬜ |
+| D-07 | 05-04 T1/T2 | `execute` zwangsweise trocken: nie `placeOrder`/`cancelOrder`; `ledger.jsonl` entsteht nie | unit | `pytest tests/test_ibkr_execute.py -k "nothing_sent or forced_dry" -x` | ❌ W0 | ⬜ |
+| D-08 | 05-02 T1, 05-04 T1 | Dry-Lauf schreibt `ledger-dryrun.jsonl`; echte Datei mit `mode:"dryrun"`-Zeile → Exit 6 | unit | `pytest tests/test_ibkr_ledger.py tests/test_ibkr_execute.py -k "dryrun" -x` | ❌ W0 | ⬜ |
+| Wächter | 05-03 T2, 05-09 T1 | Adapter ≤ 10 öffentliche Methoden (exakte Menge); `cancel_all(` nur an einer Stelle; `ibkr_market_data.py` ohne `cancel_all`/`reqGlobalCancel`; neue Module bibliotheksfrei; Handbuch Exit 4/6/7 ohne „reserved" | unit | `pytest tests/test_ibkr_isolation.py -x` | ✅ (anpassen) | ⬜ |
 
 *Status: ⬜ offen · ✅ grün · ❌ rot · ⚠️ instabil*
 

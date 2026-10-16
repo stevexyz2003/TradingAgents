@@ -632,38 +632,46 @@ Der erste Fall (Ledger ja, Broker nein) ist die Reconciliation (Exit 6); der zwe
 | A6 | Die Reconciliation läuft auf dem Ledger des **aktuellen Modus** (trocken → `ledger-dryrun.jsonl`), nicht auf dem echten | Pattern 4 | Andere Lesart von D-07/D-08: SC6 wäre über die CLI nicht zeigbar; Bestätigung im Plan-Check einholen |
 | A7 | Kein neues Paket nötig; `fsync` auf neu angelegten Dateien ohne Verzeichnis-`fsync` ist unter Windows hinnehmbar | Standard Stack, Pattern 4 | Bei Stromausfall direkt nach Anlegen könnte der erste Ledger-Eintrag fehlen; der echte Ledger entsteht erst in Phase 6, der Lauf-Nachweis kommt davor |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Wo steht die erste Schalterprüfung relativ zur Reconciliation?**
+   - **RESOLVED:** D-21 (Preflight direkt nach dem Lock, vor der Reconciliation; umgesetzt in 05-05, Vermerk für Phase 6 in 05-09)
    - Was wir wissen: REQ-45 setzt Kill-Switch zwischen Handelszeit und `whatIf`; SC1/SC2 und D-04 verlangen Prüfung vor jeder Order und Protokoll in jedem Lauf; ein aktiver Kill muss den Gateway-Kontakt zum Stornieren auslösen können, auch wenn die Reconciliation scheitern würde.
    - Was unklar ist: ob der Phase-6-Reihenfolgetest einen zusätzlichen Preflight-Schritt zulässt.
    - Empfehlung: Preflight direkt nach dem Lock, vor der Reconciliation (Schalterzustand ins Ledger, Kill → Storno-Pfad), plus die Prüfungen an den Stellen nach REQ-45 und unmittelbar vor `intent`. Im Plan als „Superset von REQ-45" benennen und REQ-45 bei Phase 6 entsprechend lesen.
 
 2. **Was heißt „Widerspruch der Position" in Phase 5, wo es keine Fills gibt?**
+   - **RESOLVED:** D-18 (enge Regel; umgesetzt in 05-01 und 05-07)
    - Was wir wissen: REQ-63 nennt „Ledger und `reqPositions()`". Der echte Ledger ist leer, der Trocken-Ledger enthält nie Fills. Ein Ledger-Soll von 0 stünde jedem manuell gehaltenen Bestand gegenüber und würde diesen Ticker dauerhaft stoppen.
    - Empfehlung: Mechanismus und Test jetzt bauen, aber nur mit einer **engen** Regel: Widerspruch, wenn der Ledger eigene gefüllte Menge `Q > 0` für diese `conId` kennt und der Broker-Bestand kleiner als `Q` ist (der Executor kann nicht weniger halten, als er selbst gekauft hat, ohne dass etwas Fremdes passiert wäre). Ohne Fills im Ledger ergibt sich kein Widerspruch. Die Regel für Verkäufe und Fremdbestände wird mit der Fill-Verarbeitung in Phase 6/7 geschärft. Bestätigung des Operators einholen.
 
 3. **Was ist die zweite Quelle für „Handelbarkeit" und „Konto der Order" vor der ersten Order?**
+   - **RESOLVED:** D-22 (Kalender + `liquidHours`, `managedAccounts` + `RELEASE.account`, Echo optional; umgesetzt in 05-07, Handbuch 05-09)
    - Was wir wissen: „Order-Status nach Platzierung (399 geparkt)" existiert erst mit einer echten Order (Phase 6). Die `whatIf`-Antwort zeigte bei geschlossener Börse **keinen** Warntext (`warningText=''`, Messung 2026-10-12), taugt also nicht als Ersatz. Das Konto-Feld der Order kommt nur zurück, wenn das Gateway es im Echo spiegelt (A5).
    - Empfehlung: Vergleichsfunktionen, Tests (zwei Quellen laufen auseinander → keine Order) und Verdrahtung jetzt; die Handelbarkeits-Quelle „Order-Status 399" im Placer von Phase 6 anschließen, bis dahin ist die zweite Quelle die Kombination aus `evaluate_session` und `calendar_conflict` (beides schon in der Kette) und im Handbuch so benannt. Konto: `managedAccounts` (Guard) und `RELEASE.account` sind die zwei Quellen; das Echo ist optional und nur bei Abweichung maßgeblich.
 
 4. **Wie wird ein unauflösbarer `intent` (Exit 6) aufgelöst?**
+   - **RESOLVED:** D-19 (Abbruch + Meldung in 05-07, Handbuch-Ablauf in 05-09, `--resolve` in Phase 6)
    - Was wir wissen: REQ-43 verlangt Abbruch statt Raten; ohne Auflösungsweg blockiert jeder Folgelauf dauerhaft, auch in Phase 8 unbeaufsichtigt.
    - Empfehlung: Phase 5 liefert Abbruch + eindeutige Meldung (welcher Schlüssel, was die Quellen zeigen). Die Auflösung ist **Operator-Handlung mit Spur**: ein dokumentierter Ablauf (Handbuch) oder ein kleines Flag `execute --resolve KEY=never_sent --note TEXT`, das ein `resolved`-Ereignis anhängt, nie eine Zeile ändert. Ob das Flag in Phase 5 oder Phase 6 gehört, entscheidet der Operator; für Phase 5 reicht der Abbruch samt Handbuchabschnitt.
 
 5. **Löst „Zustand nicht lesbar" das `reqGlobalCancel` aus?**
+   - **RESOLVED:** D-17 (Storno nur bei vorhandener `KILL`-Datei; 05-01, 05-05)
    - Was wir wissen: D-03 sagt „gilt als aktiv (Exit 4)"; D-05/REQ-35 binden das Storno an einen **festgestellten** aktiven Kill-Switch; die Diskussion nannte als Risiko, dass ein Bug fremde TWS-Orders wegräumt.
    - Empfehlung: Storno **nur bei positiv vorhandener `KILL`-Datei**. Unlesbarer Zustand und fehlende/abgelaufene Freigabe enden mit Exit 4 **ohne** Storno (`KILL_UNREADABLE`, `RELEASE_*`). Das liest D-03 „aktiv" als „Handel gesperrt", nicht als „Storno". Operator bestätigen lassen; die Gegenlesart (Storno auch bei unlesbar) ist ein Einzeiler im Executor.
 
 6. **Obergrenze für die Laufzeit der Freigabe?**
+   - **RESOLVED:** D-20 (90 Tage; 05-01)
    - Was wir wissen: D-01 will „Wochen im Voraus"; eine ewige Freigabe wird vergessen.
    - Empfehlung (optional): `valid_until` weiter als N Tage in der Zukunft → `invalid`. N ist Operator-Ermessen (Vorschlag 90). Ohne Obergrenze genügt `valid_until=9999-12-31` als „ewige" Freigabe.
 
 7. **Jev-Todo (`2026-10-16-mark-or-exclude-jev-fallback-ratings-in-ibkr-preview`): gehört es in Phase 5?**
+   - **RESOLVED:** D-23 (nicht in Phase 5, Eingangsaufgabe von Phase 6; Feld `rating_source` in 05-02, ROADMAP-Vermerk in 05-09)
    - Was wir wissen: Das Todo betrifft die **Entscheidungsquelle** (Rating im Decision-Log nicht von einem Engine-Rating unterscheidbar), nicht eine Leitplanke. `summary.json` trägt `rating_source` (`daily_paper_run.py:372`); der Konsumentenvertrag `SUMMARY_FIELDS/RUN_FIELDS` liest das Feld heute nicht. Phase 5 sendet nichts, ein Jev-Rating in einem Trockenlauf ist folgenlos.
    - **Empfehlung: nicht in Phase 5.** Es ist eine Vorbedingungsprüfung in der Familie von REQ-IBKR-16/-17 (Phase 4) und hat drei Lösungswege (a Log-Tag, b `summary.json`-Abgleich, c bewusst akzeptieren), von denen (a) eine Upstream-Datei ändert. Die Entscheidung muss **vor der ersten echten Order** fallen, also als Eingangsaufgabe von Phase 6 (oder als eigene kleine Einfügung zwischen 5 und 6 nach G3) eingeplant werden, nicht als Teil von G3. Billige Mitnahme in Phase 5, falls gewünscht: das Ledger-Schema hat ein optionales Feld `rating_source`, das erst in Phase 6 befüllt wird. Das ist keine Entscheidung; sie liegt beim Operator.
 
 8. **`execute` und Aktualisierung von REQUIREMENTS-/ROADMAP-Text.**
+   - **RESOLVED:** 05-09 Task 2 (datierte Vermerke zu REQ-25/-33/-42/-63 und ROADMAP)
    - Dokumentpflege, die der Plan einplanen muss (jeweils mit datiertem „Geändert 2026-10-..."-Vermerk nach dem Muster aus Phase 3): REQ-33 (Freigabe-Datei statt -Variable), REQ-42 (Gründe `source_conflict`, `already_attempted`, `decision_changed`, `foreign_open_order`; `weekend_gap` als Markierung), REQ-25 (Fenster = Phase-3-Puffer), und im ROADMAP SC1 „Freigabe fehlt" bleibt wörtlich richtig.
 
 ## Environment Availability

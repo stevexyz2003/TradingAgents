@@ -254,7 +254,39 @@ Plans:
 - Kein Branch, kein Heartbeat, kein Scheduler.
 - Keine Backup-Erweiterung — die kommt mit Phase 7, wenn der Ledger seine endgültige Form hat.
 
-**Plans:** TBD
+**Plans:** 10 plans (7 Wellen)
+
+Plans:
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — `ibkr_guards.py`: RELEASE/KILL fail-closed, Größengrenze, `decision_key`, Quellenvergleiche, Zustände (W1)
+- [ ] 05-02-PLAN.md — `ibkr_ledger.py`: append-only JSONL, torn tail, Modus-Trennung, `resolve_entry`, Git-Baum-Prüfung (W1)
+- [ ] 05-03-PLAN.md — Adapter: `order_history`, `open_orders()` ungefiltert, `orderRef` am whatIf, `cancel_all` als Einmal-Permit (W1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-04-PLAN.md — `execute`-Durchstich: zwangsweise trocken, `ledger-dryrun.jsonl`, `intent` mit fsync, `orderRef == decision_key` (W2)
+- [ ] 05-08-PLAN.md — Read-only-Sonde `scripts/smoke/ibkr_order_probe.py` für die Gateway-Messungen (W2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 05-05-PLAN.md — Lauf-Lock (Exit 7), Schalter-Preflight und Prüfung vor jeder Order (Exit 4), Kill-Storno; G3 Kill (W3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 05-06-PLAN.md — Größengrenze, Sitzungsfenster (REQ-25), ein Versuch je Schlüssel; G3 Größe und Sitzung (W4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 05-07-PLAN.md — Startup-Reconciliation (Exit 6) und Zwei-Quellen-Prüfungen (REQ-63); G3 Reconciliation (W5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 05-09-PLAN.md — Handbuch, Isolations-Wächter, git-status-Nachweis, REQ-/ROADMAP-Vermerke (W6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 05-10-PLAN.md — Operator-Checkpoint: echter Kill-Storno (SC3), Orderhistorie, `orderRef` mit `|` (W7)
 
 ---
 
