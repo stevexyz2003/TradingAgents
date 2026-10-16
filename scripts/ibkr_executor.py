@@ -1434,6 +1434,12 @@ def run_preview(
     raw = read_settings(args.env_file)
     host, port, _account = validate_settings(raw, mods.broker.EXPECTED_ACCOUNT)
     remote, branch = paper_log_settings(raw, mods.paperlog)
+    # A broken contract table is a configuration error (exit 1); left alone it
+    # would surface mid-window as a plan_order ValueError and exit as a gateway
+    # failure with the session open and the finished rows lost.
+    problems = mods.contracts.table_problems()
+    if problems:
+        raise ConfigError("contract table: " + "; ".join(problems))
     source = paper_log_factory(REPO_ROOT, remote, branch)
     ctx = SimpleNamespace(
         mods=mods,

@@ -976,6 +976,24 @@ class TestSessionAndCalendar:
 
 
 class TestContracts:
+    def test_a_broken_contract_table_is_exit_1_before_any_contact(self, tmp_path, monkeypatch):
+        """WR-03: table_problems runs up front, not as a mid-window ValueError (exit 3)."""
+        monkeypatch.setattr(executor, "load_contracts_module", lambda: contracts_mod)
+        monkeypatch.setattr(
+            contracts_mod, "table_problems", lambda *a: ("'AAPL': block_qty must be positive",)
+        )
+        paper = _buy_paper(tmp_path)
+        factory = _RecordingFactory()
+        code, out, log, _c = _run_preview(
+            tmp_path, factory, ["AAPL"], paper_log=paper, contracts=_contracts_file(
+                tmp_path, {"AAPL": _identity("AAPL")}
+            )
+        )
+        assert code == executor.EXIT_CONFIG
+        assert factory.calls == []
+        assert not Path(out).exists()
+        assert "contract table" in _log_text(log)
+
     def test_a_ticker_without_a_stored_contract_is_not_resolved_yet(self, tmp_path):
         paper = _buy_paper(tmp_path, ticker="MSFT")
         path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
