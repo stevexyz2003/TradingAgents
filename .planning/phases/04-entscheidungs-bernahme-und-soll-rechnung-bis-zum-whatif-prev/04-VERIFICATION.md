@@ -1,9 +1,15 @@
 ---
 phase: 04-entscheidungs-bernahme-und-soll-rechnung-bis-zum-whatif-prev
 verified: 2026-10-12T00:00:00Z
-status: human_needed
-score: 8/8 ROADMAP-Success-Criteria verifiziert (SC2 mit Operator-Bestätigung der 321-Anpassung offen)
-overrides_applied: 0
+status: passed
+score: 8/8 ROADMAP-Success-Criteria verifiziert; SC2 per Operator-Entscheidung 2026-10-16 umformuliert (321-Schalter blockt whatIf, Schutz ist die Socket-Sperre); 154 per Override; Sitzungsfenster aus REQ-IBKR-25 nach Phase 5 verschoben
+overrides_applied: 1
+overrides:
+  - must_have: "REQ-IBKR-67 Fehlercode 154 (Halt) am echten Gateway gemessen"
+    reason: "154 ist am Paper-Gateway nicht herbeiführbar (Annahme A5) und nur über die offizielle IBKR-Codeliste plus test_code_154_is_halted belegt. Der Code ist request-gebunden und wird in der whatIf-Vorschau ausgewertet, nicht im Lesefenster. Offen bis zur ersten Live-Gelegenheit."
+    accepted_by: "Operator"
+    accepted_at: "2026-10-16T19:27:26Z"
+re_verification: "2026-10-16T19:27:26Z — alle 4 human_verification-Punkte vom Operator entschieden, siehe 04-HUMAN-UAT.md"
 human_verification:
   - test: "D-14 / SC2-Anpassung bestätigen: Der ROADMAP-Satz zu 321 (\"ein versehentliches place scheitert an 321 – nur solange der Operator den Schreibschutz gesetzt hat\") wird ersetzt durch: Der Gateway-Schalter 'Read-Only API' blockt auch whatIf (321, 10 s Timeout), bleibt daher in Phase 4 AUS; der Schutz vor einem versehentlichen place ist allein die Socket-Sperre (Id 3 nur als STK-whatIf)."
     expected: "Operator bestätigt den Ersatzsatz und dass der Schalter AUS bleibt (Schalter-Stand AUS am 2026-10-12 ist laut Operator bestätigt). ROADMAP.md SC2 trägt den alten Satz noch."

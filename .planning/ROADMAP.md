@@ -23,7 +23,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 | Gate | Zwischen | Bedingung |
 |---|---|---|
 | **G1 — Messung** | Phase 1 → 2 | `.planning/ibkr-konto-befund.md` ist committet und beantwortet alle fünf Fragen aus REQ-IBKR-01. Ohne ihn beginnt kein Code. |
-| **G2 — Preview** | Phase 4 → 5 | Für mindestens ein Fixture liegt ein `whatIf`-Protokoll mit Margin, Kommission und leerem `rejectReason` vor, und der Lauf hat nachweislich nichts gesendet. |
+| **G2 — Preview** | Phase 4 → 5 | Für mindestens ein Fixture liegt ein `whatIf`-Protokoll mit Margin, Kommission und leerem `rejectReason` vor, und der Lauf hat nachweislich nichts gesendet. **Geschlossen 2026-10-16** (`04-VERIFICATION.md` passed, `04-HUMAN-UAT.md` complete). |
 | **G3 — Leitplanken** | Phase 5 → 6 | Alle vier Leitplanken sind ohne Gateway testbar nachgewiesen (Kill-Switch-Test, Größen-Test, Sitzungs-Test, Reconciliation-Test). Erst danach wird das API-Schreibrecht freigegeben. |
 
 ---
@@ -43,8 +43,8 @@ Vier Regeln haben den Zuschnitt bestimmt:
 |---|---|---|
 | 1. Konto-Messung | 2 | abgeschlossen |
 | 2. Verbindung & Kontolesen | 12 | abgeschlossen |
-| 3. Symbol & Handelszeiten | 7 | offen |
-| 4. Entscheidung & Trockenlauf | 16 | offen |
+| 3. Symbol & Handelszeiten | 7 | abgeschlossen |
+| 4. Entscheidung & Trockenlauf | 16 | abgeschlossen |
 | 5. Leitplanken | 15 | offen |
 | 6. Erste echte Order | 5 | offen |
 | 7. Rückkanal | 4 | offen |
@@ -188,7 +188,7 @@ Plans:
 **Success Criteria:**
 
 1. Der Trockenlauf gegen den **echten** Branchstand vom 2026-10-09 (AAPL, `Hold`) erzeugt keine Order und protokolliert `skipped: hold`. Das ist der wichtigste Einzelnachweis dieser Phase: die eine reale Entscheidung im Bestand darf am Tag 1 nichts kaufen.
-2. Ein Fixture mit `Buy` und flacher Position erzeugt die Absicht „2 Blöcke kaufen", durchläuft `whatIf` und protokolliert Margin-Impact, Kommission und `rejectReason` — und sendet nichts; ein versehentliches `place` scheitert in dieser Phase an 321 — aber nur, solange der Operator den Gateway-Schreibschutz gesetzt hat (am 2026-10-11 war er wieder aus).
+2. Ein Fixture mit `Buy` und flacher Position erzeugt die Absicht „2 Blöcke kaufen", durchläuft `whatIf` und protokolliert Margin-Impact, Kommission und `rejectReason` — und sendet nichts; ein versehentliches `place` blockt allein die Socket-Sperre des Adapters (Nachricht 3 nur als STK-`whatIf`). Der Gateway-Schalter „Read-Only API" blockt auch `whatIf` (321, 10 s Timeout, gemessen 2026-10-12) und bleibt deshalb aus. *Umformuliert 2026-10-16 per Operator-Entscheidung (D-14).*
 3. Der Divergenzfall ist abgedeckt: ein Fixture, in dem `summary.json` ein anderes Signal zeigt als `decision-log.md`, endet mit Exit 2 und protokollierter Abweichung — und der Lauf hat die Fassung aus `decision-log.md` gelesen, nicht die aus dem Summary.
 4. Die Aktualitätsregel ist **in Sitzungen** getestet, mit allen vier Gegenproben: Di-Lauf/`trade_date`=Mo → ausführbar · Sa-Entscheidung am Mo → ausführbar, markiert als `weekend_gap` · Mi verpasst, Do nachgeholt → Exit 2 · Feiertagsmontag, Di-Lauf → ausführbar.
 5. `null`, `"REVIEW"`, `status != "ok"`, `schema_version != 1` und ein Befund von `state_maintenance.py verify` führen jeweils zu einem eigenen protokollierten Zustand und zu keiner Order.
@@ -233,7 +233,7 @@ Plans:
 
 **Ziel:** Die vier Pflicht-Leitplanken sind scharf und ohne eine einzige Order bewiesen.
 **Depends on:** Phase 4 (Gate G2)
-**Requirements:** REQ-IBKR-32, -33, -34, -35, -36, -39, -40, -41, -42, -43, -44, -46, -63, -64, -66
+**Requirements:** REQ-IBKR-32, -33, -34, -35, -36, -39, -40, -41, -42, -43, -44, -46, -63, -64, -66, -25 (Teil Sitzungsfenster, aus Phase 4 verschoben am 2026-10-16)
 **Warum eigene Phase:** Alle Nachweise dieser Phase sind **ohne** Gateway führbar (Stub nach dem Muster von `scripts/smoke/stub_llm.py`) bzw. read-only. Eine Leitplanke, die erst nach der ersten echten Order geprüft wird, ist keine Leitplanke.
 
 **Success Criteria:**
