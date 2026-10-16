@@ -110,13 +110,28 @@ def test_read_before_fetch():
 
 
 def test_read_blob_and_missing():
-    r = FakeRunner(_ok_fetch() + [(0, b"a\r\nb", b""), (128, b"", b"fatal")])
+    r = FakeRunner(
+        _ok_fetch() + [(0, b"a\r\nb", b""), (128, b"", b"fatal: path"), (0, b"", b"")]
+    )
     log = _log(r)
     log.fetch()
     assert log.read("decision-log.md") == b"a\r\nb"
     assert r.calls[3][0] == ["git", "cat-file", "blob", f"{SHA}:decision-log.md"]
     with pytest.raises(pl.BlobMissing):
         log.read("runs/2026-01-01/summary.json")
+    assert r.calls[-1][0] == ["git", "cat-file", "-e", f"{SHA}^{{commit}}"]
+
+
+def test_read_failure_with_missing_commit_is_unavailable_not_missing():
+    """WR-06: a damaged or shallow repo must not read as 'file missing'."""
+    r = FakeRunner(
+        _ok_fetch() + [(128, b"", b"fatal: bad object"), (128, b"", b"fatal: Not a valid")]
+    )
+    log = _log(r)
+    log.fetch()
+    with pytest.raises(pl.PaperLogUnavailable) as ei:
+        log.read("decision-log.md")
+    assert "bad object" in ei.value.reason
 
 
 @pytest.mark.parametrize("bad", ["../x", "-p", "/abs", "", "a//b", "a b"])

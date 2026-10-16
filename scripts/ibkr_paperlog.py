@@ -158,6 +158,15 @@ class GitPaperLog:
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise PaperLogUnavailable(f"git unavailable: {exc}") from exc
         if proc.returncode != 0:
+            # git words "path absent" and "commit/object absent" the same way,
+            # so ask for the commit itself: only if it is there is the path
+            # really missing. Otherwise the repo is damaged or partial.
+            try:
+                commit = self._git(["cat-file", "-e", f"{sha}^{{commit}}"], self._read_timeout)
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                raise PaperLogUnavailable(f"git unavailable: {exc}") from exc
+            if commit.returncode != 0:
+                raise PaperLogUnavailable(f"cat-file failed: {self._err(proc)}")
             raise BlobMissing(path)
         return proc.stdout
 
