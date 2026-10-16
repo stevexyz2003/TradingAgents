@@ -1352,28 +1352,30 @@ def test_the_fake_forbids_market_data():
         assert name in fake.calls
 
 
-# --- fail-closed for system events: an unexpected reqId=-1 code voids a read window ----
+# --- fail-closed for system events: an unclassified reqId=-1 code voids a read window --
 
-#: Real IBKR system notices that report a broken state but are no link codes. Before
-#: this fix the window only knew LINK_CODES, so these passed silently (fail-open).
-_BROKEN_SYSTEM_EVENTS = [
-    (2103, "FARM_DOWN", "Market data farm connection is broken"),
-    (2105, "FARM_DOWN", "HMDS data farm connection is broken"),
+#: System codes that must void a read window. 2157 is the realistic one: the sec-def
+#: farm, which contract_details depends on, is not classified anywhere, so before this
+#: fix a break of it passed the window silently (fail-open).
+_VOIDING_SYSTEM_EVENTS = [
+    (2157, "UNKNOWN", "Sec-def data farm connection is broken"),
     (507, "SOCKET_EOF", "Bad message length"),
+    (2999, "UNKNOWN", "a code nobody has measured"),
 ]
-_BROKEN_IDS = [str(code) for code, _, _ in _BROKEN_SYSTEM_EVENTS]
+_VOIDING_IDS = [str(code) for code, _, _ in _VOIDING_SYSTEM_EVENTS]
+_BENIGN = sorted({2104, 2106, 2158, 10089, 10090, 10167, 2103, 2105, 2107, 2108, 321})
 
 
-@pytest.mark.parametrize(("code", "state", "text"), _BROKEN_SYSTEM_EVENTS, ids=_BROKEN_IDS)
-def test_health_voids_a_probe_with_an_unexpected_system_event(loop, code, state, text):
+@pytest.mark.parametrize(("code", "state", "text"), _VOIDING_SYSTEM_EVENTS, ids=_VOIDING_IDS)
+def test_health_voids_a_probe_with_an_unclassified_system_event(loop, code, state, text):
     # The probe answers well formed (assumption A4): only the event in its window shows it.
     fake = FakeIB(emit_during={"probe": [(-1, code, text, None)]})
     health = _connected(fake, loop).health()
     assert (health.ok, health.state) == (False, state)
 
 
-@pytest.mark.parametrize(("code", "state", "text"), _BROKEN_SYSTEM_EVENTS, ids=_BROKEN_IDS)
-def test_positions_discards_a_snapshot_with_an_unexpected_system_event(loop, code, state, text):
+@pytest.mark.parametrize(("code", "state", "text"), _VOIDING_SYSTEM_EVENTS, ids=_VOIDING_IDS)
+def test_positions_discards_a_snapshot_with_an_unclassified_system_event(loop, code, state, text):
     fake = FakeIB(
         positions=[position("DUQ634065", "AAPL", 3)],
         summary=_summary(),
@@ -1384,45 +1386,38 @@ def test_positions_discards_a_snapshot_with_an_unexpected_system_event(loop, cod
     assert (info.value.state, info.value.code) == (state, code)
 
 
-def test_resolution_read_is_voided_by_an_unexpected_system_event(loop):
-    # The resolution path persists what it reads (contracts.json), so a read taken
-    # while the farm is down must not be learned.
+def test_contract_details_are_voided_by_a_secdef_farm_break(loop):
+    # The resolution path persists what it reads (contracts.json): a read taken while
+    # the sec-def farm is broken must not be learned.
     detail = contract_detail(stk_contract("AAPL", 265598), liquid_hours="20261012:0930-1600")
     fake = FakeIB(
         details={265598: [detail]},
-        emit_during={"contract_details": [(-1, 2103, "Market data farm connection is broken", None)]},
+        emit_during={"contract_details": [(-1, 2157, "Sec-def data farm connection is broken", None)]},
     )
     with pytest.raises(broker.GatewayUnavailable) as info:
         _connected(fake, loop).contract_details(265598, "SMART")
-    assert (info.value.state, info.value.code) == ("FARM_DOWN", 2103)
+    assert (info.value.state, info.value.code) == ("UNKNOWN", 2157)
 
 
-def test_a_never_measured_system_code_voids_the_window(loop):
-    # Not in STATE_BY_CODE: fail-closed by construction, no measurement needed (REQ-IBKR-67).
-    fake = FakeIB(emit_during={"probe": [(-1, 2999, "something nobody has seen", None)]})
-    health = _connected(fake, loop).health()
-    assert (health.ok, health.state) == (False, "UNKNOWN")
+def test_window_benign_codes_are_pinned():
+    # A code enters only when measured at the real gateway or decided in a review;
+    # see the comment at WINDOW_BENIGN_CODES.
+    assert broker.WINDOW_BENIGN_CODES == frozenset(_BENIGN)
 
 
-def test_window_benign_codes_are_exactly_the_measured_notices():
-    # Pinned: a code enters only after it was seen at the real gateway. 2107 was
-    # measured 2026-10-12 in the real account run; it is session state, not a fault.
-    assert broker.WINDOW_BENIGN_CODES == frozenset(
-        {2104, 2106, 2158, 2107, 10089, 10090, 10167}
-    )
-
-
-@pytest.mark.parametrize("code", [2104, 2106, 2158, 2107, 10089, 10090, 10167])
-def test_benign_system_notices_do_not_void_a_window(loop, code):
+@pytest.mark.parametrize("code", _BENIGN)
+def test_benign_system_notices_do_not_void_a_probe(loop, code):
     fake = FakeIB(emit_during={"probe": [(-1, code, "notice", None)]})
     assert _connected(fake, loop).health().ok is True
 
 
-def test_2107_inside_a_snapshot_keeps_the_snapshot(loop):
+@pytest.mark.parametrize("code", [2103, 2107])
+def test_farm_notices_inside_a_snapshot_keep_the_snapshot(loop, code):
+    # 2103 concerns the market-data farm, 2107 is idle HMDS: neither feeds the account.
     fake = FakeIB(
         positions=[],
         summary=_summary(),
-        emit_during={"account_summary": [(-1, 2107, "HMDS data farm connection is inactive", None)]},
+        emit_during={"account_summary": [(-1, code, "farm notice", None)]},
     )
     snapshot = _connected(fake, loop).positions()
     assert float(snapshot.cash) == pytest.approx(1005459.44)
