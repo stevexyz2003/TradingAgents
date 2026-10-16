@@ -28,10 +28,13 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install (with dev extras)
+      - name: Install (with the full test extras)
+        # The "ci" extra pulls dev plus every optional package a test imports via
+        # importorskip; without them safety tests skip silently.
+        # tests/test_ci_optional_deps.py fails the job if one is missing.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[ci]"
       - name: Run test suite
         run: pytest -q
 

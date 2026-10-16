@@ -52,6 +52,12 @@ ibkr = [
     # XNYS session calendar for the phase-4 freshness rule (D-05): liquidHours only reaches about five days ahead, never back.
     "exchange_calendars>=4.13,<5",
 ]
+# Everything the CI test job needs, under a neutral name: the workflow files must not
+# mention the broker at all (tests/test_ibkr_isolation.py), yet the write-barrier and
+# XNYS tests need the extra above or they skip silently (see tests/test_ci_optional_deps.py).
+ci = [
+    "tradingagents[dev,ibkr]",
+]
 
 [project.scripts]
 tradingagents = "cli.main:app"
