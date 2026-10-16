@@ -555,3 +555,55 @@ class TestGatewayFailures:
         code, _c, _l = _run(tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path)
         assert code == executor.EXIT_GATEWAY
         assert path.read_bytes() == before
+
+
+# --- real weekend listing (Nyquist audit, phase 03, REQ-IBKR-37, D-24 vs D-29) ----------
+
+#: Verbatim from the gateway, AAPL, measured Sunday 2026-10-11 (.planning/ibkr-konto-befund.md).
+REAL_AAPL_LIQUID_HOURS = (
+    "20261011:CLOSED;20261012:0930-20261012:1600;20261013:0930-20261013:1600;"
+    "20261014:0930-20261014:1600;20261015:0930-20261015:1600;20261016:0930-20261016:1600"
+)
+REAL_AAPL_TIME_ZONE = "US/Eastern"
+#: Sunday 2026-10-11, 13:20 US/Eastern (EDT, UTC-4).
+REAL_SUNDAY_NOW = datetime(2026, 10, 11, 17, 20, tzinfo=UTC)
+#: Saturday 2026-10-10, 13:20 US/Eastern.
+REAL_SATURDAY_NOW = datetime(2026, 10, 10, 17, 20, tzinfo=UTC)
+
+
+class TestRealWeekendLiquidHours:
+    def test_real_sunday_liquid_hours_is_closed_not_unknown(self, tmp_path, loop, capsys):
+        """Source: Befund 2026-10-11 (real AAPL liquidHours, a Sunday with a CLOSED entry).
+
+        The CLOSED day is named in the string, so D-24 gives ``closed`` with the next
+        window (Monday open plus the 15 minute buffer), exit 0, never ``session-unknown``.
+        """
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        fake = _fake_for(
+            ("AAPL",), liquid_hours=REAL_AAPL_LIQUID_HOURS, time_zone_id=REAL_AAPL_TIME_ZONE
+        )
+        code, _c, _l = _run(
+            tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path, clock=REAL_SUNDAY_NOW
+        )
+        line = _lines(capsys)[0]
+        assert "session-unknown" not in line
+        assert line.startswith("resolve: AAPL closed"), line
+        # 09:30 ET open plus the 15 minute buffer, in the exchange's own offset.
+        assert "next window 2026-10-12T09:45:00-04:00" in line
+        assert code == executor.EXIT_OK
+
+    def test_real_saturday_without_an_entry_is_session_unknown(self, tmp_path, loop, capsys):
+        """Source: Befund 2026-10-11 string; Saturday 2026-10-10 is not listed in it.
+
+        D-24: a day with neither a window nor a CLOSED entry is ``session-unknown``
+        (exit 2). A live Saturday gateway run, which may list Saturday itself, stays manual.
+        """
+        path = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        fake = _fake_for(
+            ("AAPL",), liquid_hours=REAL_AAPL_LIQUID_HOURS, time_zone_id=REAL_AAPL_TIME_ZONE
+        )
+        code, _c, _l = _run(
+            tmp_path, _fake_factory(fake, loop), ["AAPL"], contracts=path, clock=REAL_SATURDAY_NOW
+        )
+        assert _lines(capsys)[0].startswith("resolve: AAPL session-unknown")
+        assert code == executor.EXIT_PRECONDITION
