@@ -107,6 +107,36 @@ Backup-Erweiterung (kommt mit Phase 7).
 - Ob die `execute`-Kette Bausteine aus `run_preview` wiederverwendet oder
   herauslöst.
 
+### Operator-Entscheidungen nach der Recherche (2026-10-16, Planung)
+
+Aus den offenen Fragen in `05-RESEARCH.md` § Open Questions; gelten als gesperrt.
+
+- **D-17 Storno-Auslöser:** `reqGlobalCancel` nur bei positiv vorhandener `KILL`-Datei.
+  Unlesbarer Zustand (`KILL_UNREADABLE`) und fehlende/abgelaufene/ungültige Freigabe
+  (`RELEASE_*`) enden mit Exit 4 **ohne** Storno. D-03 „gilt als aktiv" heißt
+  „Handel gesperrt", nicht „stornieren".
+- **D-18 Positions-Widerspruch (REQ-63), enge Regel:** Widerspruch nur, wenn der Ledger
+  eigene gefüllte Menge `Q > 0` für die `conId` kennt und der Broker-Bestand `< Q` ist.
+  Ohne Fills im Ledger kein Widerspruch. Mechanismus und Tests jetzt; Schärfung für
+  Verkäufe/Fremdbestände mit der Fill-Verarbeitung in Phase 6/7.
+- **D-19 Unauflösbarer `intent` (Exit 6):** Phase 5 bricht ab, meldet eindeutig (Schlüssel,
+  was jede Quelle zeigt) und dokumentiert den Auflösungsablauf im Handbuch. Das Flag
+  `execute --resolve KEY=never_sent --note TEXT` (hängt ein `resolved`-Ereignis an, ändert
+  nie eine Zeile) kommt in Phase 6.
+- **D-20 Obergrenze der Freigabe:** `valid_until` mehr als 90 Tage in der Zukunft → Freigabe
+  `invalid` (Exit 4, ohne Storno nach D-17).
+- **D-21 Erste Schalterprüfung (Superset von REQ-45):** Preflight direkt nach dem Lock, vor
+  der Reconciliation (Schalterzustand ins Ledger, `KILL` → Storno-Pfad), zusätzlich die
+  Prüfungen an der REQ-45-Stelle und unmittelbar vor `intent`. Der Reihenfolgetest von
+  Phase 6 kennt diesen Schritt. (Empfehlung der Recherche, vom Orchestrator übernommen.)
+- **D-22 Zweite Quelle Handelbarkeit/Konto vor der ersten Order:** Handelbarkeit bis Phase 6 =
+  `evaluate_session` + `calendar_conflict`; „Order-Status 399" wird im Placer von Phase 6
+  angeschlossen. Konto = `managedAccounts` (Guard) + `RELEASE.account`; das Order-Echo ist
+  optional und nur bei Abweichung maßgeblich. Im Handbuch so benennen. (Empfehlung übernommen.)
+- **D-23 Jev-Fallback-Todo:** nicht in Phase 5; Eingangsaufgabe von Phase 6 vor der ersten
+  echten Order. Phase 5 sieht im Ledger-Schema ein optionales Feld `rating_source` vor
+  (in Phase 5 nicht befüllt). (Empfehlung übernommen.)
+
 </decisions>
 
 <canonical_refs>
