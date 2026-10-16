@@ -137,6 +137,17 @@ PREVIEW_TIF = "DAY"
 
 #: Farm-OK and delayed-market-data notices: expected states, logged at INFO.
 INFO_CODES = frozenset({2104, 2106, 2158, 10089, 10090, 10167})
+#: System notices (reqId == -1) that may appear inside a read window without voiding
+#: it. Any other system code inside a window voids what was read there, a never
+#: classified one included (2157, the sec-def farm the contract reads depend on, is
+#: such a code): fail-closed by construction instead of a list of known faults.
+#: Each entry is measured at the real gateway or a reviewed decision:
+#:   INFO_CODES  farm-OK and delayed-market-data notices
+#:   2107        HMDS farm inactive, available on demand (measured 2026-10-12)
+#:   2103/2105/2108  market-data and HMDS farms: neither the account nor the
+#:               sec-def reads use them (phase-3 review, 2b941a0)
+#:   321         read-only API, owned by the preview (measured 2026-10-11)
+WINDOW_BENIGN_CODES = INFO_CODES | frozenset({2103, 2105, 2107, 2108, 321})
 
 # Named states without a gateway code.
 CONNECT_TIMEOUT = "CONNECT_TIMEOUT"
@@ -534,7 +545,8 @@ class IbkrBroker:
         self._request_errors: list[int] = []
         #: The same errors with their text, for the preview's error report.
         self._request_error_texts: list[tuple[int, str]] = []
-        #: Every LINK_CODES event of the session, in order; read windows compare its length.
+        #: Every window-voiding event of the session, in order: a LINK_CODES event or a
+        #: system notice outside WINDOW_BENIGN_CODES. Read windows compare its length.
         self._link_codes: list[int] = []
 
     def __enter__(self) -> IbkrBroker:
@@ -658,7 +670,7 @@ class IbkrBroker:
         flight voids its answer.
 
         Known limit (assumption A4): should the gateway answer the probe from a
-        cache while the server link is down, only the 1100/2110 events reveal
+        cache while the server link is down, only the system events reveal
         it; they are checked before and after the probe.
         """
         ib, handles = self._ib, self._handles
@@ -1055,7 +1067,7 @@ class IbkrBroker:
         return None
 
     def _link_event_since(self, mark: int) -> tuple[str, int] | None:
-        """``(state, code)`` of the first link event after ``mark``, or None.
+        """``(state, code)`` of the first window-voiding event after ``mark``, or None.
 
         The first event names the state: 1100 then 1102 inside one window is
         still a lost link, whatever the flags say afterwards.
@@ -1083,10 +1095,16 @@ class IbkrBroker:
         level = logging.INFO if errorCode in INFO_CODES else logging.WARNING
         self._log.log(level, 'ibkr-state=%s code=%s detail="%s"', state, errorCode, errorString)
         self._seen_codes.append(errorCode)
-        if isinstance(reqId, int) and reqId >= 0:
+        request_scoped = isinstance(reqId, int) and reqId >= 0
+        if request_scoped:
             self._request_errors.append(errorCode)
             self._request_error_texts.append((errorCode, str(errorString)))
-        if errorCode in LINK_CODES:
+        # A link code, or any system notice that is not known to be benign, voids the
+        # read window it lands in. Request-scoped codes answer their request and are
+        # judged by _request_error_since instead.
+        if errorCode in LINK_CODES or (
+            not request_scoped and errorCode not in WINDOW_BENIGN_CODES
+        ):
             self._link_codes.append(errorCode)
         if errorCode == 1100:
             self.link_lost = True

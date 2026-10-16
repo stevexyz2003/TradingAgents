@@ -1402,7 +1402,7 @@ def test_contract_details_are_voided_by_a_secdef_farm_break(loop):
 def test_window_benign_codes_are_pinned():
     # A code enters only when measured at the real gateway or decided in a review;
     # see the comment at WINDOW_BENIGN_CODES.
-    assert broker.WINDOW_BENIGN_CODES == frozenset(_BENIGN)
+    assert frozenset(_BENIGN) == broker.WINDOW_BENIGN_CODES
 
 
 @pytest.mark.parametrize("code", _BENIGN)
