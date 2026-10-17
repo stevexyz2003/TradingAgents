@@ -3,14 +3,15 @@ gsd_state_version: 1.0
 milestone: M2
 milestone_name: IBKR Paper Execution
 status: ready_to_plan
-last_updated: "2026-10-17T10:08:50.216Z"
+last_updated: 2026-10-17T12:45:25.374Z
 last_activity: 2026-10-17 -- Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 31
-  completed_plans: 21
+  completed_plans: 31
   percent: 38
+stopped_at: Phase 05 complete (10/10) — ready to discuss Phase 6
 ---
 
 # Project State — TradingEngineX (TradingAgents)
@@ -21,8 +22,8 @@ progress:
 
 ## Current Position
 
-Phase: 05 (leitplanken-scharf) — EXECUTING
-Plan: 1 of 10
+Phase: 6
+Plan: Not started
 **Nächster Schritt: M2 Phase 5 planen — `/gsd:plan-phase 5`** (Kontext steht in
 `.planning/phases/05-leitplanken-scharf/05-CONTEXT.md`). Kill-Switch, Ledger,
 Lock, Reconciliation und neu das Sitzungsfenster aus REQ-IBKR-25, alles ohne eine
@@ -36,7 +37,7 @@ Querschnitts-Fix d344433: Jede nicht als harmlos geführte System-Meldung
 z. B. 2157 (Sec-Def-Farm kaputt) still durch und konnte in `contracts.json` gelernt
 werden.
 
-Last activity: 2026-10-17 -- Phase 05 execution started
+Last activity: 2026-10-17
 
 Davor: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
 
