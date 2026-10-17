@@ -6,9 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Changes that need action when upgrading are listed under "Upgrading from" in their release.
 
-## [Unreleased] — TradingEngineX strand (rebased onto v0.6.0)
+## [Unreleased] — TradingEngineX strand (rebased onto v0.7.0)
 
-Features from the former `v0.2.5-tex` strand, ported onto upstream v0.6.0.
+Features from the former `v0.2.5-tex` strand, ported onto upstream v0.7.0.
 
 ### Added
 
