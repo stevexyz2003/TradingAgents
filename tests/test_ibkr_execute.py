@@ -1785,3 +1785,136 @@ class TestReconcile:
         )
         # AAPL from the broken run, MSFT is the new order the real chain never lets through.
         assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL", "MSFT"]
+
+
+# --- two sources per fact (05-07, Task 2) ---------------------------------------------------------
+
+
+def _two_ticker_run(tmp_path, loop, fake, **kwargs):
+    return _gateway_run(
+        tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path), **kwargs
+    )
+
+
+def _intent_tickers(records):
+    return [r["ticker"] for r in _events(records, "intent")]
+
+
+class TestSourceConflict:
+    def test_source_conflict_account_echo_stops_the_whole_run(self, tmp_path, loop, capsys):
+        fake = _fake_for(("AAPL", "MSFT"), whatif_echo_account="DUX000000")
+        code, records = _two_ticker_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_ACCOUNT_GUARD
+        end = _events(records, "run_end")[-1]
+        assert end["exit"] == 8
+        assert end["state"] == "account-conflict"
+        assert _events(records, "intent") == []
+        assert fake.calls.count("placeOrder(whatIf)") == 1
+        text = _log_text(tmp_path)
+        assert "ibkr-state=ACCOUNT_CONFLICT" in text
+        assert "DUX000000" in text
+        assert "DUQ634065" in text
+        assert "account-conflict" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("echo", [None, "", "DUQ634065"], ids=["none", "empty", "same"])
+    def test_source_conflict_account_echo_missing_is_not_a_conflict(self, tmp_path, loop, echo):
+        fake = _fake_for(whatif_echo_account=echo)
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        assert _intent_tickers(records) == ["AAPL"]
+
+    def test_source_conflict_position_only_that_ticker(self, tmp_path, loop):
+        """D-18: the ledger holds own fills the broker does not show."""
+        filled = {"decision_key": PREV_KEY, "ticker": "AAPL", "con_id": _CON, "filled_qty": 2}
+        _prepare_ledger((ledger_mod.FILLED, filled))
+        fake = _fake_for(("AAPL", "MSFT"), positions=[_aapl_position(1)])
+        code, records = _two_ticker_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["ticker"] == "AAPL"
+        assert skipped["reason"] == "source_conflict"
+        assert skipped["state"] == "source-conflict"
+        assert "ledger has 2 filled, broker holds 1" in skipped["detail"]
+        assert _intent_tickers(records) == ["MSFT"]
+
+    def test_source_conflict_position_without_fills_is_no_conflict(self, tmp_path, loop):
+        fake = _fake_for(positions=[_aapl_position(5)])
+        _code, records = _gateway_run(tmp_path, loop, fake)
+        assert [r for r in _events(records, "skipped") if r["reason"] == "source_conflict"] == []
+
+    def test_source_conflict_already_executed_broker_knows_order_ref(self, tmp_path, loop):
+        known = ibkr_fakes.completed_trade(_CON, "Filled", order_ref=KEY, quantity=2, filled=2.0)
+        fake = _fake_for(("AAPL", "MSFT"), completed_orders=[known])
+        code, records = _two_ticker_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["ticker"] == "AAPL"
+        assert skipped["reason"] == "source_conflict"
+        assert "executed:" in skipped["detail"]
+        assert fake.calls.count("placeOrder(whatIf)") == 1
+        assert _intent_tickers(records) == ["MSFT"]
+
+    def test_source_conflict_tradability_calendar_vs_liquid_hours_only_that_ticker(
+        self, tmp_path, loop
+    ):
+        aapl = ibkr_fakes.stk_contract("AAPL", CON_IDS["AAPL"])
+        msft = ibkr_fakes.stk_contract("MSFT", CON_IDS["MSFT"])
+        fake = ibkr_fakes.FakeIB(
+            qualify={"AAPL": [aapl], "MSFT": [msft]},
+            details={
+                CON_IDS["AAPL"]: [ibkr_fakes.contract_detail(aapl, liquid_hours=OPEN_HOURS)],
+                # MSFT agrees with the calendar that today is no session day.
+                CON_IDS["MSFT"]: [
+                    ibkr_fakes.contract_detail(
+                        msft, liquid_hours="20261012:CLOSED;20261013:0930-20261013:1600"
+                    )
+                ],
+            },
+            summary=_funds(),
+            whatif=ibkr_fakes.order_state(),
+        )
+        calendar = _stub_calendar(holidays={date(2026, 10, 12)})
+        code, records = _two_ticker_run(tmp_path, loop, fake, calendar=calendar)
+        assert code == executor.EXIT_PRECONDITION
+        by_ticker = {r["ticker"]: r for r in _events(records, "skipped")}
+        assert by_ticker["AAPL"]["state"] == "calendar-conflict"
+        assert by_ticker["AAPL"]["reason"] == "source_conflict"
+        # MSFT was processed on its own: its end is its own state, not a conflict.
+        assert by_ticker["MSFT"]["reason"] == "outside_session"
+        assert _events(records, "intent") == []
+        assert "placeOrder(whatIf)" not in fake.calls
+
+    def test_source_conflict_never_leaves_an_intent_for_the_ticker(self, tmp_path, loop):
+        known = ibkr_fakes.open_trade(_CON, order_ref=KEY, quantity=2)
+        fake = _fake_for(("AAPL", "MSFT"), open_orders=[known])
+        _code, records = _two_ticker_run(tmp_path, loop, fake)
+        assert _intent_tickers(records) == ["MSFT"]
+        assert [r["ticker"] for r in _events(records, "skipped")] == ["AAPL"]
+
+    def test_source_conflict_negative_control_position_check_removed(
+        self, tmp_path, loop, monkeypatch
+    ):
+        filled = {"decision_key": PREV_KEY, "ticker": "AAPL", "con_id": _CON, "filled_qty": 2}
+        _prepare_ledger((ledger_mod.FILLED, filled))
+        monkeypatch.setattr(guards, "position_conflict", lambda **kwargs: None)
+        fake = _fake_for(("AAPL", "MSFT"), positions=[_aapl_position(1)])
+        _code, records = _two_ticker_run(tmp_path, loop, fake)
+        assert "AAPL" in _intent_tickers(records)
+
+    def test_source_conflict_negative_control_executed_check_removed(
+        self, tmp_path, loop, monkeypatch
+    ):
+        monkeypatch.setattr(guards, "executed_conflict", lambda **kwargs: None)
+        known = ibkr_fakes.completed_trade(_CON, "Filled", order_ref=KEY, quantity=2, filled=2.0)
+        fake = _fake_for(("AAPL", "MSFT"), completed_orders=[known])
+        _code, records = _two_ticker_run(tmp_path, loop, fake)
+        assert "AAPL" in _intent_tickers(records)
+
+    def test_source_conflict_negative_control_account_check_removed(
+        self, tmp_path, loop, monkeypatch
+    ):
+        monkeypatch.setattr(guards, "account_conflict", lambda **kwargs: None)
+        fake = _fake_for(("AAPL", "MSFT"), whatif_echo_account="DUX000000")
+        code, records = _two_ticker_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        assert _intent_tickers(records) == ["AAPL", "MSFT"]
