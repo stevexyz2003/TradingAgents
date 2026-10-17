@@ -314,3 +314,139 @@ def test_exit_table_is_read_only():
 )
 def test_worst_run_exit_ranking(codes, expected):
     assert g.worst_run_exit(codes) == expected
+
+
+# --- size cap ----------------------------------------------------------------------------
+
+
+def _load_probe(name, filename):
+    spec = importlib.util.spec_from_file_location(name, _SCRIPTS / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # dataclasses resolves string annotations through sys.modules
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
+@pytest.mark.parametrize("qty", [1, 2])
+def test_size_within_cap_is_accepted(qty):
+    assert g.check_size(qty) is None
+
+
+def test_size_above_cap_is_rejected_with_reason():
+    assert "exceeds MAX_QTY_PER_ORDER 2" in g.check_size(3)
+
+
+@pytest.mark.parametrize("qty", [0, -1, 2.0, True, "2", None])
+def test_size_not_a_positive_whole_number_is_rejected(qty):
+    assert "not a positive whole number" in g.check_size(qty)
+
+
+def test_size_sentinel_blocks_times_block_qty_fit_the_cap():
+    decision = _load_probe("ibkr_decision_guards_probe", "ibkr_decision.py")
+    contracts = _load_probe("ibkr_contracts_guards_probe", "ibkr_contracts.py")
+    tradable = [
+        spec.block_qty
+        for spec in contracts.CONTRACT_TABLE.values()
+        if spec.sec_type in contracts.ALLOWED_SEC_TYPES
+    ]
+    assert tradable, "no tradable entry: the sentinel would check nothing"
+    largest = max(decision.BLOCKS.values()) * max(tradable)
+    assert largest <= g.MAX_QTY_PER_ORDER, (
+        f"largest order {largest} exceeds MAX_QTY_PER_ORDER {g.MAX_QTY_PER_ORDER}: "
+        "raise MAX_QTY_PER_ORDER deliberately in the same commit"
+    )
+
+
+def test_negative_control_size_cap_rejects_instead_of_trimming():
+    assert g.check_size(3) is not None
+    assert isinstance(g.check_size(3), str)  # a reason, never a smaller quantity
+    trimming = [n for n in dir(g) if n.startswith(("trim", "clamp", "cap_"))]
+    assert trimming == []
+
+
+# --- decision key ------------------------------------------------------------------------
+
+
+def test_decision_key_joins_date_and_ticker_with_the_separator():
+    assert g.DECISION_KEY_SEPARATOR == "|"
+    assert g.decision_key("2026-10-09", "AAPL") == "2026-10-09|AAPL"
+
+
+@pytest.mark.parametrize(
+    ("trade_date", "ticker"),
+    [
+        ("2026-10-9", "AAPL"),
+        ("2026-02-30", "AAPL"),
+        ("2026-10-09", ""),
+        ("2026-10-09", "AA|PL"),
+        ("2026-10-09", "aapl"),
+    ],
+)
+def test_decision_key_rejects_bad_parts(trade_date, ticker):
+    with pytest.raises(ValueError):
+        g.decision_key(trade_date, ticker)
+
+
+def test_decision_key_has_no_sha():
+    import re
+
+    assert not re.search(r"[0-9a-f]{40}", g.decision_key("2026-10-09", "AAPL"))
+
+
+# --- source conflicts --------------------------------------------------------------------
+
+
+def test_source_conflict_account_agreeing_sources_are_clean():
+    assert (
+        g.account_conflict(managed_account=ACCOUNT, release_account=ACCOUNT, echo_account=None)
+        is None
+    )
+
+
+def test_source_conflict_account_empty_echo_is_optional():
+    assert (
+        g.account_conflict(managed_account=ACCOUNT, release_account=ACCOUNT, echo_account="")
+        is None
+    )
+
+
+def test_source_conflict_account_echo_mismatch():
+    reason = g.account_conflict(
+        managed_account=ACCOUNT, release_account=ACCOUNT, echo_account="DUX000000"
+    )
+    assert reason and "DUX000000" in reason and ACCOUNT in reason
+
+
+def test_source_conflict_account_release_mismatch():
+    reason = g.account_conflict(
+        managed_account=ACCOUNT, release_account="DUX000000", echo_account=None
+    )
+    assert reason and "DUX000000" in reason
+
+
+@pytest.mark.parametrize("ledger,broker", [(0, 5), (2, 2), (2, 3)])
+def test_source_conflict_position_clean(ledger, broker):
+    assert g.position_conflict(ledger_filled_qty=ledger, broker_held=broker) is None
+
+
+def test_source_conflict_position_broker_holds_less_than_ledger_filled():
+    reason = g.position_conflict(ledger_filled_qty=2, broker_held=1)
+    assert reason and "2" in reason and "1" in reason
+
+
+def test_source_conflict_executed_broker_has_trace_ledger_does_not():
+    reason = g.executed_conflict(ledger_attempted=False, history_has_ref=True)
+    assert "broker shows an order with this orderRef, ledger has none" in reason
+
+
+def test_source_conflict_executed_ledger_attempted_broker_silent():
+    reason = g.executed_conflict(ledger_attempted=True, history_has_ref=False)
+    assert "ledger says attempted, broker shows no trace" in reason
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_source_conflict_executed_agreeing_sources_are_clean(value):
+    assert g.executed_conflict(ledger_attempted=value, history_has_ref=value) is None
