@@ -166,17 +166,30 @@ class ReleaseState:
         return self.state == RELEASE_OK
 
 
-def read_kill(state_dir: str | os.PathLike[str]) -> KillState:
-    """Three outcomes via ``os.stat``: present, absent, anything else is unreadable (D-03).
+def is_kill_name(name: str) -> bool:
+    """``KILL`` or ``KILL.<anything>``, in any case (``KILL.txt``, ``kill.TXT``).
 
-    Only a positive hit (file or directory) is ``kill-active``. A permission error or
+    Explorer hides file endings by default: "New > Text Document" named ``KILL`` is
+    ``KILL.txt`` on disk, and the stop switch must not fail open on that (WR-03).
+    """
+    folded = name.casefold()
+    kill = KILL_FILE_NAME.casefold()
+    return folded == kill or folded.startswith(kill + ".")
+
+
+def read_kill(state_dir: str | os.PathLike[str]) -> KillState:
+    """Three outcomes: present, absent, anything else is unreadable (D-03).
+
+    First ``os.stat`` on ``KILL`` itself, then a listing of the state folder for any
+    entry that ``is_kill_name`` (``KILL.txt`` and the like). Only a positive hit (file or
+    directory) is ``kill-active``. A permission error, a folder that cannot be listed or
     any other failure is ``kill-unreadable``: trading stops, but nothing is cancelled
     (D-17). Existence helpers swallow such errors into "absent" and would fail open.
     """
     try:
         os.stat(os.path.join(os.fspath(state_dir), KILL_FILE_NAME))
     except FileNotFoundError:
-        return _kill_absent_or_blocked(state_dir)
+        return _kill_by_listing(state_dir)
     except OSError as exc:
         return KillState(KILL_UNREADABLE, type(exc).__name__)
     except Exception as exc:  # noqa: BLE001 - every surprise means "blocked", never "allowed"
@@ -184,17 +197,19 @@ def read_kill(state_dir: str | os.PathLike[str]) -> KillState:
     return KillState(KILL_ACTIVE)
 
 
-def _kill_absent_or_blocked(state_dir: str | os.PathLike[str]) -> KillState:
-    """Windows reports "not found" also when the state folder is a plain file; look closer."""
+def _kill_by_listing(state_dir: str | os.PathLike[str]) -> KillState:
+    """No exact ``KILL``: list the folder. Windows also reports "not found" when the state
+    folder is a plain file; listing it fails, which is ``kill-unreadable``."""
     try:
-        if os.path.isdir(os.fspath(state_dir)):
-            return KillState(KILL_ABSENT)
-        os.stat(os.fspath(state_dir))
+        names = os.listdir(os.fspath(state_dir))
     except FileNotFoundError:
         return KillState(KILL_ABSENT)  # no folder, so no kill file in it
     except Exception as exc:  # noqa: BLE001 - blocked, never allowed
         return KillState(KILL_UNREADABLE, type(exc).__name__)
-    return KillState(KILL_UNREADABLE, "NotADirectoryError")
+    hits = sorted(name for name in names if is_kill_name(name))
+    if hits:
+        return KillState(KILL_ACTIVE, f"{hits[0]} present")
+    return KillState(KILL_ABSENT)
 
 
 def read_release(

@@ -479,7 +479,14 @@ every run, and again before every whatIf and before every `intent`.
 | File | Path | Meaning |
 |---|---|---|
 | `RELEASE` | `...\ibkr\RELEASE` | the operator's permission: account and a "valid until" date |
-| `KILL` | `...\ibkr\KILL` | the stop: any file or folder of that name |
+| `KILL` | `...\ibkr\KILL` | the stop: any file or folder named `KILL` or `KILL.<anything>`, in any case |
+
+`KILL` matches loosely on purpose: Explorer hides file endings by default, so
+"New > Text Document" typed as `KILL` is `KILL.txt` on disk. Every entry in the state
+folder whose name, ignoring case, is `KILL` or starts with `KILL.` counts as a present
+kill switch (`KILL`, `KILL.txt`, `kill.TXT`); `KILLER` or `KILL_old` do not. If the
+state folder cannot be listed, the state is `kill-unreadable`. `RELEASE` stays exact:
+only a file named `RELEASE` is read, so a stray `RELEASE.txt` never opens trading.
 
 `RELEASE` is UTF-8 JSON without a byte-order mark with exactly two keys:
 
@@ -502,8 +509,8 @@ $d = Join-Path $env:LOCALAPPDATA 'TradingEngineX\ibkr'; New-Item -ItemType Direc
 # stop everything: create KILL
 New-Item -ItemType File -Force (Join-Path $env:LOCALAPPDATA 'TradingEngineX\ibkr\KILL')
 
-# lift the stop: remove KILL
-Remove-Item (Join-Path $env:LOCALAPPDATA 'TradingEngineX\ibkr\KILL')
+# lift the stop: remove KILL and every KILL.* (KILL.txt from Explorer included)
+Get-ChildItem (Join-Path $env:LOCALAPPDATA 'TradingEngineX\ibkr') | Where-Object { $_.Name -ieq 'KILL' -or $_.Name -ilike 'KILL.*' } | Remove-Item -Recurse
 ```
 
 Do not write the release with `echo ... > RELEASE` or `Set-Content`: Windows
@@ -660,8 +667,8 @@ collision or contradiction stays exit 6 in both ledgers.
 | `invalid-decision-key` | 2 | no decision key can be built for the ticker (for instance `^GSPC`); only this ticker stops |
 | `outside-session` | 2 | outside the regular session with its buffer |
 | `source-conflict` | 2 | two sources disagree on position, already-executed or tradability; this ticker stops |
-| `kill-active` | 4 | a KILL file exists; global cancel |
-| `kill-unreadable` | 4 | the state of KILL cannot be read; trading stops, nothing is cancelled |
+| `kill-active` | 4 | a KILL file exists (`KILL` or `KILL.*`, any case); global cancel |
+| `kill-unreadable` | 4 | the state of KILL cannot be read (or the state folder cannot be listed); trading stops, nothing is cancelled |
 | `release-account-mismatch` | 4 | the release is for another account |
 | `release-expired` | 4 | `valid_until` lies in the past (UTC) |
 | `release-invalid` | 4 | not UTF-8 JSON, wrong keys or a bad date |

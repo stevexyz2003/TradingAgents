@@ -1194,6 +1194,18 @@ class TestFailClosed:
         assert fake.calls.count("reqGlobalCancel") == 1
         assert path.read_bytes() == before
 
+    def test_a_kill_txt_from_explorer_stops_and_cancels(self, tmp_path, loop):
+        """WR-03: KILL.txt (hidden ending in Explorer) is a present kill switch."""
+        kill_txt = executor.default_kill_file().with_name("KILL.txt")
+        kill_txt.parent.mkdir(parents=True, exist_ok=True)
+        kill_txt.write_text("stop", encoding="utf-8")
+        fake = _fake_for()
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert fake.calls.count("reqGlobalCancel") == 1
+        assert _events(records, "intent") == []
+        assert _events(records, "run_start")[0]["kill"] == "kill-active"
+
     @pytest.mark.parametrize("seq", ['"x"', "null", "1.5", "true", "0"])
     def test_kill_with_a_malformed_seq_still_cancels_with_exit_4(self, tmp_path, loop, seq):
         """CR-01: a record that is valid JSON but not a ledger record never bypasses the kill."""

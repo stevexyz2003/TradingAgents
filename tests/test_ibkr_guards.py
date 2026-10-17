@@ -81,6 +81,36 @@ def test_kill_unreadable_on_unexpected_exception_fail_closed(tmp_path, monkeypat
     assert g.read_kill(tmp_path).state == g.KILL_UNREADABLE
 
 
+@pytest.mark.parametrize("name", ["KILL.txt", "kill.TXT", "Kill", "KILL.", "kill.stop.now"])
+def test_kill_active_for_a_kill_file_with_an_ending_or_another_case(tmp_path, name):
+    """WR-03: Explorer hides endings, so "New > Text Document" named KILL is KILL.txt."""
+    (tmp_path / name).write_bytes(b"")
+    result = g.read_kill(tmp_path)
+    assert result.state == g.KILL_ACTIVE
+    assert result.active
+
+
+@pytest.mark.parametrize("name", ["KILLER", "KILL_old", "NOKILL", "kill-switch.txt", "RELEASE"])
+def test_kill_absent_for_names_that_only_look_alike(tmp_path, name):
+    (tmp_path / name).write_bytes(b"")
+    assert g.read_kill(tmp_path).state == g.KILL_ABSENT
+
+
+def test_kill_unreadable_when_the_folder_cannot_be_listed(tmp_path, monkeypatch):
+    def boom(path):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(os, "listdir", boom)
+    result = g.read_kill(tmp_path)
+    assert result.state == g.KILL_UNREADABLE
+    assert "PermissionError" in result.detail
+    assert not result.active
+
+
+def test_kill_absent_when_the_state_folder_does_not_exist(tmp_path):
+    assert g.read_kill(tmp_path / "missing").state == g.KILL_ABSENT
+
+
 def test_negative_control_kill_never_uses_exists(tmp_path, monkeypatch):
     (tmp_path / "KILL").write_bytes(b"")
     monkeypatch.setattr(Path, "exists", lambda self, *a, **k: False)
