@@ -254,7 +254,7 @@ Plans:
 - Kein Branch, kein Heartbeat, kein Scheduler.
 - Keine Backup-Erweiterung — die kommt mit Phase 7, wenn der Ledger seine endgültige Form hat.
 
-**Plans:** 6/10 plans executed
+**Plans:** 7/10 plans executed
 
 Plans:
 **Wave 1**
@@ -274,7 +274,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 05-06-PLAN.md — Größengrenze, Sitzungsfenster (REQ-25), ein Versuch je Schlüssel; G3 Größe und Sitzung (W4)
+- [x] 05-06-PLAN.md — Größengrenze, Sitzungsfenster (REQ-25), ein Versuch je Schlüssel; G3 Größe und Sitzung (W4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
