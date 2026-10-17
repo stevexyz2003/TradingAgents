@@ -1518,10 +1518,13 @@ class TestOneAttemptPerKey:
                 raise RuntimeError("crash after the write-ahead line")
 
         _gateway_run(tmp_path, loop, _fake_for(), placer=CrashingPlacer())
-        code, records = _gateway_run(tmp_path, loop, _fake_for())
-        assert code == executor.EXIT_PRECONDITION
+        fake = _fake_for()
+        code, records = _gateway_run(tmp_path, loop, fake)
+        # Since 05-07 the reconciliation meets the open intent first: no trace at the broker
+        # is exit 6; the key check behind it is never reached, and no second intent appears.
+        assert code == executor.EXIT_RECONCILE
         assert len(_events(records, "intent")) == 1
-        assert _events(records, "skipped")[-1]["reason"] == "already_attempted"
+        assert "placeOrder(whatIf)" not in fake.calls
 
     def test_negative_control_key_check_removed_allows_second_intent(
         self, tmp_path, loop, monkeypatch
@@ -1531,3 +1534,254 @@ class TestOneAttemptPerKey:
         code, records = _gateway_run(tmp_path, loop, _fake_for())
         assert code == executor.EXIT_OK
         assert len(_events(records, "intent")) == 2
+
+
+# --- startup reconciliation (05-07, Task 1) -------------------------------------------------------
+
+PREV_KEY = "2026-10-08|AAPL"
+RECONCILE_MANUAL = "see IBKR_EXECUTION.md, Ledger and reconciliation"
+
+
+def _prepare_ledger(*events):
+    """Write lines into the dry-run ledger the way a former run would have (not by hand)."""
+    path = executor.default_dryrun_ledger_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    led = ledger_mod.Ledger.open(
+        path, mode=ledger_mod.MODE_DRYRUN, clock=_fixed(OPEN_NOW), run_id="prepared"
+    )
+    for event, fields in events:
+        led.append(event, **fields)
+    return led
+
+
+def _prepared_intent():
+    fields = ledger_mod.intent_record(
+        decision_key=PREV_KEY,
+        ticker="AAPL",
+        trade_date="2026-10-08",
+        rating="Buy",
+        paper_log_sha=SHA,
+        side="BUY",
+        quantity=2,
+        con_id=CON_IDS["AAPL"],
+        order_ref=PREV_KEY,
+        weekend_gap=False,
+    )
+    return ledger_mod.INTENT, fields
+
+
+def _unresolved_keys():
+    led = ledger_mod.Ledger.open(
+        executor.default_dryrun_ledger_file(),
+        mode=ledger_mod.MODE_DRYRUN,
+        clock=_fixed(OPEN_NOW),
+        run_id="reader",
+    )
+    return [entry["decision_key"] for entry in led.unresolved()]
+
+
+class _CrashAfterIntent:
+    dry = True
+
+    def complete(self, ctx, intent):
+        raise RuntimeError("crash after the write-ahead line")
+
+
+def _msft_run(tmp_path, loop, fake, **kwargs):
+    """MSFT is the new Buy ticker next to a prepared AAPL entry of the day before."""
+    return _gateway_run(
+        tmp_path,
+        loop,
+        fake,
+        tickers=("MSFT",),
+        paper=_buy_paper(tmp_path, ticker="MSFT"),
+        **kwargs,
+    )
+
+
+_CON = CON_IDS["AAPL"]
+_RECONCILE_CASES = [
+    pytest.param(
+        {"open_orders": [ibkr_fakes.open_trade(_CON, order_ref=PREV_KEY, quantity=2)]},
+        "open",
+        "placed",
+        None,
+        id="open-order",
+    ),
+    pytest.param(
+        {
+            "completed_orders": [
+                ibkr_fakes.completed_trade(_CON, "Cancelled", order_ref=PREV_KEY, quantity=2)
+            ]
+        },
+        "not_filled",
+        "rejected",
+        None,
+        id="cancelled-order",
+    ),
+    pytest.param(
+        {"executions": [ibkr_fakes.fill(_CON, PREV_KEY, 2)]},
+        "filled",
+        "filled",
+        2.0,
+        id="executions",
+    ),
+    pytest.param(
+        {
+            "completed_orders": [
+                ibkr_fakes.completed_trade(
+                    _CON, "Filled", order_ref=PREV_KEY, quantity=2, filled=2.0
+                )
+            ]
+        },
+        "filled",
+        "filled",
+        2.0,
+        id="completed-filled",
+    ),
+]
+
+
+class TestReconcile:
+    def test_g3_reconcile_unresolved_intent_aborts_with_exit_six(self, tmp_path, loop, capsys):
+        """SC6 / G3: a run that broke off after the intent blocks the next run before any order."""
+        code, records = _gateway_run(tmp_path, loop, _fake_for(), placer=_CrashAfterIntent())
+        assert code != executor.EXIT_OK
+        assert len(_events(records, "intent")) == 1
+        capsys.readouterr()
+        fake = _fake_for(("AAPL", "MSFT"))
+        pl_factory = _PaperLogFactory(_two_buys(tmp_path))
+        code, records = _gateway_run(
+            tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=pl_factory
+        )
+        assert code == executor.EXIT_RECONCILE
+        for name in ("open_orders", "completed_orders", "executions"):
+            assert name in fake.calls
+        assert "placeOrder(whatIf)" not in fake.calls
+        assert pl_factory.calls == []
+        assert len(_events(records, "intent")) == 1
+        (reconcile,) = _events(records, "reconcile")
+        assert reconcile["decision_key"] == KEY
+        assert reconcile["outcome"] == "no_trace"
+        assert (reconcile["open"], reconcile["completed"], reconcile["executions"]) == (0, 0, 0)
+        end = _events(records, "run_end")[-1]
+        assert end["exit"] == 6
+        assert end["state"] == "reconcile-unresolved"
+        assert (
+            f"ibkr-state=RECONCILE_UNRESOLVED key={KEY} outcome=no_trace "
+            "open=0 completed=0 executions=0"
+        ) in _log_text(tmp_path)
+        assert RECONCILE_MANUAL in capsys.readouterr().out
+
+    @pytest.mark.parametrize(("history", "outcome", "follow", "filled"), _RECONCILE_CASES)
+    def test_g3_reconcile_resolves_before_any_new_order(
+        self, tmp_path, loop, history, outcome, follow, filled
+    ):
+        _prepare_ledger(_prepared_intent())
+        fake = _fake_for(("MSFT",), **history)
+        code, records = _msft_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        (reconcile,) = _events(records, "reconcile")
+        assert reconcile["decision_key"] == PREV_KEY
+        assert reconcile["outcome"] == outcome
+        (resolved,) = [
+            r for r in records if r["event"] == follow and r.get("source") == "reconcile"
+        ]
+        assert resolved["decision_key"] == PREV_KEY
+        if filled is not None:
+            assert resolved["filled_qty"] == filled
+            assert resolved["con_id"] == _CON
+        if follow == "rejected":
+            assert resolved["state"] == "not-filled"
+        new_intents = [r for r in _events(records, "intent") if r["decision_key"] != PREV_KEY]
+        assert [r["ticker"] for r in new_intents] == ["MSFT"]
+        assert reconcile["seq"] < new_intents[0]["seq"]
+        assert resolved["seq"] < new_intents[0]["seq"]
+        assert not executor.default_ledger_file().exists()
+
+    def test_g3_reconcile_unresolved_stays_unresolved_on_the_next_run(self, tmp_path, loop):
+        """Blocker REQ-43: a reconcile line does not close an entry; every run stops again."""
+        _gateway_run(tmp_path, loop, _fake_for(), placer=_CrashAfterIntent())
+        for expected_lines in (1, 2):
+            fake = _fake_for(("AAPL", "MSFT"))
+            code, records = _gateway_run(
+                tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
+            )
+            assert code == executor.EXIT_RECONCILE
+            reconciles = _events(records, "reconcile")
+            assert len(reconciles) == expected_lines
+            assert {r["decision_key"] for r in reconciles} == {KEY}
+            assert reconciles[-1]["outcome"] == "no_trace"
+            assert "placeOrder(whatIf)" not in fake.calls
+            assert len(_events(records, "intent")) == 1
+            assert _unresolved_keys() == [KEY]
+
+    def test_reconcile_collision_is_exit_six(self, tmp_path, loop):
+        _prepare_ledger(_prepared_intent())
+        stranger = ibkr_fakes.open_trade(999, order_ref=PREV_KEY, quantity=2)
+        fake = _fake_for(("MSFT",), open_orders=[stranger])
+        code, records = _msft_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_RECONCILE
+        (reconcile,) = _events(records, "reconcile")
+        assert reconcile["outcome"] == "collision"
+        assert len(_events(records, "intent")) == 1
+        assert "placeOrder(whatIf)" not in fake.calls
+
+    def test_reconcile_contradiction_is_exit_six(self, tmp_path, loop):
+        _prepare_ledger(_prepared_intent())
+        fake = _fake_for(
+            ("MSFT",),
+            open_orders=[ibkr_fakes.open_trade(_CON, order_ref=PREV_KEY, quantity=2)],
+            completed_orders=[
+                ibkr_fakes.completed_trade(_CON, "Cancelled", order_ref=PREV_KEY, quantity=2)
+            ],
+        )
+        code, records = _msft_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_RECONCILE
+        (reconcile,) = _events(records, "reconcile")
+        assert reconcile["outcome"] == "contradiction"
+        assert "placeOrder(whatIf)" not in fake.calls
+
+    def test_reconcile_skipped_without_open_entries(self, tmp_path):
+        done = {"decision_key": PREV_KEY, "ticker": "AAPL"}
+        _prepare_ledger(_prepared_intent(), (ledger_mod.DRY_COMPLETE, done))
+        factory = _RecordingFactory()
+        code, records = _run_execute(
+            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path, rating="Hold")
+        )
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+        assert _events(records, "reconcile") == []
+
+    def test_write_ahead_torn_tail_tolerated_at_cli(self, tmp_path, loop):
+        _prepare_ledger((ledger_mod.RUN_START, {"command": "execute"}))
+        path = executor.default_dryrun_ledger_file()
+        with open(path, "ab") as fh:
+            fh.write(b'{"v":1,"seq":2,"ts')
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code == executor.EXIT_OK
+        lines = path.read_bytes().split(b"\n")
+        assert lines[1] == b'{"v":1,"seq":2,"ts'
+        assert json.loads(lines[2])["seals_torn_line"] == 2
+        assert len(_events(records, "intent")) == 1
+
+    def test_reconcile_kill_wins_over_exit_six(self, tmp_path, loop):
+        """D-21: an active KILL ends the run with 4 and cancels; nothing is reconciled first."""
+        _prepare_ledger(_prepared_intent())
+        fake = _fake_for(("MSFT",))
+        code, records = _msft_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert fake.calls.count("reqGlobalCancel") == 1
+        assert _events(records, "reconcile") == []
+
+    def test_negative_control_reconcile_removed_would_create_new_intent(
+        self, tmp_path, loop, monkeypatch
+    ):
+        _gateway_run(tmp_path, loop, _fake_for(), placer=_CrashAfterIntent())
+        monkeypatch.setattr(executor, "_reconcile", lambda ctx: None)
+        fake = _fake_for(("AAPL", "MSFT"))
+        _code, records = _gateway_run(
+            tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
+        )
+        # AAPL from the broken run, MSFT is the new order the real chain never lets through.
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL", "MSFT"]
