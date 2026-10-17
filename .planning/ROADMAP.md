@@ -255,7 +255,7 @@ Plans:
 - Kein Branch, kein Heartbeat, kein Scheduler.
 - Keine Backup-Erweiterung — die kommt mit Phase 7, wenn der Ledger seine endgültige Form hat.
 
-**Plans:** 8/10 plans executed
+**Plans:** 9/10 plans executed
 
 Plans:
 **Wave 1**
@@ -283,7 +283,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 05-09-PLAN.md — Handbuch, Isolations-Wächter, git-status-Nachweis, REQ-/ROADMAP-Vermerke (W6)
+- [x] 05-09-PLAN.md — Handbuch, Isolations-Wächter, git-status-Nachweis, REQ-/ROADMAP-Vermerke (W6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
