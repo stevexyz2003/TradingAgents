@@ -105,7 +105,12 @@ EXIT_BY_STATE: Mapping[str, int] = MappingProxyType(
 )
 
 #: Rank for the run exit, ascending: 0 < 2 < 5 < 1 < 3 < 8 < 6 < 7 < 4.
-#: The kill switch always wins; 6 and 7 beat everything else; below that 1 > 5 > 2 > 0.
+#: Among the exits combined here (ticker ends and run-level stops of one run) the kill
+#: switch wins; 6 and 7 beat everything else; below that 1 > 5 > 2 > 0. Exits that end
+#: the run before or outside this combination do not pass through it: a lock that is
+#: held or fails (7, before the switch preflight), an account guard violation at
+#: connect (8, also with KILL present; it never reaches the cancel) and an unexpected
+#: error (1 or 3). See IBKR_EXECUTION.md, Exit codes.
 _RUN_EXIT_RANK = {
     code: rank
     for rank, code in enumerate(
@@ -141,7 +146,9 @@ RELEASE_KEYS = frozenset({"account", "valid_until"})
 MAX_RELEASE_BYTES = 4096
 MAX_RELEASE_DAYS = 90
 
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Used with ``fullmatch``: ``$`` alone also matches before a trailing newline (IN-01), and
+# ``\d`` also matches non-ASCII digits.
+_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 @dataclass(frozen=True)
@@ -246,7 +253,7 @@ def _read_release(
     account, valid_text = body["account"], body["valid_until"]
     if not isinstance(account, str) or not isinstance(valid_text, str):
         return ReleaseState(RELEASE_INVALID, "account and valid_until must be text")
-    if not _DATE_RE.match(valid_text):
+    if not _DATE_RE.fullmatch(valid_text):
         return ReleaseState(RELEASE_INVALID, "valid_until must look like YYYY-MM-DD")
     try:
         valid_until = date.fromisoformat(valid_text)
@@ -339,19 +346,20 @@ def check_size(quantity: object) -> str | None:
 #: Unmeasured at the gateway (assumption A3); the operator checkpoint measures it, '_' is the fallback.
 DECISION_KEY_SEPARATOR = "|"
 
-_TRADE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,11}$")
+# Used with ``fullmatch`` (IN-01): a key with a trailing newline would go out as orderRef.
+_TRADE_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_TICKER_RE = re.compile(r"[A-Z0-9][A-Z0-9.\-]{0,11}")
 
 
 def decision_key(trade_date: str, ticker: str) -> str:
     """``<trade_date><sep><ticker>``, whitelisted parts, no hash (REQ-IBKR-39)."""
-    if not isinstance(trade_date, str) or not _TRADE_DATE_RE.match(trade_date):
+    if not isinstance(trade_date, str) or not _TRADE_DATE_RE.fullmatch(trade_date):
         raise ValueError(f"invalid trade date: {trade_date!r}")
     try:
         date.fromisoformat(trade_date)
     except ValueError:
         raise ValueError(f"invalid trade date: {trade_date!r}") from None
-    if not isinstance(ticker, str) or not _TICKER_RE.match(ticker):
+    if not isinstance(ticker, str) or not _TICKER_RE.fullmatch(ticker):
         raise ValueError(f"invalid ticker: {ticker!r}")
     return f"{trade_date}{DECISION_KEY_SEPARATOR}{ticker}"
 

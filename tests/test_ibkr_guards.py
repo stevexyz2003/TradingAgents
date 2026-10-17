@@ -413,11 +413,21 @@ def test_decision_key_joins_date_and_ticker_with_the_separator():
         ("2026-10-09", ""),
         ("2026-10-09", "AA|PL"),
         ("2026-10-09", "aapl"),
+        # IN-01: ``$`` would let a trailing newline through into the orderRef.
+        ("2026-10-09", "AAPL\n"),
+        ("2026-10-09\n", "AAPL"),
+        ("２０２６-10-09", "AAPL"),
     ],
 )
 def test_decision_key_rejects_bad_parts(trade_date, ticker):
     with pytest.raises(ValueError):
         g.decision_key(trade_date, ticker)
+
+
+def test_release_date_with_a_trailing_newline_is_invalid(tmp_path):
+    """IN-01: the release date is matched in full, not up to a trailing newline."""
+    path = _write_release(tmp_path / "RELEASE", {"account": ACCOUNT, "valid_until": "2026-10-31\n"})
+    assert _read_release(path).state == g.RELEASE_INVALID
 
 
 def test_decision_key_has_no_sha():

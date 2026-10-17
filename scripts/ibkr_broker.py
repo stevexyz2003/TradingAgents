@@ -604,6 +604,7 @@ def _arm_write_barrier(client, permit: _CancelPermit | None = None) -> None:
         elif msg_id == 58 and permit.open:
             result = original_send_msg(msg, *args, **kwargs)
             permit.open = False
+            # Counted as handed to the client; when throttled it may only be queued (IN-02).
             permit.sent += 1
             return result
         elif msg_id in _WRITE_MESSAGE_IDS:
@@ -1209,6 +1210,11 @@ class IbkrBroker:
         fire-and-forget: its effect is proven only by reading the open orders
         again (the executor's job, Pitfall 5). Only the executor's kill path calls
         this (D-05).
+
+        "Sent" means handed to the client library's ``sendMsg`` exactly once. Under
+        request throttling the library may only queue the message and put it on the
+        socket later, so ``sent=1`` in the ledger is no proof that the gateway got it;
+        the re-read of the open orders is (IN-02).
         """
         if self._ib is None or self._handles is None:
             raise GatewayUnavailable("NOT_CONNECTED", 504, "no session; connect() first")

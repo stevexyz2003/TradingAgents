@@ -145,7 +145,11 @@ Identical to the table in the docstring of `scripts/ibkr_executor.py`; a test
 
 Exits 4, 6 and 7 are active since phase 5 (`execute`). When several things go
 wrong in one run, the run exit is the worst by this rank: `4 > 7 > 6 > 8 > 3 >
-1 > 5 > 2 > 0`.
+1 > 5 > 2 > 0`. The rank combines the ticker ends and run-level stops of a run that
+got past the lock; it does not make 4 win everywhere. A lock that is held or fails
+ends the run with 7 before the switches are read, a wrong account at connect
+(`managedAccounts`) ends it with 8 even with `KILL` present (that run never cancels),
+and an unexpected error is 1 or 3.
 
 Exit 2 is active since phase 3 (`resolve`): a rejected ticker (any result
 other than `ok` or `closed`), a missing `contracts.json` and `--init` on an
