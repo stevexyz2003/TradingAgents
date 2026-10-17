@@ -74,6 +74,7 @@ import logging
 import os
 import sys
 import tempfile
+import time
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -81,6 +82,7 @@ from types import SimpleNamespace
 
 from dotenv import dotenv_values
 
+from tradingagents.dataflows.files import locked
 from tradingagents.memory.log import TradingMemoryLog
 from tradingagents.portfolio import PortfolioContext, Position, load_portfolio
 
@@ -127,6 +129,12 @@ _LEDGER_PATH = Path(__file__).with_name("ibkr_ledger.py")
 #: ``execute`` runs dry in phase 5: a placer that is not dry ends the run before any file
 #: is touched. Phase 6 removes only this.
 EXECUTE_FORCED_DRY = True
+
+#: After the global cancel the open orders are read again for this long, every interval:
+#: the request is fire-and-forget, only the re-read proves it worked (Pitfall 5).
+KILL_RECHECK_SECONDS = 10.0
+KILL_RECHECK_INTERVAL_S = 0.5
+_sleep = time.sleep
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 _LOGGER_NAME = "ibkr_executor"
@@ -1163,7 +1171,6 @@ def run_execute(
     problems = mods.contracts.table_problems()
     if problems:
         raise ConfigError("contract table: " + "; ".join(problems))
-    guards = mods.guards
     ledger_mod = mods.ledger
     state_dir = default_ledger_file().parent
     try:
@@ -1181,8 +1188,167 @@ def run_execute(
             f"ibkr-state=STATE_DIR_UNUSABLE {state_dir}: {type(exc).__name__}: {exc}",
             f"state folder not usable: {state_dir} ({type(exc).__name__})",
         )
-    # The context exists before the ledger is opened, so the guards of the later plans can
-    # work without one.
+    # The outermost bracket of the run (T-05-27): one run at a time per ledger. Only the
+    # attempt to take the lock sits in the ``try``; an OSError inside the run is never exit 7.
+    # The lock path is always ``ledger.jsonl``, also for the dry run (it is the live ledger's lock).
+    lock_stack = contextlib.ExitStack()
+    try:
+        held = lock_stack.enter_context(locked(default_ledger_file(), wait=False))
+    except OSError as exc:
+        lock_stack.close()
+        return _fail(
+            logger,
+            EXIT_LOCKED,
+            f'ibkr-state=LOCK_ERROR detail="{type(exc).__name__}: {exc}"',
+            "execute: lock-error (not executed)",
+        )
+    if not held:
+        lock_stack.close()
+        return _fail(
+            logger,
+            EXIT_LOCKED,
+            f'ibkr-state=LOCK_HELD detail="{default_ledger_file()}.lock"',
+            "execute: lock-held (another run holds the ledger lock)",
+        )
+    with lock_stack:
+        return _run_locked(
+            args,
+            mods,
+            broker_factory,
+            paper_log_factory,
+            calendar,
+            placer,
+            logger,
+            progress,
+            clock,
+            now_utc=now_utc,
+            host=host,
+            port=port,
+            remote=remote,
+            branch=branch,
+            state_dir=state_dir,
+        )
+
+
+def _check_switches(ctx):
+    """Read the release file and the kill file anew; the clock is read on every call (D-04)."""
+    today = ctx.clock().astimezone(UTC).date()
+    return ctx.mods.guards.check_switches(
+        str(ctx.state_dir),
+        today_utc=today,
+        expected_account=ctx.mods.broker.EXPECTED_ACCOUNT,
+    )
+
+
+def _blocking_detail(ctx, switches) -> str:
+    guards = ctx.mods.guards
+    if switches.kill.state != guards.KILL_ABSENT:
+        detail = switches.kill.detail or "KILL file present"
+    else:
+        detail = switches.release.detail or "no valid release"
+    return detail
+
+
+def _report_blocked(ctx, switches) -> str:
+    """One log line and one console line for the state that blocks the run."""
+    state = switches.blocking_state
+    detail = _blocking_detail(ctx, switches)
+    ctx.logger.warning('ibkr-state=%s detail="%s"', state.upper().replace("-", "_"), detail)
+    print(f"execute: {state} ({detail})")
+    return detail
+
+
+def _halt_on_switches(ctx, row: dict, switches) -> None:
+    """A switch closed between two orders: this ticker and all later ones end as skipped."""
+    ctx.halted = ctx.halted or switches
+    _finish_row(ctx, row, switches.blocking_state, _blocking_detail(ctx, switches))
+
+
+def _kill_path(ctx, switches) -> None:
+    """The one place that cancels: only for a positively present KILL file (D-17).
+
+    The cancel is fire-and-forget; the open orders are read again to see whether it worked.
+    The exit stays 4 either way. A broker that cannot be reached ends the run with 4, not 3.
+    A wrong account is not caught here (exit 8) and never reaches ``cancel_all``.
+    """
+    if not switches.cancel:
+        raise RuntimeError("the kill path needs a positively present KILL file")
+    if ctx.cancelled:
+        return
+    ctx.cancelled = True  # once per run, whatever comes of it
+    broker_mod = ctx.mods.broker
+    ledger_mod = ctx.mods.ledger
+    record = switches.as_record()
+    try:
+        broker = _session(ctx)
+        broker.cancel_all(kill_evidence=switches.kill)
+    except (broker_mod.GatewayUnavailable, _ExecuteStop) as exc:
+        ctx.logger.error('ibkr-state=KILL_CANCEL_FAILED detail="%s"', exc)
+        print(f"execute: kill-active, global cancel not sent ({type(exc).__name__})")
+        if ctx.ledger is not None:
+            ctx.ledger.append(
+                ledger_mod.KILL_CANCEL,
+                outcome="gateway_unavailable",
+                detail=str(exc),
+                sent=0,
+                **record,
+            )
+        return
+    remaining: int | None = None
+    rechecks = 0
+    detail = ""
+    deadline = time.monotonic() + KILL_RECHECK_SECONDS
+    try:
+        while True:
+            remaining = len(broker.open_orders())
+            rechecks += 1
+            if remaining == 0 or time.monotonic() >= deadline:
+                break
+            _sleep(KILL_RECHECK_INTERVAL_S)
+    except broker_mod.GatewayUnavailable as exc:
+        detail = f"re-read failed: {exc}"
+    if ctx.ledger is not None:
+        ctx.ledger.append(
+            ledger_mod.KILL_CANCEL,
+            outcome="sent",
+            sent=1,
+            remaining=remaining,
+            rechecks=rechecks,
+            detail=detail,
+            **record,
+        )
+    ctx.logger.log(
+        logging.WARNING if remaining != 0 else logging.INFO,
+        'ibkr-state=KILL_CANCEL remaining=%s rechecks=%s detail="%s"',
+        remaining,
+        rechecks,
+        detail,
+    )
+    print(f"execute: kill-active, global cancel sent, {remaining} open order(s) left")
+
+
+def _run_locked(
+    args,
+    mods,
+    broker_factory,
+    paper_log_factory,
+    calendar,
+    placer,
+    logger,
+    progress,
+    clock,
+    *,
+    now_utc,
+    host,
+    port,
+    remote,
+    branch,
+    state_dir,
+) -> int:
+    """The run proper, holding the ledger lock: switches first, then the ledger, then the chain."""
+    guards = mods.guards
+    ledger_mod = mods.ledger
+    # The context exists before the ledger is opened, so the guards can work without one.
     ctx = SimpleNamespace(
         mods=mods,
         logger=logger,
@@ -1211,6 +1377,15 @@ def run_execute(
         on_row_finished=_ledger_row_finished,
         state_dir=state_dir,
     )
+    # Preflight (D-21): both switches are read before anything else, and logged in every run.
+    switches = ctx.switches = _check_switches(ctx)
+    logger.log(
+        logging.INFO if switches.allowed else logging.WARNING,
+        "ibkr-state=SWITCHES release=%s kill=%s valid_until=%s",
+        switches.release.state,
+        switches.kill.state,
+        switches.release.valid_until,
+    )
     try:
         ctx.ledger = ledger_mod.Ledger.open(
             default_dryrun_ledger_file(),
@@ -1221,19 +1396,40 @@ def run_execute(
     except ledger_mod.LedgerError as exc:
         logger.error('ibkr-state=LEDGER_CORRUPT detail="%s"', exc)
         print(f"execute: ledger-corrupt ({exc})")
-        return EXIT_RECONCILE
-    source = paper_log_factory(REPO_ROOT, remote, branch)
+        if switches.allowed:
+            return EXIT_RECONCILE
+        # A closed switch is the stronger signal (rank 4 before 6); nothing is written to the
+        # damaged ledger, but a present KILL file still cancels.
+        try:
+            _report_blocked(ctx, switches)
+            if switches.cancel:
+                _kill_path(ctx, switches)
+        finally:
+            ctx.stack.close()
+        return EXIT_KILL_SWITCH
     tickers = list(dict.fromkeys(args.tickers))
-    ctx.ledger.append(ledger_mod.RUN_START, command="execute", tickers=tickers)
+    ctx.ledger.append(
+        ledger_mod.RUN_START, command="execute", tickers=tickers, **switches.as_record()
+    )
     rows: dict = {}
     abort_code = None
     stop_state = None
     try:
         try:
+            if not switches.allowed:
+                _report_blocked(ctx, switches)
+                if switches.cancel:
+                    _kill_path(ctx, switches)
+                raise _ExecuteStop(
+                    EXIT_KILL_SWITCH, switches.blocking_state, _blocking_detail(ctx, switches)
+                )
+            source = paper_log_factory(REPO_ROOT, remote, branch)
             ctx.sha = source.fetch()
             rows, remaining = _local_chain(ctx, source, args.tickers)
             if remaining:
                 _execute_gateway_chain(ctx, rows, remaining)
+            if ctx.halted is not None and ctx.halted.cancel:
+                _kill_path(ctx, ctx.halted)
         except mods.paperlog.PaperLogUnavailable as exc:
             # No second attempt and no fall back to a local ref (D-02).
             stop = _RunAbort(mods.decision.PAPER_LOG_UNAVAILABLE, exc.reason)
@@ -1760,6 +1956,11 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         _finish_row(ctx, row, plan.state, plan.detail)
         return
     key = guards.decision_key(row["trade_date"], ticker)
+    # Read the switches anew right before the whatIf (REQ-34, D-21): no cache between orders.
+    switches = _check_switches(ctx)
+    if not switches.allowed:
+        _halt_on_switches(ctx, row, switches)
+        return
     preview = broker.preview_order(
         con_id=identity.con_id,
         symbol=spec.symbol,
@@ -1803,6 +2004,14 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
     }
     if verdict.state != decision_mod.PREVIEW_OK:
         _finish_row(ctx, row, verdict.state, verdict.detail)
+        return
+    # And once more right before the write-ahead line; the result is part of the record.
+    switches = _check_switches(ctx)
+    ctx.ledger.append(
+        ledger_mod.SWITCH_CHECK, decision_key=key, ticker=ticker, **switches.as_record()
+    )
+    if not switches.allowed:
+        _halt_on_switches(ctx, row, switches)
         return
     intent = ledger_mod.intent_record(
         decision_key=key,
@@ -1860,6 +2069,10 @@ def _execute_gateway_chain(ctx, rows: dict, remaining: list[str]) -> None:
     snapshot = None
     for result in outcome.results:
         row = rows[result.ticker]
+        if ctx.halted is not None:
+            # A switch closed earlier in this run: no further broker call for this ticker.
+            _halt_on_switches(ctx, row, ctx.halted)
+            continue
         # A closed market is only noted here; the refusal outside the window comes with the
         # size and session guards.
         closed = result.state == contracts_mod.CLOSED

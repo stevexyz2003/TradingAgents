@@ -411,9 +411,7 @@ class TestDryrunLedger:
             encoding="utf-8",
         )
         factory = _RecordingFactory()
-        code, _records = _run_execute(
-            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path)
-        )
+        code, _records = _run_execute(tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path))
         assert code == executor.EXIT_RECONCILE
         assert "ibkr-state=LEDGER_CORRUPT" in _log_text(tmp_path)
         assert factory.calls == []
@@ -424,9 +422,7 @@ class TestDryrunLedger:
         line = {"v": 1, "seq": 1, "mode": "live", "event": "run_start"}
         path.write_text(json.dumps(line) + "\n", encoding="utf-8")
         factory = _RecordingFactory()
-        code, _records = _run_execute(
-            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path)
-        )
+        code, _records = _run_execute(tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path))
         assert code == executor.EXIT_RECONCILE
         assert "ibkr-state=LEDGER_CORRUPT" in _log_text(tmp_path)
         assert factory.calls == []
