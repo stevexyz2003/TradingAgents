@@ -34,7 +34,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - [x] **Phase 2: Verbindung, Paper-Guard und Kontolesen** — ein lokaler Prozess liest `DUQ634065` read-only und füllt `PortfolioContext` (completed 2026-10-12)
 - [x] **Phase 3: Symbol-Auflösung, Handelbarkeit und Handelszeiten** — vom Roh-Ticker zu genau einem Contract, oder begründet gar nicht (completed 2026-10-12)
 - [x] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet (completed 2026-10-12)
-- [ ] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order
+- [x] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order (completed 2026-10-17)
 - [ ] **Phase 6: Die erste echte Order** — umschalten, platzieren, im Ledger wiederfinden
 - [ ] **Phase 7: Rückkanal und Soll-Ist-Zusammenführung** — eigener Branch, Join beim Lesen
 - [ ] **Phase 8: Unbeaufsichtigter Betrieb** — Scheduler, Heartbeat, lauter Ausfall
@@ -255,7 +255,7 @@ Plans:
 - Kein Branch, kein Heartbeat, kein Scheduler.
 - Keine Backup-Erweiterung — die kommt mit Phase 7, wenn der Ledger seine endgültige Form hat.
 
-**Plans:** 9/10 plans executed
+**Plans:** 10/10 plans complete
 
 Plans:
 **Wave 1**
@@ -287,7 +287,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 05-10-PLAN.md — Operator-Checkpoint: echter Kill-Storno (SC3), Orderhistorie, `orderRef` mit `|` (W7)
+- [x] 05-10-PLAN.md — Operator-Checkpoint: echter Kill-Storno (SC3), Orderhistorie, `orderRef` mit `|` (W7)
 
 ---
 
