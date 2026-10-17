@@ -10,6 +10,7 @@ import copy
 import importlib.util
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ _BROKER = Path(__file__).resolve().parents[1] / "scripts" / "ibkr_broker.py"
 WRITE_CALLS = ("placeOrder", "cancelOrder", "reqGlobalCancel", "exerciseOptions")
 #: The client's send path, which the adapter guards on the wire (message ids).
 WIRE_CALLS = ("send", "sendMsg")
+_UNSET_DOUBLE = 1.7976931348623157e308
 
 
 def load_broker():
@@ -75,6 +77,7 @@ class FakeOrder:
     tif: str = ""
     account: str = ""
     whatIf: bool = False
+    orderRef: str = ""
 
 
 def stk_contract(
@@ -133,15 +136,86 @@ def position(account, symbol, quantity, avg_cost=100.0, **contract):
 
 
 def open_trade(
-    con_id, status="Submitted", action="BUY", quantity=1, order_type="LMT", client_id=0
+    con_id,
+    status="Submitted",
+    action="BUY",
+    quantity=1,
+    order_type="LMT",
+    client_id=0,
+    order_ref="",
+    perm_id=0,
+    order_id=0,
 ):
     """A Trade row of reqAllOpenOrdersAsync as the client library reports it."""
     return SimpleNamespace(
         contract=FakeContract(conId=con_id),
         order=SimpleNamespace(
-            action=action, totalQuantity=quantity, orderType=order_type, clientId=client_id
+            action=action,
+            totalQuantity=quantity,
+            orderType=order_type,
+            clientId=client_id,
+            orderRef=order_ref,
+            permId=perm_id,
+            orderId=order_id,
         ),
         orderStatus=SimpleNamespace(status=status),
+    )
+
+
+def completed_trade(
+    con_id,
+    status="Cancelled",
+    order_ref="",
+    action="BUY",
+    quantity=1,
+    filled=None,
+    perm_id=0,
+    order_id=0,
+    client_id=0,
+):
+    """A Trade row of reqCompletedOrdersAsync: status only, filled count on the order."""
+    return SimpleNamespace(
+        contract=FakeContract(conId=con_id),
+        order=SimpleNamespace(
+            action=action,
+            totalQuantity=quantity,
+            orderType="MKT",
+            clientId=client_id,
+            orderRef=order_ref,
+            permId=perm_id,
+            orderId=order_id,
+            filledQuantity=_UNSET_DOUBLE if filled is None else filled,
+        ),
+        orderStatus=SimpleNamespace(status=status),
+    )
+
+
+def fill(
+    con_id,
+    order_ref,
+    shares,
+    side="BOT",
+    exec_id="0001",
+    price=100.0,
+    perm_id=0,
+    order_id=0,
+    client_id=0,
+    time=None,
+):
+    """A Fill row of reqExecutionsAsync as the client library reports it."""
+    return SimpleNamespace(
+        contract=FakeContract(conId=con_id),
+        execution=SimpleNamespace(
+            execId=exec_id,
+            orderRef=order_ref,
+            permId=perm_id,
+            orderId=order_id,
+            clientId=client_id,
+            shares=shares,
+            price=price,
+            side=side,
+            time=time or datetime(2026, 10, 9, 14, 0, 0, tzinfo=UTC),
+        ),
     )
 
 
@@ -192,12 +266,17 @@ class FakeIB:
         open_orders=None,
         whatif=None,
         whatif_echo_tif="DAY",
+        completed_orders=None,
+        executions=None,
+        whatif_echo_account=None,
+        global_cancel_clears=True,
     ):
         self.accounts = list(accounts)
         self.refuse = refuse
         self.emit_on_connect = list(emit_on_connect)
         #: call name ("positions", "account_summary", "probe", "qualify",
-        #: "contract_details") -> error events emitted
+        #: "contract_details", "open_orders", "completed_orders", "executions",
+        #: "global_cancel", "whatif") -> error events emitted
         #: while that request is in flight; the answer still comes back well formed.
         self.emit_during = dict(emit_during or {})
         self._positions = [] if positions is None else positions
@@ -208,6 +287,14 @@ class FakeIB:
         )
         #: Trades (or "hang") for reqAllOpenOrdersAsync
         self.open_orders = [] if open_orders is None else open_orders
+        #: Trades (or "hang") for reqCompletedOrdersAsync
+        self.completed_orders = [] if completed_orders is None else completed_orders
+        #: Fills (or "hang") for reqExecutionsAsync
+        self.executions = [] if executions is None else executions
+        #: account the whatIf echo carries (None = the account that was sent)
+        self.whatif_echo_account = whatif_echo_account
+        #: whether reqGlobalCancel empties the open orders (False = the cancel has no effect)
+        self.global_cancel_clears = global_cancel_clears
         self.probe = probe
         #: symbol -> matching FakeContracts (or "hang") for qualifyContractsAsync
         self.qualify = dict(qualify) if isinstance(qualify, dict) else (qualify or {})
@@ -355,6 +442,8 @@ class FakeIB:
         if answer is not None and answer != [] and self.whatif_echo_tif is not None:
             echo = copy.copy(what_if_order)
             echo.tif = self.whatif_echo_tif
+            if self.whatif_echo_account is not None:
+                echo.account = self.whatif_echo_account
             self.wrapper.openOrder(req_id, contract, echo, answer)
         return answer
 
@@ -364,6 +453,28 @@ class FakeIB:
         if self.open_orders == "hang":
             await _forever()
         return list(self.open_orders)
+
+    async def reqCompletedOrdersAsync(self, apiOnly=False):
+        self.calls.append("completed_orders")
+        self._emit_during("completed_orders")
+        if self.completed_orders == "hang":
+            await _forever()
+        return list(self.completed_orders)
+
+    async def reqExecutionsAsync(self, execFilter=None):
+        self.calls.append("executions")
+        self._emit_during("executions")
+        if self.executions == "hang":
+            await _forever()
+        return list(self.executions)
+
+    def reqGlobalCancel(self):
+        # Models the library: the named call first, then message 58 on the wire.
+        self.client.reqGlobalCancel()
+        self.client.sendMsg("58\0" + "1\0")
+        self._emit_during("global_cancel")
+        if self.global_cancel_clears:
+            self.open_orders = []
 
     # Phase 4 previews through whatIfOrderAsync only; placeOrder/whatIfOrder on IB are
     # bugs. Phase 3 resolution only reads; it never touches orders, any of these is a bug. Each

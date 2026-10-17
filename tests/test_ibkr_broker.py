@@ -1209,6 +1209,8 @@ def test_preview_returns_a_fully_read_result(loop):
         errors=(),
         effective_tif="DAY",
         sent_tif="DAY",
+        echo_order_ref="",
+        echo_account="DUQ634065",
     )
 
 
@@ -1428,3 +1430,147 @@ def test_request_scoped_codes_are_not_system_events(loop):
     # it (empty result), it must not turn into a voided window.
     fake = FakeIB(emit_during={"qualify": [(5, 200, "No security definition", None)]})
     assert _connected(fake, loop).search_contract(Spec("ZZZZ")) == ()
+
+
+# --- phase 5: order_history, open_orders without a filter, order_ref echo ---------------
+
+REF = "2026-10-09|AAPL"
+
+
+def test_open_orders_without_con_id_returns_every_open_order_with_order_ref(loop):
+    trades = [
+        ibkr_fakes.open_trade(265598, status="Submitted", order_ref=REF),
+        ibkr_fakes.open_trade(272093, status="PreSubmitted", action="SELL", order_type="MKT"),
+        ibkr_fakes.open_trade(265598, status="Cancelled"),
+    ]
+    fake = FakeIB(open_orders=trades)
+    result = _connected(fake, loop).open_orders()
+    assert [(o.con_id, o.order_ref, o.status) for o in result] == [
+        (265598, REF, "Submitted"),
+        (272093, "", "PreSubmitted"),
+    ]
+    assert not any(call in fake.calls for call in FORBIDDEN_CALLS)
+
+
+def test_open_orders_with_con_id_still_filters_and_carries_order_ref(loop):
+    trades = [
+        ibkr_fakes.open_trade(265598, order_ref=REF),
+        ibkr_fakes.open_trade(272093, order_ref="other"),
+    ]
+    result = _connected(FakeIB(open_orders=trades), loop).open_orders(265598)
+    assert [(o.con_id, o.order_ref) for o in result] == [(265598, REF)]
+
+
+def _history_fake(**overrides):
+    kwargs = {
+        "open_orders": [
+            ibkr_fakes.open_trade(
+                265598, order_ref=REF, perm_id=7, order_id=11, client_id=20001, quantity=2
+            )
+        ],
+        "completed_orders": [
+            ibkr_fakes.completed_trade(
+                272093, status="Cancelled", order_ref="2026-10-08|MSFT", perm_id=8, order_id=12
+            ),
+            ibkr_fakes.completed_trade(
+                265598, status="Filled", order_ref=REF, filled=2.0, action="SELL"
+            ),
+        ],
+        "executions": [
+            ibkr_fakes.fill(265598, REF, 1.5, side="BOT", exec_id="A1", price=101.25, perm_id=7),
+            ibkr_fakes.fill(265598, REF, 0.5, side="SLD", exec_id="A2", perm_id=7),
+        ],
+    }
+    kwargs.update(overrides)
+    return FakeIB(**kwargs)
+
+
+def test_order_history_returns_the_three_broker_sources(loop):
+    fake = _history_fake()
+    history = _connected(fake, loop).order_history()
+    assert isinstance(history, broker.OrderHistory)
+    (opened,) = history.open
+    assert opened == broker.OrderRecord(
+        source="open",
+        order_ref=REF,
+        status="Submitted",
+        action="BUY",
+        quantity=2.0,
+        filled=None,
+        con_id=265598,
+        perm_id=7,
+        order_id=11,
+        client_id=20001,
+    )
+    assert [(c.source, c.order_ref, c.status) for c in history.completed] == [
+        ("completed", "2026-10-08|MSFT", "Cancelled"),
+        ("completed", REF, "Filled"),
+    ]
+    assert [c.filled for c in history.completed] == [None, 2.0]
+    assert [(e.exec_id, e.side, e.shares, e.price) for e in history.executions] == [
+        ("A1", "BUY", 1.5, 101.25),
+        ("A2", "SELL", 0.5, 100.0),
+    ]
+    first = history.executions[0]
+    assert (first.order_ref, first.con_id, first.perm_id) == (REF, 265598, 7)
+    assert first.time == "2026-10-09T14:00:00+00:00"
+    assert fake.calls.count("open_orders") == 1
+    assert "completed_orders" in fake.calls and "executions" in fake.calls
+    assert not any(call in fake.calls for call in FORBIDDEN_CALLS)
+
+
+@pytest.mark.parametrize("source", ["open_orders", "completed_orders", "executions"])
+def test_order_history_request_timeout_on_each_source(loop, source):
+    adapter = _connected(_history_fake(**{source: "hang"}), loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.order_history()
+    assert info.value.state == "REQUEST_TIMEOUT"
+
+
+@pytest.mark.parametrize("source", ["open_orders", "completed_orders", "executions"])
+def test_order_history_discards_an_answer_with_a_link_event_inside(loop, source):
+    fake = _history_fake(emit_during={source: [(-1, 1100, "lost", None)]})
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _connected(fake, loop).order_history()
+    assert info.value.state == "CONNECTIVITY_LOST"
+
+
+def test_order_history_when_not_connected(loop):
+    adapter = broker.IbkrBroker("127.0.0.1", 7497, loop=loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.order_history()
+    assert info.value.state == "NOT_CONNECTED"
+
+
+def test_order_history_unknown_execution_side_fails_closed(loop):
+    fake = _history_fake(executions=[ibkr_fakes.fill(265598, REF, 1, side="???")])
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _connected(fake, loop).order_history()
+    assert info.value.state == "REQUEST_FAILED"
+
+
+def test_preview_order_ref_is_set_on_the_whatif_order_and_read_back_from_the_echo(loop):
+    fake = FakeIB(whatif=_state())
+    result = _preview(fake, loop, order_ref=REF)
+    assert fake.whatif_calls[-1][1].orderRef == REF
+    assert result.echo_order_ref == REF
+    assert result.echo_account == "DUQ634065"
+
+
+def test_preview_order_ref_echo_account_follows_the_gateway(loop):
+    fake = FakeIB(whatif=_state(), whatif_echo_account="DUX000000")
+    result = _preview(fake, loop, order_ref=REF)
+    assert result.echo_account == "DUX000000"
+
+
+def test_preview_without_order_ref_leaves_it_empty(loop):
+    fake = FakeIB(whatif=_state())
+    result = _preview(fake, loop)
+    assert fake.whatif_calls[-1][1].orderRef == ""
+    assert result.echo_order_ref == ""
+
+
+def test_preview_order_ref_echo_is_none_without_an_echo(loop):
+    fake = FakeIB(whatif=_state(), whatif_echo_tif=None)
+    result = _preview(fake, loop, order_ref=REF)
+    assert (result.echo_order_ref, result.echo_account) == (None, None)
