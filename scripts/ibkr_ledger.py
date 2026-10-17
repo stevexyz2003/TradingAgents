@@ -173,6 +173,67 @@ class LedgerError(ValueError):
     """The ledger file cannot be trusted (broken middle line, foreign mode, bad record)."""
 
 
+SIDES = frozenset({"BUY", "SELL"})
+
+
+def _is_int(value: object) -> bool:
+    return type(value) is int  # excludes bool on purpose
+
+
+def _is_number(value: object) -> bool:
+    return type(value) in (int, float)  # excludes bool on purpose
+
+
+def _is_text(value: object) -> bool:
+    return isinstance(value, str) and value != ""
+
+
+def _schema_problem(record: dict) -> str | None:
+    """Why ``record`` is not a ledger record the executor can use, or None.
+
+    ``v``, ``event`` and ``mode`` are checked by the caller; this covers the fields that are
+    read later (``seq``, ``ts``, ``run_id``, the decision key, the intent's order fields,
+    the filled quantity and the skip reason).
+    """
+    seq = record.get("seq")
+    if not _is_int(seq) or seq <= 0:
+        return f"has seq {seq!r}, expected a positive whole number"
+    for name in ("ts", "run_id"):
+        if not _is_text(record.get(name)):
+            return f"has {name} {record.get(name)!r}, expected text"
+    event = record["event"]
+    if "decision_key" in record and not _is_text(record["decision_key"]):
+        return f"has decision_key {record['decision_key']!r}, expected text"
+    if event == INTENT:
+        if "decision_key" not in record:
+            return "is an intent without a decision_key"
+        if not _is_text(record.get("ticker")):
+            return f"is an intent with ticker {record.get('ticker')!r}"
+        if not _is_text(record.get("rating")):
+            return f"is an intent with rating {record.get('rating')!r}"
+        if not _is_text(record.get("paper_log_sha")):
+            return f"is an intent with paper_log_sha {record.get('paper_log_sha')!r}"
+        if record.get("side") not in SIDES:
+            return f"is an intent with side {record.get('side')!r}"
+        quantity = record.get("quantity")
+        if not _is_number(quantity) or quantity <= 0:
+            return f"is an intent with quantity {quantity!r}"
+        if not _is_int(record.get("con_id")):
+            return f"is an intent with con_id {record.get('con_id')!r}"
+        order_ref = record.get("order_ref")
+        if order_ref is not None and not _is_text(order_ref):
+            return f"is an intent with order_ref {order_ref!r}"
+    if event in (FILLED, PARTIAL):
+        filled = record.get("filled_qty")
+        if filled is not None and (not _is_number(filled) or filled < 0):
+            return f"has filled_qty {filled!r}"
+        if "con_id" in record and not _is_int(record["con_id"]):
+            return f"has con_id {record['con_id']!r}"
+    if event == SKIPPED and record.get("reason") not in REASONS:
+        return f"is skipped with reason {record.get('reason')!r}"
+    return None
+
+
 class StateInGitTree(ValueError):
     """A state path lies inside a git work tree."""
 
@@ -200,7 +261,8 @@ class Ledger:
         self._clock = clock
         self._needs_newline = needs_newline
         self._torn_line = torn_line
-        self._seq = max((int(r.get("seq", 0)) for r in records), default=0)
+        # ``_check`` guarantees every ``seq`` is a positive int.
+        self._seq = max((r["seq"] for r in records), default=0)
 
     @classmethod
     def open(
@@ -258,6 +320,11 @@ class Ledger:
         found = record.get("mode")
         if found != mode:
             raise LedgerError(f"{path}: line {number} has mode {found!r}, this ledger is {mode!r}")
+        # Every field the executor reads later is checked here, so a malformed line is a
+        # ``LedgerError`` at open and never a ``KeyError``/``ValueError`` deep in the run.
+        problem = _schema_problem(record)
+        if problem:
+            raise LedgerError(f"{path}: line {number} {problem}")
         return record
 
     def append(self, event: str, **fields: object) -> dict:

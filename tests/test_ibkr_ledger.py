@@ -201,6 +201,52 @@ def test_ledger_bad_record_shape_is_ledger_error(tmp_path, line):
         _open(path)
 
 
+_BASE = {"v": 1, "seq": 1, "ts": "t", "run_id": "r", "mode": "dryrun", "event": "run_start"}
+_GOOD_INTENT = {**_BASE, "event": "intent", **_intent("2026-10-09|AAPL")}
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {**_BASE, "seq": "x"},
+        {**_BASE, "seq": None},
+        {**_BASE, "seq": 1.5},
+        {**_BASE, "seq": True},
+        {**_BASE, "seq": 0},
+        {k: v for k, v in _BASE.items() if k != "seq"},
+        {**_BASE, "ts": None},
+        {**_BASE, "run_id": 7},
+        {**_BASE, "decision_key": 5},
+        {k: v for k, v in _GOOD_INTENT.items() if k != "side"},
+        {k: v for k, v in _GOOD_INTENT.items() if k != "quantity"},
+        {k: v for k, v in _GOOD_INTENT.items() if k != "con_id"},
+        {k: v for k, v in _GOOD_INTENT.items() if k != "decision_key"},
+        {k: v for k, v in _GOOD_INTENT.items() if k != "rating"},
+        {**_GOOD_INTENT, "side": "HOLD"},
+        {**_GOOD_INTENT, "quantity": "2"},
+        {**_GOOD_INTENT, "quantity": True},
+        {**_GOOD_INTENT, "quantity": -1},
+        {**_GOOD_INTENT, "con_id": "265598"},
+        {**_GOOD_INTENT, "con_id": 265598.0},
+        {**_GOOD_INTENT, "order_ref": 3},
+        {**_BASE, "event": "filled", "decision_key": "K", "filled_qty": "2"},
+        {**_BASE, "event": "skipped", "decision_key": "K", "reason": "bogus"},
+    ],
+)
+def test_ledger_malformed_record_is_ledger_error(tmp_path, record):
+    """CR-01: every malformed record is a LedgerError at open, never a crash later."""
+    path = tmp_path / "l.jsonl"
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    with pytest.raises(led.LedgerError, match="line 1"):
+        _open(path)
+
+
+def test_ledger_well_formed_intent_is_accepted(tmp_path):
+    path = tmp_path / "l.jsonl"
+    path.write_text(json.dumps(_GOOD_INTENT) + "\n", encoding="utf-8")
+    assert [e["decision_key"] for e in _open(path).unresolved()] == ["2026-10-09|AAPL"]
+
+
 def test_dryrun_line_in_live_ledger_is_ledger_error(tmp_path):
     path = tmp_path / "ledger.jsonl"
     _open(path, mode="dryrun").append("run_start")

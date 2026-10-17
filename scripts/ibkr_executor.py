@@ -1397,9 +1397,14 @@ def _run_locked(
             clock=clock,
             run_id=uuid.uuid4().hex,
         )
-    except ledger_mod.LedgerError as exc:
-        logger.error('ibkr-state=LEDGER_CORRUPT detail="%s"', exc)
-        print(f"execute: ledger-corrupt ({exc})")
+    except Exception as exc:  # noqa: BLE001 - an unreadable ledger is "corrupt", never a crash
+        # A malformed record is a LedgerError; a file another program holds open (Windows),
+        # or any other read failure, ends the same way, so a present KILL still cancels.
+        detail = (
+            str(exc) if isinstance(exc, ledger_mod.LedgerError) else f"{type(exc).__name__}: {exc}"
+        )
+        logger.error('ibkr-state=LEDGER_CORRUPT detail="%s"', detail)
+        print(f"execute: ledger-corrupt ({detail})")
         if switches.allowed:
             return EXIT_RECONCILE
         # A closed switch is the stronger signal (rank 4 before 6); nothing is written to the

@@ -1072,6 +1072,76 @@ class TestFailClosed:
         assert fake.calls.count("reqGlobalCancel") == 1
         assert path.read_bytes() == before
 
+    @pytest.mark.parametrize("seq", ['"x"', "null", "1.5", "true", "0"])
+    def test_kill_with_a_malformed_seq_still_cancels_with_exit_4(self, tmp_path, loop, seq):
+        """CR-01: a record that is valid JSON but not a ledger record never bypasses the kill."""
+        path = executor.default_dryrun_ledger_file()
+        path.parent.mkdir(parents=True)
+        line = f'{{"v":1,"seq":{seq},"ts":"t","run_id":"r","mode":"dryrun","event":"run_start"}}\n'
+        path.write_text(line, encoding="utf-8")
+        fake = _fake_for()
+        code, _records = _gateway_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert fake.calls.count("reqGlobalCancel") == 1
+        text = _log_text(tmp_path)
+        assert "ibkr-state=LEDGER_CORRUPT" in text
+        assert "UNEXPECTED" not in text
+
+    def test_kill_with_an_intent_missing_its_order_fields_still_cancels(self, tmp_path, loop):
+        """CR-01: an intent without side/quantity/con_id is a ledger error, not a KeyError later."""
+        path = executor.default_dryrun_ledger_file()
+        path.parent.mkdir(parents=True)
+        intent = {
+            "v": 1,
+            "seq": 1,
+            "ts": "t",
+            "run_id": "r",
+            "mode": "dryrun",
+            "event": "intent",
+            "decision_key": KEY,
+        }
+        path.write_text(json.dumps(intent) + "\n", encoding="utf-8")
+        fake = _fake_for()
+        code, _records = _gateway_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert fake.calls.count("reqGlobalCancel") == 1
+
+    @staticmethod
+    def _ledger_read_denied(monkeypatch):
+        real = Path.read_bytes
+
+        def read_bytes(self):
+            if self.name == "ledger-dryrun.jsonl":
+                raise PermissionError("held open by another program")
+            return real(self)
+
+        monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    def test_kill_with_an_unreadable_ledger_still_cancels_with_exit_4(
+        self, tmp_path, loop, monkeypatch
+    ):
+        """CR-01: a ledger another program holds open (Windows) ends like a corrupt one."""
+        path = executor.default_dryrun_ledger_file()
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"x")  # present, so the read is attempted
+        self._ledger_read_denied(monkeypatch)
+        fake = _fake_for()
+        code, _records = _gateway_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert fake.calls.count("reqGlobalCancel") == 1
+        assert 'ibkr-state=LEDGER_CORRUPT detail="PermissionError' in _log_text(tmp_path)
+
+    def test_an_unreadable_ledger_without_kill_is_exit_6(self, tmp_path, monkeypatch):
+        path = executor.default_dryrun_ledger_file()
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"x")
+        self._ledger_read_denied(monkeypatch)
+        factory = _RecordingFactory()
+        code, _records = _run_execute(tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path))
+        assert code == executor.EXIT_RECONCILE
+        assert factory.calls == []
+        assert "ibkr-state=LEDGER_CORRUPT" in _log_text(tmp_path)
+
     def test_negative_control_switches_bypassed_would_reach_intent(
         self, tmp_path, loop, monkeypatch
     ):
