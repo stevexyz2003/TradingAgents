@@ -1,4 +1,4 @@
-[2026-10-09 | AAPL | Hold | pending]
+[2026-10-09 | AAPL | Hold | +2.0% | +4.0% | 5d | resolved:2026-10-16]
 
 DECISION:
 **Rating**: Hold
@@ -20,6 +20,9 @@ What would change the view: a close above about 342 with a positive and rising M
 **Price Target**: 342.0
 
 **Time Horizon**: 2-6 weeks, reassess after the next one or two sessions and any close beyond 342 or below 329.40
+
+REFLECTION:
+The 5-day alpha of +4.0% (raw +2.0%) is favorable for a Hold that recommended no directional add, though one window cannot validate or refute a 2-6 week thesis. The outperformance came with a rise that stayed well short of the 342 price target, so the call was not tested on its own terms. The window supports the medium-term trend leg (price above rising 50 and 200 SMAs) and does not clearly test the cooling-momentum or gap-risk legs, which needed a pullback or a sharp move to be validated. Next time, when a Hold rests on offsetting trend and momentum signals, state an explicit expected range for the holding period and check the momentum read against the MACD histogram within the first two or three sessions, rather than relying on relative return alone to score the call.
 
 <!-- ENTRY_END -->
 
@@ -430,6 +433,133 @@ What would change the view:
 **Price Target**: 248.0
 
 **Time Horizon**: 6-12 months
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | AAPL | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold AAPL at your existing standard weight. Don't add at about 343.46, which sits just under the 345.80 upper Bollinger Band after a session that faded from its open. Don't trim yet. Add a first tranche of 25–33% of the intended increase only on a pullback that holds near the 10 EMA or middle band (about 337–340), or on a decisive close above 345.80 on sustained volume. Use 325.69 (the 50 SMA) as the thesis stop and trim toward Underweight on a close below it on rising volume. Size positions so a 7% gap is tolerable.
+
+**Investment Thesis**: The Aggressive analyst's fundamentals case is strong and nobody disputed it. Nine-month revenue is up 16.2%, EPS is up 22%, gross margin is 50.1%, and free cash flow is about $110B. The trend is intact, with price above the 10 EMA (339.85), 50 SMA (325.69) and 200 SMA (292.14). That rules out the Conservative analyst's case for trimming or exiting. The Conservative analyst's case against adding now is stronger, and it wins that narrower question for these reasons.
+
+1. Valuation is not verified. There is no market cap, P/E or EV multiple. The Aggressive argument that a 20% compounder doesn't need a multiple is the weakest point in the debate, and the Neutral analyst correctly rejected it. The Zacks "cheapest Mag 7" headline is an opinion with no stated metric.
+
+2. The legal exposure is only a roughly $40B headline estimate. The Aggressive "a quarter of a year's FCF" framing ignores timing and balance-sheet flexibility. About 86% of FCF is already committed to buybacks and dividends, and cash is only $39.5B. A ruling would be a discrete event that could gap the stock, like the 7.4% drop on 7/31. The Neutral analyst's point that buybacks are discretionary is fair and argues for a measured position, not for adding.
+
+3. The momentum evidence is mixed. MACD has recovered to 4.14 but is well below its 6.27 peak, with a thin histogram of about 0.19. RSI of 62 is below its September high even though price made new closing highs. The 59.9M-share volume was a single day, and that day opened at 346.09, hit 347.82 and closed at 343.46, an intraday fade. Narrowing bands show compression, not direction. This does not show a broken trend. It shows a poor entry point.
+
+4. The risk/reward for a fresh add is poor. The 325.69 stop is about 5.2% below the close, against about 0.7% to the upper band. The Neutral analyst's pullback-add structure gives about 2–3% risk and a cheaper entry. A prior Hold on AAPL near 336–337 had the same structure of strong trend and cooling momentum. That call worked without being fully tested, so I am keeping the same discipline of explicit levels and staged adds.
+
+Data gaps remain: valuation, the equity increase from $65.8B to $107.5B, macro data (FRED unavailable) and the recent AAPL price series. These gaps argue for neutral sizing, not for cutting.
+
+What would move to Overweight: verified valuation that supports the price, the equity reconciliation, a better-sourced legal estimate, and a decisive close above 345.80 on sustained volume with MACD and RSI confirming. A held pullback to 337–340 would give a better-priced entry.
+
+What would move to Underweight: a close below 325.69 on rising volume, Q4 gross margin below 50%, revenue growth well below mid-teens, a confirmed legal liability near $40B, or cuts to buybacks. A close below 337.42 is a caution flag only. The Neutral analyst's suggestion to trim a quarter on a close below 337.42 on rising volume is a reasonable optional overlay for risk-averse holders, but it sits within one ATR of the price, so I would not require it.
+
+**Price Target**: 345.0
+
+**Time Horizon**: 2-6 weeks; reassess on a close above 345.80 or below 337.42/325.69
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | MSFT | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold MSFT at its current weight and do not add at $529. Pre-commit to one small tranche (no more than a third of any planned add) only if price pulls back into $505–520 while the 50 SMA is still rising. Hold any further adds until after the earnings print and the missing checks. Because a close-based stop does not protect against an earnings gap, size the position so that a ~$24 (about 4.5%) loss is tolerable. Review the position if price closes below ~$505 with a bearish MACD cross, or if margin and FCF triggers deteriorate. The horizon is roughly 1–3 months, through the Mag 7 earnings window.
+
+**Investment Thesis**: The evidence is balanced, and the three analysts converge on not adding at $529. The conservative view is the stronger one on timing. The neutral view is the stronger one on execution.
+
+**Business quality (supports not trimming)**
+- Fiscal Q3 2026 revenue was $82.9B, up about 19%.
+- Operating income was up about 21%.
+- Operating cash flow was $46.7B.
+- TTM FCF is about $67.6B.
+- Liabilities are about 0.71x equity.
+- Price is above a rising 50 SMA (~505) and 200 SMA (~434).
+
+**Deterioration signals (argue against adding)**
+- Capex is up about 95% YoY and is now about 37% of revenue.
+- Quarterly FCF has been flat at about $15–16B for three quarters.
+- Operating margin has slipped from about 49% to 46%.
+- Revenue growth has slowed from about 26% to 19%.
+- Total liabilities rose about $41B in one quarter, current liabilities rose about 23%, and cash fell about a third. Nobody has explained this.
+
+**Where the aggressive case fails**
+- Its own numbers give a risk/reward below 1: a $24 stop against about $22 to the 551 high.
+- Its second tranche at ~531 worsens that ratio.
+- It reads the $527.5 put sweep as a hedge, but the data cannot distinguish a hedge from a directional bet.
+- "Doesn't need to borrow" is plausible but unverified, given the liability jump.
+- The Maia chip and NiSource power deal are headlines, not measured moat evidence.
+- Its entry and stop were both listed at 505.37, which is an error.
+
+**Where the conservative case overreaches**
+- Flat FCF is not declining FCF.
+- A 46% margin is already at the proposed threshold, so ordinary noise could trip it.
+- The 20% drawdown it cites is a scenario, not a forecast.
+- It leaves no pre-planned entry.
+- It also proposes a protective put without pricing it.
+
+**Missing from the record**
+- Valuation (P/E, EV/EBITDA).
+- A verified 10-year yield (FRED returned nothing).
+- Backlog or AI revenue.
+- The explanation for the liability jump.
+- Possibly the fiscal Q4 filing.
+- Sentiment is mixed: the sentiment report scored 4.6/10, and the stock slipped despite a $600 target.
+
+**What would upgrade to Overweight**
+- Quarterly FCF turns up from the $15–16B range.
+- Operating margin holds at or above about 46%.
+- Backlog or AI revenue grows faster than capex.
+- The liability jump proves to be payables.
+- Valuation is reasonable against earnings growth.
+
+**What would downgrade to Underweight**
+- Operating margin stays below about 45%.
+- FCF declines while capex keeps outgrowing revenue.
+- The liability jump proves to be short-term borrowing.
+- A close below the 50 SMA comes with a bearish MACD cross.
+
+**Lesson applied from the prior AAPL Hold**
+- State an expected range of about $505–551.
+- Check the MACD histogram within the first two or three sessions (it is only about 0.27 now).
+- Do not score the call on relative return alone.
+
+**Price Target**: 551.0
+
+**Time Horizon**: 1-3 months (through the Mag 7 earnings window)
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | NVDA | Hold | pending]
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold the existing NVDA position at its current weight. Do not add at $214.13 and do not average down. Use a graded response to weakness: trim about 15-20% on a daily close below $210.96, and cut further toward underweight on a decisive close below the 200 SMA near $202.66. Add only a small tranche (about 0.1-0.2x standard allocation) after a reclaim of $223-224 on solid volume, or after an RSI higher low with a shrinking MACD histogram. Scale toward 1.25x only after the forward P/E, the non-current liabilities breakdown and hyperscaler capex guidance come back clean. Expected horizon is 2-6 weeks, with a range of roughly $202-$228 until a trigger fires.
+
+**Investment Thesis**: The debate leaves the evidence balanced, and no side has a decisive edge.
+
+**Aggressive case.** Its fundamentals are real: FQ2 revenue of $96.2B (+106% y/y), 75% gross margin, 66% operating margin, and $74.4B of six-month operating cash flow. But it uses them to answer questions they cannot answer. Valuation was not verified. Non-current liabilities rose from about $20B to about $48B in one quarter with no explanation. Net income has exceeded operating income, so some EPS growth comes from non-operating items. Its "favorable asymmetry" claim also fails on the numbers. The 200 SMA is about 5.4% below the close, while the 50 SMA and Bollinger middle are only about 4% and 6.6% above it. That is roughly symmetric, not an edge. Moving the stop to $202 does not reduce risk. It makes the loss larger if the stop is hit, and the tranche would be bought before any confirmation. The tape is still deteriorating: price is below the 10 EMA, the 50 SMA and the lower Bollinger band, the MACD histogram is -2.37 and widening, and RSI is 37.6. Retail capitulation is weak contrarian evidence, since sentiment confidence is low, StockTwits data is missing, and only 10 Reddit posts were used.
+
+**Conservative case.** Its sequencing argument is sound: do not add before confirmation and the fundamental checks. But it overstates the macro headwind, because the FRED data was unverified. It also treats a single close at $210.96 as a meaningful signal, which is too blunt. That level is 1.5% away and inside one ATR (5.96, about 2.8% of price). The neutral analyst correctly points this out and proposes a smaller initial trim, which I adopt.
+
+**Why Hold.** The long-term trend is intact, with price about 5.7% above a rising 200 SMA and the business strong. That argues against selling into weakness. The deteriorating tape, the unexplained liabilities and the unverified valuation argue against adding. The two sides roughly offset, so I am not forcing a direction.
+
+**What would change this.**
+- Upgrade toward Overweight or Buy: a close above $223-224 and then $228 on volume, or an RSI higher low with a shrinking MACD histogram. This also needs a benign liabilities breakdown in the 10-Q (not debt-heavy), supportive hyperscaler capex guidance (expected in late October), and an acceptable forward P/E.
+- Downgrade toward Underweight or Sell: a decisive close below $202.66, capex guidance cuts, evidence of stress in AI financing (CoreWeave or neocloud credit, spreads), or liabilities that prove to be leverage-driven.
+
+**Process note.** Following the lesson from the AAPL Hold, I state an explicit range ($202-$228). I would also check the MACD histogram within the first two or three sessions, rather than judging the call on relative return alone. If the position is large, a modest put spread is reasonable because the tape is weak.
+
+**Price Target**: not provided
+
+**Time Horizon**: 2-6 weeks, reassess after hyperscaler capex guidance in late October
 
 <!-- ENTRY_END -->
 

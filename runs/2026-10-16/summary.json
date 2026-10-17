@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-10-17T06:50:06.584784+00:00",
+  "finished_at": "2026-10-17T06:59:05.713628+00:00",
+  "trade_date": "2026-10-16",
+  "provider": "anthropic",
+  "deep_think_llm": "claude-sonnet-5-5",
+  "quick_think_llm": "claude-haiku-5-5",
+  "max_cost_per_run_usd": 1.5,
+  "max_total_cost_usd": 4.5,
+  "commit": "14e31f1d485d606b912e18a9f2789d38cb6669d9",
+  "status": "ok",
+  "totals": {
+    "tickers": 3,
+    "cost_usd": 0.73344,
+    "tokens_in": 479422,
+    "tokens_out": 141936,
+    "ok": 3,
+    "failed": 0,
+    "budget_aborted": 0,
+    "skipped": 0
+  },
+  "runs": [
+    {
+      "ticker": "AAPL",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.24016499999999996,
+      "tokens_in": 153632,
+      "tokens_out": 46505,
+      "duration_s": 174.845465841,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AAPL/complete_report.md",
+      "error": null,
+      "jev": {
+        "model": "jev-1.13.0",
+        "input_tokens": 4662,
+        "cost_usd": 0.0001958,
+        "latency_ms": 166,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "HOLD",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
+            "existing": "Mixed",
+            "jev": "mixed",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          }
+        }
+      },
+      "rating_source": "engine"
+    },
+    {
+      "ticker": "MSFT",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.252339,
+      "tokens_in": 165709,
+      "tokens_out": 48847,
+      "duration_s": 190.42981247500006,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/MSFT/complete_report.md",
+      "error": null,
+      "jev": {
+        "model": "jev-1.13.0",
+        "input_tokens": 4315,
+        "cost_usd": 0.00018123,
+        "latency_ms": 167,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "HOLD",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
+            "existing": "Mixed",
+            "jev": "mixed",
+            "confidence": 0.93,
+            "agree": true,
+            "applied": false
+          }
+        }
+      },
+      "rating_source": "engine"
+    },
+    {
+      "ticker": "NVDA",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.24093649999999997,
+      "tokens_in": 160081,
+      "tokens_out": 46584,
+      "duration_s": 172.9292165249999,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/NVDA/complete_report.md",
+      "error": null,
+      "jev": {
+        "model": "jev-1.13.0",
+        "input_tokens": 4739,
+        "cost_usd": 0.00019904,
+        "latency_ms": 161,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "HOLD",
+            "jev": "hold",
+            "confidence": 0.99,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
+            "existing": "Mixed",
+            "jev": "mixed",
+            "confidence": 0.78,
+            "agree": true,
+            "applied": false
+          }
+        }
+      },
+      "rating_source": "engine"
+    }
+  ]
+}
