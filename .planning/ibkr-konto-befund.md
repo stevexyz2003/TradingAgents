@@ -361,3 +361,125 @@ Der Operator schaltet "Read-Only API" nach dieser Messung wieder aus; die Bestä
 Fehler 154 (Halt) lässt sich am Paper-Gateway nicht herbeiführen. `halted` ist nur über die
 offizielle Codeliste und einen Fake-Test belegt (A5). Das bleibt eine offene REQ-67-Lücke
 für die Verifikation; es wird keine Messung behauptet.
+
+## Kill-Storno, Orderhistorie und orderRef (Phase 5, D-06) — 2026-10-17
+
+Gemessen am Samstag, 2026-10-17, zwischen 11:44 und 11:59 UTC, über **TWS Paper**
+(nicht IB Gateway) auf `127.0.0.1:7497`, Konto `DUQ634065`, Serverversion 178.
+Gateway und TWS lassen pro Benutzer nur eine Sitzung zu. Die TWS-Anmeldung hat
+das Gateway deshalb getrennt, und TWS hat die API übernommen. Die API-Einstellungen
+in TWS sind getrennt von denen des Gateways: „ActiveX- und Socket-Clients aktivieren“
+musste der Operator erst einschalten (vorher `GATEWAY_UNREACHABLE`, Exit 3).
+
+Ausgangslage:
+
+- „Schreibgeschützte API“ in TWS **aus** (Screenshot des Operators, 13:46 MESZ).
+- Vom Operator in TWS von Hand angelegt: AAPL KAUFEN 1, LMT 115.00, DAY, SMART
+  (Kurs zu diesem Zeitpunkt ≈ 342,6). `permId 1440521754`, `client_id 0`.
+- Vorab (Agent selbst): `ruff check .` sauber; `pytest -k g3` 14 passed; die volle
+  Suite hat 2425 passed, 1 failed. Der Fehler ist der bekannte, schon vor der Phase
+  rote Test `test_yfinance_keeps_its_cache_out_of_the_users_home` (Windows-TEMP
+  liegt unter Home).
+- Im echten State-Ordner lagen vorher weder `KILL` noch `RELEASE`.
+
+### Messung 1: Einzeiler
+
+Beide Handbuch-Einzeiler wurden wörtlich am echten Pfad ausgeführt
+(`RELEASE` um 11:44:30 UTC, `KILL` um 11:59:06 UTC).
+
+```text
+RELEASE = {"account": "DUQ634065", "valid_until": "2026-11-16"}   (UTF-8 ohne BOM)
+KILL    = leere Datei, Length 0
+```
+
+Der Executor las beide wie erwartet (`ibkr-state=SWITCHES release=release-ok
+kill=kill-active valid_until=2026-11-16`). Gegenprobe in einem Scratch-Ordner:
+`Set-Content` (ANSI) und `>` (BOM) ergeben beide `release-invalid`.
+
+### Messung 2: Kill-Storno (SC3)
+
+Historie vorher (`ibkr_order_probe.py --history`, 11:58:58 UTC): genau eine offene
+Order, die Testorder. Der Haltepunkt (fremde offene Orders) griff nicht.
+
+```json
+"open": [{"source": "open", "order_ref": "", "status": "PreSubmitted", "action": "BUY",
+          "quantity": 1.0, "filled": null, "con_id": 265598, "perm_id": 1440521754,
+          "order_id": 0, "client_id": 0}],
+"completed": [], "executions": []
+```
+
+Aufruf: `.venv/Scripts/python.exe scripts/ibkr_executor.py execute AAPL`, mit `KILL`
+und gültigem `RELEASE`.
+
+```text
+execute: kill-active (KILL file present)
+execute: kill-active, global cancel sent, 0 open order(s) left
+exit=4
+```
+
+Log (`logs/ibkr_executor.log`):
+
+```text
+13:59:09,319 WARNING ibkr-state=SWITCHES release=release-ok kill=kill-active valid_until=2026-11-16
+13:59:09,452 INFO    ibkr-state=CONNECTED account=DUQ634065 clientId=20001 readonly=True (...)
+13:59:09,455 WARNING ibkr-state=GLOBAL_CANCEL_SENT code=- detail="count=1 reason=kill_switch"
+13:59:10,062 INFO    ibkr-state=KILL_CANCEL remaining=0 rechecks=2 detail=""
+```
+
+Neue Zeilen in `ledger-dryrun.jsonl` (die Datei entstand mit diesem Lauf):
+
+```json
+{"command":"execute","event":"run_start","kill":"kill-active","kill_detail":"","mode":"dryrun","release":"release-ok","release_account":"DUQ634065","release_detail":"","run_id":"6c280f64947449b9b3a07bfdd1ef39ba","seq":1,"tickers":["AAPL"],"ts":"2026-10-17T11:59:09.319567+00:00","v":1,"valid_until":"2026-11-16"}
+{"detail":"","event":"kill_cancel","kill":"kill-active","kill_detail":"","mode":"dryrun","outcome":"sent","rechecks":2,"release":"release-ok","release_account":"DUQ634065","release_detail":"","remaining":0,"run_id":"6c280f64947449b9b3a07bfdd1ef39ba","sent":1,"seq":2,"ts":"2026-10-17T11:59:10.060716+00:00","v":1,"valid_until":"2026-11-16"}
+{"event":"run_end","exit":4,"mode":"dryrun","run_id":"6c280f64947449b9b3a07bfdd1ef39ba","seq":3,"state":"kill-active","ts":"2026-10-17T11:59:10.063065+00:00","v":1}
+```
+
+Ergebnis: Exit 4, genau ein globales Storno (`sent=1`), nach zwei Nachlese-Runden
+keine offene Order mehr (`remaining=0`, Dauer ≈ 0,6 s).
+
+### Messung 3: Orderhistorie nach dem Storno (A2)
+
+`KILL` entfernt, dann `ibkr_order_probe.py --history` (11:59:18 UTC):
+
+```json
+{
+  "open": [],
+  "completed": [{"source": "completed", "order_ref": "", "status": "Cancelled",
+                 "action": "BUY", "quantity": 1.0, "filled": 0.0, "con_id": 265598,
+                 "perm_id": 1440521754, "order_id": 0, "client_id": 0}],
+  "executions": []
+}
+```
+
+Die stornierte Order erscheint unter `completed` mit Status `Cancelled`, `filled 0.0`,
+derselben `perm_id`. Executions gibt es keine.
+
+### Messung 4: orderRef mit | am whatIf (A3, A5)
+
+`ibkr_order_probe.py --whatif AAPL --order-ref "2026-10-09|AAPL"` (11:59:19 UTC):
+
+```json
+{"ticker": "AAPL", "order_ref": "2026-10-09|AAPL", "state": "OK", "errors": [],
+ "echo_order_ref": "2026-10-09|AAPL", "echo_account": "DUQ634065",
+ "effective_tif": "DAY", "sent_tif": "DAY", "init_margin_change": 100.68,
+ "commission": 1.000003}
+```
+
+Danach `RELEASE` entfernt. Im State-Ordner liegen weder `KILL` noch `RELEASE`. Neu
+sind `ledger-dryrun.jsonl` (die drei Zeilen oben) und `ledger.jsonl.lock` (die Lockdatei).
+
+### Folgen
+
+- **(a) A1 bestätigt:** `reqGlobalCancel` (Nachricht 58) storniert auch **manuell in
+  TWS angelegte** Orders (`client_id 0`), obwohl der Executor auf clientId 20001
+  verbunden ist. Der Handbuch-Hinweis „takes back all open orders of the account,
+  including orders you placed by hand in TWS“ ist damit belegt.
+- **(b) Klassifikation stimmt:** Gemessener Status ist `Cancelled` mit `filled 0.0`.
+  `resolve_entry` zählt `Cancelled` zu `_CANCELLED` und klassifiziert das als
+  `not_filled`, passend zur Messung.
+- **(c) Trenner bleibt `|`:** `DECISION_KEY_SEPARATOR = "|"` wird am whatIf
+  angenommen und unverändert im Echo zurückgegeben. Ein Wechsel auf `_` ist nicht nötig.
+- **(d) Echo-Konto vorhanden (D-22):** `echo_account = "DUQ634065"` steht im Echo.
+- **Keine Abweichungen** von den Annahmen, also keine Lücke für einen Gap-Closure-Plan.
+  Zur Einordnung: Gemessen wurde über TWS statt Gateway (gleiche API, Serverversion 178).
+  Am Samstag blieb eine DAY-Limit-Order außerhalb der Handelszeit als `PreSubmitted` offen.
