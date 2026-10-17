@@ -294,3 +294,79 @@ def check_switches(
         expected_account=expected_account,
     )
     return Switches(release=release, kill=read_kill(state_dir))
+
+
+# --- size cap ----------------------------------------------------------------------------
+
+#: A code constant: every change is a commit (D-09). It equals the largest order D-10 of
+#: phase 4 can produce today (Buy = 2 blocks of 1). Raise it deliberately, never by accident.
+MAX_QTY_PER_ORDER = 2
+
+
+def check_size(quantity: object) -> str | None:
+    """Return a reason to reject the order, or None. Never returns a trimmed quantity (REQ-IBKR-32)."""
+    if type(quantity) is not int or quantity <= 0:  # excludes bool and float on purpose
+        return f"quantity {quantity!r} is not a positive whole number"
+    if quantity > MAX_QTY_PER_ORDER:
+        return f"quantity {quantity} exceeds MAX_QTY_PER_ORDER {MAX_QTY_PER_ORDER}"
+    return None
+
+
+# --- idempotency key ---------------------------------------------------------------------
+
+#: Unmeasured at the gateway (assumption A3); the operator checkpoint measures it, '_' is the fallback.
+DECISION_KEY_SEPARATOR = "|"
+
+_TRADE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,11}$")
+
+
+def decision_key(trade_date: str, ticker: str) -> str:
+    """``<trade_date><sep><ticker>``, whitelisted parts, no hash (REQ-IBKR-39)."""
+    if not isinstance(trade_date, str) or not _TRADE_DATE_RE.match(trade_date):
+        raise ValueError(f"invalid trade date: {trade_date!r}")
+    try:
+        date.fromisoformat(trade_date)
+    except ValueError:
+        raise ValueError(f"invalid trade date: {trade_date!r}") from None
+    if not isinstance(ticker, str) or not _TICKER_RE.match(ticker):
+        raise ValueError(f"invalid ticker: {ticker!r}")
+    return f"{trade_date}{DECISION_KEY_SEPARATOR}{ticker}"
+
+
+# --- source comparisons (REQ-IBKR-63: the more cautious value wins) --------------------------
+
+
+def account_conflict(
+    *, managed_account: str, release_account: str | None, echo_account: str | None
+) -> str | None:
+    """A reason if the account sources disagree. The order echo is optional (D-22)."""
+    if release_account and release_account != managed_account:
+        return f"release names account {release_account!r}, broker manages {managed_account!r}"
+    if echo_account and echo_account != managed_account:
+        return f"order echo names account {echo_account!r}, broker manages {managed_account!r}"
+    return None
+
+
+def position_conflict(*, ledger_filled_qty: float, broker_held: float) -> str | None:
+    """A reason only if the ledger knows own fills and the broker holds less (D-18, narrow rule).
+
+    Without own fills in the ledger there is no conflict. Phase 6/7 sharpen this for
+    sells and foreign holdings once fills are processed.
+    """
+    if ledger_filled_qty > 0 and broker_held < ledger_filled_qty:
+        return f"ledger has {ledger_filled_qty:g} filled, broker holds {broker_held:g}"
+    return None
+
+
+def executed_conflict(*, ledger_attempted: bool, history_has_ref: bool) -> str | None:
+    """A reason if ledger and broker history disagree on "already executed?".
+
+    "Ledger yes, broker no" is a matter for the reconciliation (exit 6); "broker yes,
+    ledger no" is a ticker conflict (``source-conflict``).
+    """
+    if history_has_ref and not ledger_attempted:
+        return "broker shows an order with this orderRef, ledger has none"
+    if ledger_attempted and not history_has_ref:
+        return "ledger says attempted, broker shows no trace"
+    return None
