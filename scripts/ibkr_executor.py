@@ -1454,7 +1454,15 @@ def _run_locked(
         finally:
             ctx.stack.close()
     except Exception as exc:
-        ctx.ledger.append(ledger_mod.RUN_END, outcome="error", error=type(exc).__name__)
+        try:
+            # After a failed append the ledger seals the cut-off line first (WR-01).
+            ctx.ledger.append(ledger_mod.RUN_END, outcome="error", error=type(exc).__name__)
+        except Exception as end_exc:  # noqa: BLE001 - the original error is the one to report
+            logger.error(
+                'ibkr-state=LEDGER_APPEND_FAILED event=run_end detail="%s: %s"',
+                type(end_exc).__name__,
+                end_exc,
+            )
         raise
     exits = [row["exit"] for row in rows.values() if row["exit"] is not None]
     if abort_code is not None:

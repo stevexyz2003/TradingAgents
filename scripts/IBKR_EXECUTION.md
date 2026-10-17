@@ -616,7 +616,11 @@ decision is still fresh.
 **Torn tail.** A crash can cut the last line. That line is tolerated; the first
 append after it carries `seals_torn_line` with the number of the cut line. A broken
 line directly followed by its seal is fine anywhere; every other defect in the
-middle of the file is exit 6 (`ledger-corrupt`).
+middle of the file is exit 6 (`ledger-corrupt`). The same holds within a run: when
+an append fails midway (full disk, network drive), the next append of that run (the
+error path's `run_end`) first checks the end of the file and seals a cut-off line;
+if that append fails too, the run logs `LEDGER_APPEND_FAILED` and ends with the
+original error.
 
 **Reconciliation.** Before any new order, each open entry (an `intent` or `placed`
 without an end) is resolved against open orders, completed orders and executions by

@@ -604,6 +604,40 @@ def _gateway_run(
     )
 
 
+def _half_writing_open(fails):
+    """An ``open`` for the ledger: a write for which ``fails(data)`` holds lands only halfway
+    and raises a full-disk error, like a write cut off on a full or network drive."""
+    import builtins
+
+    def ledger_open(path, mode):
+        real = builtins.open(path, mode)  # noqa: SIM115 - closed by the handle's __exit__
+
+        class Handle:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                real.close()
+                return False
+
+            def write(self, data):
+                if fails(data):
+                    real.write(data[: len(data) // 2])
+                    real.flush()
+                    raise OSError(28, "No space left on device")
+                return real.write(data)
+
+            def flush(self):
+                real.flush()
+
+            def fileno(self):
+                return real.fileno()
+
+        return Handle()
+
+    return ledger_open
+
+
 class TestOrderRefAndIntent:
     def test_order_ref_is_decision_key(self, tmp_path, loop, capsys):
         fake = _fake_for()
@@ -674,6 +708,49 @@ class TestOrderRefAndIntent:
         assert end["outcome"] == "error"
         assert end["error"] == "RuntimeError"
         _assert_nothing_sent(fake, 1)
+
+    def test_a_half_written_intent_does_not_corrupt_the_ledger(self, tmp_path, loop, monkeypatch):
+        """WR-01: the error path's run_end seals the cut-off intent line; the next run reads it."""
+        armed = [True]
+
+        def fails(data):
+            if armed[0] and b'"event":"intent"' in data:
+                armed[0] = False
+                return True
+            return False
+
+        monkeypatch.setattr(ledger_mod, "open", _half_writing_open(fails), raising=False)
+        fake = _fake_for()
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code != executor.EXIT_OK
+        end = _events(records, "run_end")[-1]
+        assert end["outcome"] == "error"
+        assert end["error"] == "OSError"
+        lines = executor.default_dryrun_ledger_file().read_bytes().split(b"\n")
+        cut = lines[end[ledger_mod.SEALS_LINE] - 1]
+        assert b'"event":"intent"' in cut  # the seal names the cut-off intent line
+        with pytest.raises(ValueError):
+            json.loads(cut)
+        assert _events(records, "intent") == []
+        assert _events(records, "dry_complete") == []
+        # The next run (the failing write is used up) reads the ledger and goes through.
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code == executor.EXIT_OK
+        assert "ibkr-state=LEDGER_CORRUPT" not in _log_text(tmp_path)
+        assert len(_events(records, "intent")) == 1
+
+    def test_a_run_end_that_cannot_be_written_is_refused_cleanly(self, tmp_path, loop, monkeypatch):
+        """WR-01: the disk stays full; the error path logs the failed run_end, keeps the cause."""
+
+        def fails(data):
+            return b'"event":"intent"' in data or b'"event":"run_end"' in data
+
+        monkeypatch.setattr(ledger_mod, "open", _half_writing_open(fails), raising=False)
+        code, _records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code != executor.EXIT_OK
+        text = _log_text(tmp_path)
+        assert "ibkr-state=LEDGER_APPEND_FAILED event=run_end" in text
+        assert "ibkr-state=UNEXPECTED OSError" in text
 
     def test_the_dry_placer_checks_the_size_a_second_time(self):
         ctx = SimpleNamespace(mods=SimpleNamespace(guards=guards, ledger=ledger_mod), ledger=None)

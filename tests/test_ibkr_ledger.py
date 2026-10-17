@@ -98,6 +98,112 @@ def test_negative_control_write_ahead_fsync_per_append(tmp_path, monkeypatch):
     assert ledger.unresolved() == []
 
 
+class _HalfWrite:
+    """``open`` for the ledger whose next ``fail`` line writes go only halfway, then raise."""
+
+    def __init__(self, fail=1, *, cut=None):
+        self.fail = fail
+        self.cut = cut
+
+    def __call__(self, path, mode):
+        real = open(path, mode)  # noqa: SIM115 - closed by the handle's __exit__
+        outer = self
+
+        class Handle:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                real.close()
+                return False
+
+            def write(self, data):
+                if outer.fail and data != b"\n":
+                    outer.fail -= 1
+                    cut = len(data) // 2 if outer.cut is None else outer.cut(data)
+                    real.write(data[:cut])
+                    real.flush()
+                    raise OSError(28, "No space left on device")
+                return real.write(data)
+
+            def flush(self):
+                real.flush()
+
+            def fileno(self):
+                return real.fileno()
+
+        return Handle()
+
+
+def test_ledger_append_after_a_half_written_line_seals_it(tmp_path, monkeypatch):
+    """WR-01: a later append never lands behind a cut-off line of a failed append."""
+    path = tmp_path / "l.jsonl"
+    ledger = _open(path)
+    ledger.append("run_start")
+    monkeypatch.setattr(led, "open", _HalfWrite(), raising=False)
+    with pytest.raises(OSError, match="No space"):
+        ledger.append("intent", **_intent("2026-10-09|AAPL"))
+    end = ledger.append("run_end", outcome="error", error="OSError")
+    assert end[led.SEALS_LINE] == 2
+    reopened = _open(path, run_id="r2")
+    assert [r["event"] for r in reopened.records] == ["run_start", "run_end"]
+    assert reopened.unresolved() == []
+    assert reopened.append("run_start")["seq"] == end["seq"] + 1
+
+
+def test_ledger_append_after_a_failed_fsync_keeps_the_landed_line(tmp_path, monkeypatch):
+    """WR-01: the whole line reached the disk, only fsync failed: it counts, nothing is sealed."""
+    path = tmp_path / "l.jsonl"
+    ledger = _open(path)
+    ledger.append("run_start")
+    real = os.fsync
+    calls = []
+
+    def flaky(fd):
+        calls.append(fd)
+        if len(calls) == 1:
+            raise OSError("fsync failed")
+        return real(fd)
+
+    monkeypatch.setattr(os, "fsync", flaky)
+    with pytest.raises(OSError, match="fsync failed"):
+        ledger.append("intent", **_intent("2026-10-09|AAPL"))
+    end = ledger.append("run_end")
+    assert led.SEALS_LINE not in end
+    assert [e["decision_key"] for e in ledger.unresolved()] == ["2026-10-09|AAPL"]
+    reopened = _open(path, run_id="r2")
+    assert [r["event"] for r in reopened.records] == ["run_start", "intent", "run_end"]
+    assert [r["seq"] for r in reopened.records] == [1, 2, 3]
+
+
+def test_ledger_append_after_a_line_cut_just_before_its_newline(tmp_path, monkeypatch):
+    path = tmp_path / "l.jsonl"
+    ledger = _open(path)
+    ledger.append("run_start")
+    monkeypatch.setattr(led, "open", _HalfWrite(cut=lambda data: len(data) - 1), raising=False)
+    with pytest.raises(OSError):
+        ledger.append("intent", **_intent("2026-10-09|AAPL"))
+    end = ledger.append("run_end")
+    assert led.SEALS_LINE not in end
+    reopened = _open(path, run_id="r2")
+    assert [r["event"] for r in reopened.records] == ["run_start", "intent", "run_end"]
+
+
+def test_ledger_failed_append_on_a_torn_tail_keeps_the_seal(tmp_path, monkeypatch):
+    """The newline that closes an old torn tail landed, the record did not: seal it next."""
+    path = tmp_path / "l.jsonl"
+    _open(path).append("run_start")
+    with open(path, "ab") as fh:
+        fh.write(b'{"v":1,"seq":2')
+    ledger = _open(path)
+    monkeypatch.setattr(led, "open", _HalfWrite(cut=lambda data: 0), raising=False)
+    with pytest.raises(OSError):
+        ledger.append("run_start")
+    end = ledger.append("run_end")
+    assert end[led.SEALS_LINE] == 2
+    assert [r["event"] for r in _open(path, run_id="r2").records] == ["run_start", "run_end"]
+
+
 def test_ledger_seq_continues_after_reopen(tmp_path):
     path = tmp_path / "l.jsonl"
     first = _open(path)

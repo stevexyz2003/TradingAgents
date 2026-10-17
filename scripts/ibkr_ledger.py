@@ -263,6 +263,8 @@ class Ledger:
         self._clock = clock
         self._needs_newline = needs_newline
         self._torn_line = torn_line
+        # Set when an append failed midway: part of its line may be on disk without a newline.
+        self._tail_unknown = False
         # ``_check`` guarantees every ``seq`` is a positive int.
         self._seq = max((r["seq"] for r in records), default=0)
 
@@ -335,6 +337,8 @@ class Ledger:
             raise ValueError(f"unknown ledger event: {event!r}")
         if event == SKIPPED and fields.get("reason") not in REASONS:
             raise ValueError(f"skipped needs a reason from REASONS, got {fields.get('reason')!r}")
+        if self._tail_unknown:
+            self._inspect_tail()
         record = {
             "v": LEDGER_VERSION,
             "seq": self._seq + 1,
@@ -349,17 +353,59 @@ class Ledger:
         line = (
             json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode("utf-8")
-        with open(self.path, "ab") as fh:
-            if self._needs_newline:
-                fh.write(b"\n")
-            fh.write(line)
-            fh.flush()
-            os.fsync(fh.fileno())
+        try:
+            with open(self.path, "ab") as fh:
+                if self._needs_newline:
+                    fh.write(b"\n")
+                fh.write(line)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except BaseException:
+            # A full disk or a network drive can leave part of the line on disk without its
+            # newline. The next append looks at the tail first, so it never lands behind a
+            # cut-off line unsealed (WR-01). The seq is used up: the line may be on disk.
+            self._seq += 1
+            self._tail_unknown = True
+            raise
         self._seq += 1
         self._needs_newline = False
         self._torn_line = None
         self.records.append(record)
         return record
+
+    def _inspect_tail(self) -> None:
+        """After a failed append: find out what reached the disk and how to go on safely.
+
+        * The file ends with a newline: either the failed line landed in full (it is taken
+          into ``records``), or only the newline that closed an earlier torn tail did (that
+          line still needs its seal, so ``_torn_line`` stays).
+        * The file ends without one: the last line is cut off; the next append starts a new
+          line and seals that line's number, like a torn tail found at open.
+        """
+        raw = self.path.read_bytes() if self.path.exists() else b""
+        lines = raw.split(b"\n")
+        ends_with_newline = raw.endswith(b"\n")
+        last = lines[-2] if ends_with_newline and len(lines) > 1 else lines[-1]
+        try:
+            landed = json.loads(last.decode("utf-8"))
+        except ValueError:
+            landed = None
+        if (
+            isinstance(landed, dict)
+            and landed.get("seq") == self._seq
+            and landed.get("run_id") == self.run_id
+            and not any(r.get("seq") == self._seq for r in self.records)
+        ):
+            # The failed line is on disk in full; it sealed the earlier torn tail, if any.
+            self.records.append(landed)
+            self._torn_line = None
+        if ends_with_newline or not raw:
+            self._needs_newline = False
+        else:
+            self._needs_newline = True
+            if not isinstance(landed, dict):
+                self._torn_line = len(lines)
+        self._tail_unknown = False
 
     def _lifecycle(self, key: str) -> list[dict]:
         return [
