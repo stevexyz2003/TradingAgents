@@ -9,7 +9,7 @@ reaches the gateway also checks that nothing but a whatIf preview reached the cl
 
 import importlib.util
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -525,3 +525,297 @@ class TestReasonFallback:
         assert record["reason"] == "review"
         assert "decision_key" not in record
         assert "unmapped_state" not in record
+
+
+# --- the gateway chain: resolution, position, target, whatIf with orderRef, intent -------------
+
+BUY_TEXT_HALT = "Order rejected - instrument is halted"
+
+
+def _identity(ticker, con_id=None):
+    return contracts_mod.Identity(
+        CON_IDS[ticker] if con_id is None else con_id, "NASDAQ", "USD", ticker
+    )
+
+
+def _contracts_file(tmp_path, entries):
+    """A valid contracts file; ``entries`` maps ticker to an Identity."""
+    path = tmp_path / "ibkr" / "contracts.json"
+    table = {
+        t: contracts_mod.StoredContract(i, "2026-10-01T00:00:00+00:00") for t, i in entries.items()
+    }
+    contracts_mod.commit_contracts(path, table, ())
+    return path
+
+
+def _funds(available="100000", funds_currency="EUR", cash_currency="EUR"):
+    return [
+        ibkr_fakes.account_value("TotalCashValue", "100000", currency=cash_currency),
+        ibkr_fakes.account_value("AvailableFunds", available, currency=funds_currency),
+    ]
+
+
+def _fake_for(tickers=("AAPL",), *, liquid_hours=OPEN_HOURS, funds=None, **kwargs):
+    contracts = {t: ibkr_fakes.stk_contract(t, CON_IDS[t]) for t in tickers}
+    kwargs.setdefault("whatif", ibkr_fakes.order_state(init="997.14"))
+    return ibkr_fakes.FakeIB(
+        qualify={t: [c] for t, c in contracts.items()},
+        details={
+            CON_IDS[t]: [ibkr_fakes.contract_detail(c, liquid_hours=liquid_hours)]
+            for t, c in contracts.items()
+        },
+        summary=_funds() if funds is None else funds,
+        **kwargs,
+    )
+
+
+def _aapl_position(quantity, con_id=None):
+    return ibkr_fakes.position(
+        "DUQ634065", "AAPL", quantity, conId=CON_IDS["AAPL"] if con_id is None else con_id
+    )
+
+
+def _gateway_run(
+    tmp_path,
+    loop,
+    fake,
+    *,
+    rating="Buy",
+    tickers=("AAPL",),
+    paper=None,
+    clock=OPEN_NOW,
+    calendar=None,
+    placer=None,
+):
+    """Run ``execute`` against a fake gateway with a stored contract for each ticker."""
+    paper = _buy_paper(tmp_path, rating) if paper is None else paper
+    contracts = _contracts_file(tmp_path, {t: _identity(t) for t in tickers})
+    return _run_execute(
+        tmp_path,
+        _fake_factory(fake, loop),
+        list(tickers),
+        paper_log=paper,
+        clock=clock,
+        calendar=calendar,
+        contracts=contracts,
+        placer=placer,
+    )
+
+
+class TestOrderRefAndIntent:
+    def test_order_ref_is_decision_key(self, tmp_path, loop, capsys):
+        fake = _fake_for()
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        order = fake.whatif_calls[-1][1]
+        assert order.orderRef == KEY
+        (intent,) = _events(records, "intent")
+        assert intent["decision_key"] == KEY
+        assert intent["order_ref"] == KEY
+        assert intent["paper_log_sha"] == SHA
+        assert intent["side"] == "BUY"
+        assert intent["quantity"] == 2
+        assert intent["con_id"] == CON_IDS["AAPL"]
+        assert intent["rating"] == "Buy"
+        assert intent["trade_date"] == "2026-10-09"
+        assert isinstance(intent["weekend_gap"], bool)
+        assert intent["rating_source"] is None
+        (done,) = _events(records, "dry_complete")
+        assert done["decision_key"] == KEY
+        assert done["seq"] > intent["seq"]
+        assert "execute: AAPL dry-complete BUY 2" in capsys.readouterr().out
+        text = _log_text(tmp_path)
+        assert f"ibkr-state=EXECUTE_INTENT ticker=AAPL key={KEY} sha={SHA}" in text
+        assert not executor.default_ledger_file().exists()
+        _assert_nothing_sent(fake, 1)
+
+    def test_the_run_is_framed_by_run_start_and_run_end(self, tmp_path, loop):
+        _code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert [r["event"] for r in records] == ["run_start", "intent", "dry_complete", "run_end"]
+        assert records[-1]["exit"] == executor.EXIT_OK
+
+    def test_write_ahead_intent_before_placer_complete(self, tmp_path, loop):
+        seen = []
+
+        class ReadingPlacer(executor.DryPlacer):
+            def complete(self, ctx, intent):
+                seen.append(_read_records(executor.default_dryrun_ledger_file()))
+                return super().complete(ctx, intent)
+
+        code, _records = _gateway_run(tmp_path, loop, _fake_for(), placer=ReadingPlacer())
+        assert code == executor.EXIT_OK
+        (on_disk,) = seen
+        assert [r["event"] for r in on_disk] == ["run_start", "intent"]
+        assert on_disk[-1]["decision_key"] == KEY
+
+    def test_write_ahead_negative_control_a_failing_placer_leaves_the_intent_open(
+        self, tmp_path, loop
+    ):
+        class FailingPlacer:
+            dry = True
+
+            def complete(self, ctx, intent):
+                raise RuntimeError("placer failed")
+
+        fake = _fake_for()
+        code, records = _gateway_run(tmp_path, loop, fake, placer=FailingPlacer())
+        assert code != executor.EXIT_OK
+        assert len(_events(records, "intent")) == 1
+        assert _events(records, "dry_complete") == []
+        end = _events(records, "run_end")[-1]
+        assert end["outcome"] == "error"
+        assert end["error"] == "RuntimeError"
+        _assert_nothing_sent(fake, 1)
+
+    def test_the_dry_placer_checks_the_size_a_second_time(self):
+        ctx = SimpleNamespace(mods=SimpleNamespace(guards=guards, ledger=ledger_mod), ledger=None)
+        intent = {"decision_key": KEY, "ticker": "AAPL", "quantity": guards.MAX_QTY_PER_ORDER + 1}
+        with pytest.raises(ValueError, match="size check failed"):
+            executor.DryPlacer().complete(ctx, intent)
+
+
+def _case_buy_flat():
+    return "Buy", {}, 1
+
+
+def _case_within_tolerance():
+    return "Overweight", {"positions": [_aapl_position(1)]}, 0
+
+
+def _case_foreign_open_order():
+    return "Buy", {"open_orders": [ibkr_fakes.open_trade(CON_IDS["AAPL"])]}, 0
+
+
+def _case_over_budget():
+    return "Buy", {"funds": _funds(available="500")}, 1
+
+
+def _case_halted():
+    return "Buy", {"whatif": [], "emit_during": {"whatif": [(17, 154, BUY_TEXT_HALT, None)]}}, 1
+
+
+def _case_preview_empty():
+    return "Buy", {"whatif": []}, 1
+
+
+class TestNothingIsSent:
+    @pytest.mark.parametrize(
+        "case",
+        [
+            _case_buy_flat,
+            _case_within_tolerance,
+            _case_foreign_open_order,
+            _case_over_budget,
+            _case_halted,
+            _case_preview_empty,
+        ],
+        ids=lambda f: f.__name__.removeprefix("_case_"),
+    )
+    def test_nothing_sent_forced_dry(self, tmp_path, loop, case):
+        rating, kwargs, previews = case()
+        fake = _fake_for(**kwargs)
+        _gateway_run(tmp_path, loop, fake, rating=rating)
+        _assert_nothing_sent(fake, previews)
+        assert not executor.default_ledger_file().exists()
+        assert executor.default_dryrun_ledger_file().exists()
+
+
+class TestTickerEnds:
+    def test_over_budget_is_rejected_with_exit_5(self, tmp_path, loop):
+        fake = _fake_for(funds=_funds(available="500"))
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        (rejected,) = _events(records, "rejected")
+        assert rejected["state"] == "over-budget"
+        assert rejected["decision_key"] == KEY
+        assert _events(records, "intent") == []
+        assert _events(records, "run_end")[-1]["exit"] == executor.EXIT_REJECTED
+
+    def test_halted_is_rejected_not_skipped(self, tmp_path, loop):
+        fake = _fake_for(whatif=[], emit_during={"whatif": [(17, 154, BUY_TEXT_HALT, None)]})
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        assert [r["state"] for r in _events(records, "rejected")] == ["halted"]
+        assert _events(records, "skipped") == []
+
+    def test_within_tolerance_is_skipped_with_exit_0(self, tmp_path, loop):
+        fake = _fake_for(positions=[_aapl_position(1)])
+        code, records = _gateway_run(tmp_path, loop, fake, rating="Overweight")
+        assert code == executor.EXIT_OK
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "tolerance"
+        assert skipped["state"] == "within-tolerance"
+        assert "whatif" not in fake.calls
+        assert _events(records, "intent") == []
+
+    def test_a_foreign_open_order_is_skipped_with_exit_2(self, tmp_path, loop):
+        fake = _fake_for(open_orders=[ibkr_fakes.open_trade(CON_IDS["AAPL"])])
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "foreign_open_order"
+        assert "whatif" not in fake.calls
+
+    def test_calendar_conflict_is_a_source_conflict(self, tmp_path, loop):
+        fake = _fake_for()
+        calendar = _stub_calendar(holidays={date(2026, 10, 12)})
+        code, records = _gateway_run(tmp_path, loop, fake, calendar=calendar)
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "source_conflict"
+        assert skipped["state"] == "calendar-conflict"
+        assert "whatif" not in fake.calls
+
+    def test_a_ticker_without_a_stored_contract_is_skipped_not_tradable(self, tmp_path):
+        paper = _buy_paper(tmp_path, ticker="MSFT")
+        contracts = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        factory = _RecordingFactory()
+        code, records = _run_execute(
+            tmp_path, factory, ["MSFT"], paper_log=paper, contracts=contracts
+        )
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "not_tradable"
+        assert skipped["state"] == "not-resolved-yet"
+
+    def test_a_missing_contracts_file_closes_the_run_with_its_state(self, tmp_path):
+        factory = _RecordingFactory()
+        code, records = _run_execute(tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path))
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+        assert _events(records, "run_end")[-1]["state"] == "CONTRACTS_MISSING"
+
+
+class TestSessions:
+    def test_two_tickers_share_one_broker_session(self, tmp_path, loop):
+        paper = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy"), ("2026-10-09", "MSFT", "Hold")],
+            {
+                "2026-10-09": _summary(
+                    "2026-10-09", ("AAPL", "ok", "Buy"), ("MSFT", "ok", "Hold")
+                )
+            },
+        )
+        fake = _fake_for(tickers=("AAPL", "MSFT"))
+        code, records = _gateway_run(tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=paper)
+        assert code == executor.EXIT_PRECONDITION
+        assert fake.calls.count("connect") == 1
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
+        assert [r["ticker"] for r in _events(records, "skipped")] == ["MSFT"]
+        _assert_nothing_sent(fake, 1)
+
+    def test_a_hold_only_run_opens_no_session(self, tmp_path):
+        factory = _RecordingFactory()
+        code, _records = _run_execute(
+            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path, rating="Hold")
+        )
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+
+    def test_the_executor_source_knows_no_write_call(self):
+        source = _SCRIPT.read_text(encoding="utf-8")
+        for name in ("placeOrder", "cancelOrder", "whatIfOrder", "reqMktData", "reqTickers"):
+            assert name not in source
+        assert "cancel_all(" not in source
