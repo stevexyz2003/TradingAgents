@@ -254,14 +254,14 @@ Plans:
 - Kein Branch, kein Heartbeat, kein Scheduler.
 - Keine Backup-Erweiterung — die kommt mit Phase 7, wenn der Ledger seine endgültige Form hat.
 
-**Plans:** 10 plans (7 Wellen)
+**Plans:** 3/10 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — `ibkr_guards.py`: RELEASE/KILL fail-closed, Größengrenze, `decision_key`, Quellenvergleiche, Zustände (W1)
-- [ ] 05-02-PLAN.md — `ibkr_ledger.py`: append-only JSONL, torn tail, Modus-Trennung, `resolve_entry`, Git-Baum-Prüfung (W1)
-- [ ] 05-03-PLAN.md — Adapter: `order_history`, `open_orders()` ungefiltert, `orderRef` am whatIf, `cancel_all` als Einmal-Permit (W1)
+- [x] 05-01-PLAN.md — `ibkr_guards.py`: RELEASE/KILL fail-closed, Größengrenze, `decision_key`, Quellenvergleiche, Zustände (W1)
+- [x] 05-02-PLAN.md — `ibkr_ledger.py`: append-only JSONL, torn tail, Modus-Trennung, `resolve_entry`, Git-Baum-Prüfung (W1)
+- [x] 05-03-PLAN.md — Adapter: `order_history`, `open_orders()` ungefiltert, `orderRef` am whatIf, `cancel_all` als Einmal-Permit (W1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
