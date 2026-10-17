@@ -1434,3 +1434,100 @@ class TestSessionWindow:
         assert skipped["state"] == "session-unknown"
         assert skipped["reason"] == "not_tradable"
         assert "placeOrder(whatIf)" not in fake.calls
+
+
+# --- one attempt per decision_key (05-06, Task 2) -------------------------------------------------
+
+SHA_B = "b" * 40
+
+
+def _second_paper(tmp_path, rating):
+    """A second paper-log state: same entry date and ticker, another rating and SHA."""
+    root = write_paper_log(
+        tmp_path / "pl2",
+        [("2026-10-09", "AAPL", rating)],
+        {"2026-10-09": _summary("2026-10-09", ("AAPL", "ok", rating))},
+    )
+    return FixturePaperLog(root, SHA_B)
+
+
+class TestOneAttemptPerKey:
+    def test_already_attempted_second_run_same_key(self, tmp_path, loop):
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code == executor.EXIT_OK
+        (first,) = _events(records, "intent")
+        factory = _RecordingFactory()
+        code, records = _run_execute(
+            tmp_path,
+            factory,
+            ["AAPL"],
+            paper_log=_buy_paper(tmp_path),
+            contracts=tmp_path / "ibkr" / "contracts.json",
+        )
+        assert code == executor.EXIT_PRECONDITION
+        assert factory.calls == []
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "already_attempted"
+        assert skipped["state"] == "already-attempted"
+        assert KEY in skipped["detail"]
+        assert first["run_id"] in skipped["detail"]
+        assert first["ts"] in skipped["detail"]
+        assert len(_events(records, "intent")) == 1
+
+    def test_already_attempted_sends_no_second_whatif(self, tmp_path, loop):
+        _gateway_run(tmp_path, loop, _fake_for())
+        fake = _fake_for()
+        code, _records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_PRECONDITION
+        assert "placeOrder(whatIf)" not in fake.calls
+        assert "connect" not in fake.calls
+
+    def test_decision_changed_second_version_is_logged_not_executed(self, tmp_path, loop):
+        _gateway_run(tmp_path, loop, _fake_for())
+        fake = _fake_for()
+        paper = _second_paper(tmp_path, "Overweight")
+        code, records = _gateway_run(tmp_path, loop, fake, paper=paper)
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "decision_changed"
+        assert skipped["state"] == "decision-changed"
+        assert skipped["first_rating"] == "Buy"
+        assert skipped["paper_log_sha"] == SHA_B
+        assert skipped["first_paper_log_sha"] == SHA
+        assert "Overweight" in skipped["detail"]
+        assert len(_events(records, "intent")) == 1
+        assert "placeOrder(whatIf)" not in fake.calls
+
+    def test_already_attempted_skipped_does_not_consume(self, tmp_path, loop):
+        code, records = _gateway_run(
+            tmp_path, loop, _fake_for(liquid_hours=_FULL), clock=_window_clock(_START, 5)
+        )
+        assert code == executor.EXIT_PRECONDITION
+        assert _events(records, "skipped")[0]["reason"] == "outside_session"
+        code, records = _gateway_run(
+            tmp_path, loop, _fake_for(liquid_hours=_FULL), clock=_window_clock(_START, 200)
+        )
+        assert code == executor.EXIT_OK
+        assert len(_events(records, "intent")) == 1
+
+    def test_already_attempted_after_crash_is_not_a_second_intent(self, tmp_path, loop):
+        class CrashingPlacer:
+            dry = True
+
+            def complete(self, ctx, intent):
+                raise RuntimeError("crash after the write-ahead line")
+
+        _gateway_run(tmp_path, loop, _fake_for(), placer=CrashingPlacer())
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code == executor.EXIT_PRECONDITION
+        assert len(_events(records, "intent")) == 1
+        assert _events(records, "skipped")[-1]["reason"] == "already_attempted"
+
+    def test_negative_control_key_check_removed_allows_second_intent(
+        self, tmp_path, loop, monkeypatch
+    ):
+        _gateway_run(tmp_path, loop, _fake_for())
+        monkeypatch.setattr(ledger_mod.Ledger, "attempt_of", lambda self, key: None)
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code == executor.EXIT_OK
+        assert len(_events(records, "intent")) == 2
