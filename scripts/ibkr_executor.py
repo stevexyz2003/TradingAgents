@@ -1134,6 +1134,10 @@ def _ledger_row_finished(ctx, row: dict, state: str, detail: str) -> None:
         "paper_log_sha": ctx.sha,
         "weekend_gap": fresh["weekend_gap"] if fresh else None,
     }
+    for extra in ("rating", "first_rating", "first_paper_log_sha"):
+        # The second version of a changed decision is logged next to the first one (SC8).
+        if state == guards.DECISION_CHANGED and row.get(extra) is not None:
+            fields[extra] = row[extra]
     if row["trade_date"]:
         # An undated or malformed decision has no key; the state says why.
         with contextlib.suppress(ValueError):
@@ -1426,6 +1430,7 @@ def _run_locked(
             source = paper_log_factory(REPO_ROOT, remote, branch)
             ctx.sha = source.fetch()
             rows, remaining = _local_chain(ctx, source, args.tickers)
+            remaining = _check_attempts(ctx, rows, remaining)
             if remaining:
                 _execute_gateway_chain(ctx, rows, remaining)
             if ctx.halted is not None and ctx.halted.cancel:
@@ -1452,6 +1457,40 @@ def _run_locked(
         end["state"] = stop_state
     ctx.ledger.append(ledger_mod.RUN_END, **end)
     return code
+
+
+def _check_attempts(ctx, rows: dict, remaining: list[str]) -> list[str]:
+    """One attempt per decision_key, the first version wins (REQ-40, SC8).
+
+    An attempt is a key that reached ``intent``; a ``skipped`` line never consumes the key.
+    This is the integrity check from the ledger, in the spirit of the first-version-wins rule
+    of ``tradingagents/memory/log.py``; the broker-side "already executed?" counter-check
+    follows in 05-07.
+
+    REQ-45 order deviation: the key check runs after freshness, because the trade_date of the
+    entry is only known once the local chain has read and dated it; documented for the
+    phase-6 order test (ROADMAP note from 05-09).
+    """
+    guards = ctx.mods.guards
+    kept: list[str] = []
+    for ticker in remaining:
+        row = rows[ticker]
+        key = guards.decision_key(row["trade_date"], ticker)
+        first = ctx.ledger.attempt_of(key)
+        if first is None:
+            kept.append(ticker)
+        elif first["rating"] != row["rating"]:
+            row["first_rating"] = first["rating"]
+            row["first_paper_log_sha"] = first["paper_log_sha"]
+            detail = (
+                f"{key}: first version {first['rating']} (sha {first['paper_log_sha']}), "
+                f"now {row['rating']} (sha {ctx.sha}); first version wins"
+            )
+            _finish_row(ctx, row, guards.DECISION_CHANGED, detail)
+        else:
+            detail = f"{key}: intent of run {first['run_id']} at {first['ts']}"
+            _finish_row(ctx, row, guards.ALREADY_ATTEMPTED, detail)
+    return kept
 
 
 def _preview_payload(run_state, rows, sha, remote, branch, now_utc: datetime) -> dict:
