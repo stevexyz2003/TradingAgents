@@ -254,7 +254,7 @@ Plans:
 - Kein Branch, kein Heartbeat, kein Scheduler.
 - Keine Backup-Erweiterung — die kommt mit Phase 7, wenn der Ledger seine endgültige Form hat.
 
-**Plans:** 7/10 plans executed
+**Plans:** 8/10 plans executed
 
 Plans:
 **Wave 1**
@@ -278,7 +278,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 05-07-PLAN.md — Startup-Reconciliation (Exit 6) und Zwei-Quellen-Prüfungen (REQ-63); G3 Reconciliation (W5)
+- [x] 05-07-PLAN.md — Startup-Reconciliation (Exit 6) und Zwei-Quellen-Prüfungen (REQ-63); G3 Reconciliation (W5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
