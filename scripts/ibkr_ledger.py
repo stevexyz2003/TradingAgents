@@ -502,6 +502,13 @@ def resolve_entry(entry: dict, history: object) -> Resolution:
                 return result(CONTRADICTION, "order is Filled but nothing shows a fill")
             if order.status not in _CANCELLED:
                 return result(CONTRADICTION, f"unexpected completed status {order.status!r}")
+            # Partly filled, then cancelled (a market-order rest at the close, a kill cancel):
+            # the next day the completed order is often the only trace of the fill.
+            filled = order.filled
+            if filled is not None and float(filled) > 0:
+                if float(filled) >= quantity:
+                    return result(CONTRADICTION, f"{order.status} order reports a full fill")
+                return result(PARTIAL_OUT, f"{order.status} after {float(filled):g} filled")
         return result(NOT_FILLED, "order was cancelled without a fill")
     return result(NO_TRACE, "no trace at the broker")
 

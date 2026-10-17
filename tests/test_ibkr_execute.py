@@ -1742,6 +1742,20 @@ _RECONCILE_CASES = [
         2.0,
         id="completed-filled",
     ),
+    # CR-03: partly filled, then cancelled, no executions (the next day): the fill counts.
+    pytest.param(
+        {
+            "completed_orders": [
+                ibkr_fakes.completed_trade(
+                    _CON, "Cancelled", order_ref=PREV_KEY, quantity=2, filled=1.0
+                )
+            ]
+        },
+        "partial",
+        "partial",
+        1.0,
+        id="cancelled-after-partial-fill",
+    ),
 ]
 
 

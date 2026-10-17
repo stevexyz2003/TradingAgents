@@ -498,6 +498,19 @@ def test_reconcile_cancelled_without_executions_is_not_filled(status):
     assert res.outcome == led.NOT_FILLED
 
 
+@pytest.mark.parametrize("status", ["Cancelled", "ApiCancelled", "Inactive"])
+def test_reconcile_cancelled_after_a_partial_fill_is_partial(status):
+    """CR-03: the fill of a partly filled, then cancelled order must not get lost."""
+    res = led.resolve_entry(ENTRY, _hist(completed=[_order(status, filled=1.0)]))
+    assert res.outcome == led.PARTIAL_OUT
+    assert "1 filled" in res.detail
+
+
+def test_reconcile_cancelled_with_a_full_fill_is_contradiction():
+    res = led.resolve_entry(ENTRY, _hist(completed=[_order("Cancelled", filled=2.0)]))
+    assert res.outcome == led.CONTRADICTION
+
+
 def test_reconcile_filled_without_executions_and_unset_filled_is_contradiction():
     res = led.resolve_entry(ENTRY, _hist(completed=[_order("Filled", filled=None)]))
     assert res.outcome == led.CONTRADICTION
