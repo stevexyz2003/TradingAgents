@@ -111,6 +111,8 @@ Jede Anforderung ist **ein prüfbarer Satz**. Wo der Satz allein nicht sagt, wie
 **REQ-IBKR-24** — M2 ist **long-only**: ein negatives Ziel ist nicht darstellbar, und ein `Sell`/`Underweight` ohne Bestand ist eine protokollierte Nulloperation, kein Short.
 
 **REQ-IBKR-25** — M2 platziert **Markt-Orders** innerhalb eines konfigurierten Fensters der regulären Sitzung (nicht Eröffnungsauktion, nicht Schlussminuten); eine später zugelassene Limit-Order hat zwingend Time-in-Force `DAY`, und offene Orders des laufenden Tages gehen in die Differenzrechnung ein.
+
+*Geändert 2026-10-17 (Phase 5, D-10): Das Sitzungsfenster ist in Phase 5 umgesetzt (aus Phase 4 verschoben am 2026-10-16) und entspricht dem Puffer der Phase 3: Beginn +15 min, Ende −15 min über `SESSION_BUFFER_MINUTES`, Halbtage ergeben sich über `liquidHours`. Außerhalb: `skipped` mit Grund `outside_session`. Bestätigung durch den Operator im Verifikationsbericht der Phase 5.*
 > Begründung: Eine Markt-Order hinterlässt keine ruhende Order. Eine nicht gefüllte Limit-Order, die bis zum nächsten Entscheidungszyklus liegt, erzeugt genau die Zustände „Teil-Fill unbemerkt" und „Order gegen veraltete Entscheidung" und verkompliziert `Ziel − Ist` um eine dritte Größe.
 
 **REQ-IBKR-26** — Marktdaten sind **nicht** Teil des Order-Pfads: `reqMarketDataType(3)` (delayed) ist Default, und die Fehler **10089**/**10090** („API data requires subscription" / Teilabdeckung) gelten als erwartete Zustände, nicht als Fehlschlag.
@@ -142,7 +144,9 @@ Die vier Pflicht-Leitplanken sind markiert: `[L1]` Positionsgröße · `[L2]` Ki
 **REQ-IBKR-32** `[L1]` — Jede Order unterliegt einer harten Obergrenze `abs(order_qty) <= MAX_QTY_PER_ORDER`; eine Order, die sie überschreitet, wird **nicht gekürzt**, sondern abgelehnt und gemeldet.
 > Begründung: Eine stillschweigende Kürzung verwandelt einen Konfigurationsfehler in eine halb ausgeführte Absicht und verwischt die Spur. Deshalb ablehnen.
 
-**REQ-IBKR-33** `[L2]` — Die Ausführung ist **fail-closed**: sie erfordert eine explizit gesetzte Freigabe-Variable **und** die Abwesenheit der Kill-Datei. Fehlt eines von beiden oder ist der Zustand nicht lesbar, wird nicht gehandelt (Exit 4).
+**REQ-IBKR-33** `[L2]` — Die Ausführung ist **fail-closed**: sie erfordert eine explizit vorhandene Freigabe-Datei (`RELEASE` im State-Ordner, mit Konto und Ablaufdatum) **und** die Abwesenheit der Kill-Datei. Fehlt eines von beiden oder ist der Zustand nicht lesbar, wird nicht gehandelt (Exit 4).
+
+*Geändert 2026-10-17 (Phase 5, D-01/D-02/D-20): Freigabe als Datei mit Konto und „gültig bis“ (höchstens 90 Tage im Voraus, einschließlich des Tages in UTC) statt Env-Variable; unbeaufsichtigter Betrieb folgt in Phase 8. Bestätigung durch den Operator im Verifikationsbericht der Phase 5.*
 > Begründung: Für den Env-Teil gibt es die Projektkonvention `_ENV_OVERRIDES` (`tradingagents/default_config.py:10-34`) samt strikter Boolean-Koerzion, die einen vertippten Wert **wirft** statt still auf den Default zu fallen (`:41-45`) — genau das richtige Verhalten für einen Sicherheitsschalter.
 
 **REQ-IBKR-34** `[L2]` — Der Kill-Switch wird **unmittelbar vor jeder einzelnen Order** neu geprüft, nicht einmal pro Lauf.
@@ -180,6 +184,8 @@ Die vier Pflicht-Leitplanken sind markiert: `[L1]` Positionsgröße · `[L2]` Ki
 > Begründung: IBKR bietet keinen Idempotenz-Schlüssel; `orderRef` ist ein freier, von IBKR *nicht* auf Eindeutigkeit geprüfter Mitläufer-String und taugt nur als Korrelationsschlüssel. Dass er auf **jeder** Execution erscheint, ist offiziell nicht formal belegt und gehört zu den Messpunkten aus REQ-IBKR-01.
 
 **REQ-IBKR-42** `[L4]` — **Write-Ahead:** Der Ledger-Eintrag im Zustand `intent` wird **vor** dem Platzieren geschrieben und erst danach auf `placed` / `filled` / `partial` / `rejected` / `skipped` fortgeschrieben; `skipped` trägt immer einen Grund (`hold`, `review`, `tolerance`, `kill_switch`, `stale`, `weekend_gap`, `size_cap`, `not_tradable`, `outside_session`).
+
+*Geändert 2026-10-17 (Phase 5, D-11/D-18): Die Gründe sind um `source_conflict` (REQ-63), `already_attempted` und `decision_changed` (REQ-40) sowie `foreign_open_order` (D-12 aus Phase 4) ergänzt; `weekend_gap` ist eine Markierung am Eintrag (REQ-20), kein Grund. Die Liste im Satz bleibt, dieser Vermerk ergänzt sie. Bestätigung durch den Operator im Verifikationsbericht der Phase 5.*
 > Begründung: Zwischen „`placeOrder` ist über die Leitung" und „ich habe das aufgeschrieben" kann der Prozess sterben. Kein Dateilock schließt diese Lücke.
 
 **REQ-IBKR-43** `[L4]` — **Startup-Reconciliation:** Jeder Ledger-Eintrag im Zustand `intent` oder `placed` wird gegen den Broker aufgelöst — `reqAllOpenOrders` **und** `reqCompletedOrders` **und** `reqExecutions(ClientId=…)`, gefiltert auf `orderRef` —, **bevor** irgendeine neue Order entsteht; bleibt ein Eintrag unauflösbar, bricht der Lauf mit Exit 6 ab und meldet, statt zu raten.
@@ -270,6 +276,8 @@ Die vier Pflicht-Leitplanken sind markiert: `[L1]` Positionsgröße · `[L2]` Ki
 > **Nachweis:** Test mit nicht antwortender Gegenstelle endet im Fehlerpfad, nicht im Hänger. Gilt ab Phase 2 für jeden späteren Aufruf weiter.
 
 **REQ-IBKR-63** (S-03) — Kein sicherheitskritischer Fakt stützt sich auf nur eine Quelle: Paper-Konto (`managedAccounts` **und** Kontofeld der Order), aktuelle Position (Ledger **und** `reqPositions()`), „schon ausgeführt?" (Ledger-Eintrag **und** `orderRef`-Suche über offene/erledigte Orders), Handelbarkeit (`tradingSessions()` **und** Order-Status nach Platzierung, 399 = geparkt). Widersprechen sich die Quellen, gilt der vorsichtigere Wert, und der Lauf meldet den Widerspruch.
+
+*Geändert 2026-10-17 (Phase 5, D-11/D-18/D-22): Übergangsquellen bis Phase 6/7: Position nach der engen Regel D-18 (Widerspruch nur bei eigenen Fills im Ledger), Handelbarkeit = Börsenkalender + `liquidHours` bis zum Order-Status 399 im Placer von Phase 6, Konto = `managedAccounts` + `RELEASE.account` (das Echo auf der Order ist optional). Reichweite nach D-11: Konto-Widerspruch stoppt den Lauf (Exit 8), die übrigen stoppen nur den Ticker. Bestätigung durch den Operator im Verifikationsbericht der Phase 5.*
 > **Nachweis:** je ein Test, der beide Quellen auseinanderlaufen lässt und zeigt, dass keine Order entsteht.
 
 **REQ-IBKR-64** (S-04) — Der Kill-Switch ist fail-closed: Gehandelt wird nur, wenn eine ausdrückliche Freigabe **vorhanden und lesbar** ist **und** die Kill-Datei fehlt; geprüft wird unmittelbar vor **jeder** Order, nicht einmal beim Start. `reqGlobalCancel` bleibt der scharfe Arm für bereits liegende Orders.
