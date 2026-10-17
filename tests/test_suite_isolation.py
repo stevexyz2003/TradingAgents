@@ -33,6 +33,32 @@ def test_a_test_saves_cli_selections_to_its_own_directory(tmp_path):
 
 
 @pytest.mark.unit
+def test_a_test_without_a_fixture_of_its_own_gets_its_own_ibkr_state_folder(tmp_path_factory):
+    """The IBKR state folder holds the live ledger, RELEASE and KILL; a test that
+    forgets its own LOCALAPPDATA fixture must still not read or write the real one."""
+    import importlib.util
+    import os
+    from pathlib import Path
+
+    from tests import conftest
+
+    local = os.environ.get("LOCALAPPDATA")
+    assert local
+    assert Path(local).is_relative_to(tmp_path_factory.getbasetemp())
+    assert local != conftest.REAL_LOCALAPPDATA
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "ibkr_executor.py"
+    spec = importlib.util.spec_from_file_location("ibkr_executor_isolation_probe", path)
+    executor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(executor)
+    for state_file in (executor.default_ledger_file(), executor.default_kill_file()):
+        assert state_file.is_relative_to(tmp_path_factory.getbasetemp())
+        if conftest.REAL_LOCALAPPDATA:
+            real_state = Path(conftest.REAL_LOCALAPPDATA) / "TradingEngineX"
+            assert not state_file.is_relative_to(real_state)
+
+
+@pytest.mark.unit
 def test_yfinance_keeps_its_cache_out_of_the_users_home():
     """yfinance caches each symbol's time zone on disk, in the home directory by default."""
     from pathlib import Path

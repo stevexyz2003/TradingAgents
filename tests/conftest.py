@@ -90,6 +90,24 @@ def _own_cli_prefs(tmp_path, monkeypatch):
     monkeypatch.setattr("cli.prefs._PREFS_PATH", tmp_path / "cli_prefs.json")
 
 
+# The user's own LOCALAPPDATA, read once before any test changes it: the IBKR state
+# folder (%LOCALAPPDATA%\TradingEngineX\ibkr) lives below it and no test may touch it.
+REAL_LOCALAPPDATA = os.environ.get("LOCALAPPDATA")
+
+
+@pytest.fixture(autouse=True)
+def _own_ibkr_state_folder(tmp_path_factory, monkeypatch):
+    """Every test gets a LOCALAPPDATA of its own, so none reaches the real IBKR state folder.
+
+    The executor's ``_ibkr_base`` reads LOCALAPPDATA first on every platform and only
+    falls back to the home directory when it is unset, so pinning it covers Windows and
+    any other system alike. A test that needs a specific folder still sets its own.
+    """
+    base = tmp_path_factory.mktemp("localappdata")
+    monkeypatch.setenv("LOCALAPPDATA", str(base))
+    return base
+
+
 _API_KEY_ENV_VARS = (
     "OPENAI_API_KEY",
     "GOOGLE_API_KEY",
