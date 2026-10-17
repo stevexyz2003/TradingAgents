@@ -125,7 +125,17 @@ def test_adapter_has_at_most_ten_public_methods():
         if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and not n.name.startswith("_")
     }
     assert len(public) <= 10
-    assert public == {"connect", "positions", "health", "search_contract", "contract_details", "open_orders", "preview_order", "order_history", "cancel_all"}
+    assert public == {
+        "connect",
+        "positions",
+        "health",
+        "search_contract",
+        "contract_details",
+        "open_orders",
+        "preview_order",
+        "order_history",
+        "cancel_all",
+    }
 
 
 @pytest.mark.unit
@@ -301,9 +311,7 @@ def _load_decision():
 @pytest.mark.unit
 def test_handbook_exit_five_is_active():
     lines = [
-        line
-        for line in _handbook_text().splitlines()
-        if line.startswith("| 5 | `EXIT_REJECTED` |")
+        line for line in _handbook_text().splitlines() if line.startswith("| 5 | `EXIT_REJECTED` |")
     ]
     assert len(lines) == 1
     assert "reserved" not in lines[0]
@@ -332,6 +340,170 @@ def test_handbook_documents_preview():
         "preview.json",
     ):
         assert needle in text, needle
+
+
+# --- phase 5: execute, the switches and the ledger are documented and guarded ----------------
+
+GUARDS = ROOT / "scripts" / "ibkr_guards.py"
+LEDGER = ROOT / "scripts" / "ibkr_ledger.py"
+
+
+def _load_guards():
+    import importlib.util
+    import sys
+
+    name = "ibkr_guards_isolation_probe"
+    spec = importlib.util.spec_from_file_location(name, GUARDS)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
+@pytest.mark.unit
+def test_handbook_exit_four_six_seven_are_active():
+    for prefix in (
+        "| 4 | `EXIT_KILL_SWITCH` |",
+        "| 6 | `EXIT_RECONCILE` |",
+        "| 7 | `EXIT_LOCKED` |",
+    ):
+        lines = [line for line in _handbook_text().splitlines() if line.startswith(prefix)]
+        assert len(lines) == 1, prefix
+        assert "reserved" not in lines[0], prefix
+
+
+@pytest.mark.unit
+def test_handbook_documents_execute():
+    text = _handbook_text()
+    for needle in (
+        "## execute",
+        "execute AAPL",
+        "## RELEASE and KILL",
+        "valid_until",
+        "DUQ634065",
+        "[IO.File]::WriteAllText",
+        "New-Item",
+        "## Ledger and reconciliation",
+        "ledger-dryrun.jsonl",
+        "ledger.jsonl.lock",
+        "MAX_QTY_PER_ORDER",
+        "size_cap",
+        "outside_session",
+        "kill_switch",
+        "source_conflict",
+        "already_attempted",
+        "decision_changed",
+        "weekend_gap",
+        "reconcile-unresolved",
+        "ibkr_order_probe.py",
+    ):
+        assert needle in text, needle
+
+
+@pytest.mark.unit
+def test_handbook_state_table_matches_guards_module():
+    guards = _load_guards()
+    text = _handbook_text()
+    assert guards.EXIT_BY_STATE, "the state table would check nothing"
+    for state, code in guards.EXIT_BY_STATE.items():
+        assert re.search(rf"^\| `{re.escape(state)}` \| {code} \|", text, re.M), (
+            f"{state}={code} not in the phase-5 state table"
+        )
+
+
+@pytest.mark.unit
+def test_new_modules_are_pure():
+    # Built from parts so this file never contains the call names or the stem as literals.
+    calls = ["".join(("req", name)) for name in ("MktData", "Tickers", "HistoricalData")]
+    stem = "_".join(("ibkr", "market", "data"))
+    for path in (GUARDS, LEDGER):
+        source = path.read_text(encoding="utf-8")
+        top_level = {
+            name.split(".")[0]
+            for node in ast.parse(source).body
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for name in (
+                [a.name for a in node.names]
+                if isinstance(node, ast.Import)
+                else ([node.module] if node.module and not node.level else [])
+            )
+        }
+        for forbidden in (CLIENT_LIBRARY, "tradingagents", "exchange_calendars", "pandas"):
+            assert forbidden not in top_level, f"{path.name} imports {forbidden} at module level"
+        for forbidden in ("datetime.now", "time.time(", "date.today"):
+            assert forbidden not in source, f"{forbidden} reads the clock in {path.name}"
+        for needle in calls:
+            assert needle not in source, f"{path.name} contains a market data call: {needle}"
+        assert stem not in source, f"{path.name} names the market data session"
+
+
+@pytest.mark.unit
+def test_stream_module_never_cancels():
+    stream = ROOT / "scripts" / ("_".join(("ibkr", "market", "data")) + ".py")
+    if not stream.exists():
+        pytest.skip("no stream module in this tree")
+    source = stream.read_text(encoding="utf-8")
+    for needle in ("cancel" + "_all", "req" + "GlobalCancel"):
+        assert needle not in source, f"the stream session names {needle}"
+
+
+@pytest.mark.unit
+def test_execute_run_leaves_git_status_unchanged(tmp_path, monkeypatch):
+    # SC5 / REQ-46: a run leaves the work tree as it was and keeps all state outside it.
+    import importlib.util
+    import shutil
+    import sys
+
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+
+    def porcelain() -> str:
+        return subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "IBKR_HOST=127.0.0.1\nIBKR_PORT=7497\nIBKR_ACCOUNT_ID=DUQ634065\nIBKR_TRADING_MODE=paper\n",
+        encoding="utf-8",
+    )
+    name = "ibkr_executor_isolation_probe"
+    spec = importlib.util.spec_from_file_location(name, EXECUTOR)
+    executor = importlib.util.module_from_spec(spec)
+    sys.modules[name] = executor
+    try:
+        spec.loader.exec_module(executor)
+        before = porcelain()
+        try:
+            code = executor.main(["execute", "AAPL", "--env-file", str(env_file)])
+        finally:
+            executor.close_logging()
+        after = porcelain()
+    finally:
+        sys.modules.pop(name, None)
+
+    assert code == 4  # no RELEASE file: closed, and no gateway was needed
+    assert before == after
+    state_paths = [
+        executor.default_release_file(),
+        executor.default_kill_file(),
+        executor.default_ledger_file(),
+        executor.default_dryrun_ledger_file(),
+        executor.default_ledger_file().with_name("ledger.jsonl.lock"),
+    ]
+    for path in state_paths:
+        assert tmp_path in path.parents, path
+        assert ROOT not in path.parents, path
+    assert executor.default_dryrun_ledger_file().exists()
+    assert executor.default_ledger_file().with_name("ledger.jsonl.lock").exists()
 
 
 @pytest.mark.unit
