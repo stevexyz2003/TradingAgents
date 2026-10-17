@@ -1427,6 +1427,9 @@ def _run_locked(
                 raise _ExecuteStop(
                     EXIT_KILL_SWITCH, switches.blocking_state, _blocking_detail(ctx, switches)
                 )
+            # Reconciliation before anything is read or decided (REQ-45: lock, switches,
+            # reconciliation, paper-log, ...): an open ledger entry is resolved or the run ends.
+            _reconcile(ctx)
             source = paper_log_factory(REPO_ROOT, remote, branch)
             ctx.sha = source.fetch()
             rows, remaining = _local_chain(ctx, source, args.tickers)
@@ -1457,6 +1460,92 @@ def _run_locked(
         end["state"] = stop_state
     ctx.ledger.append(ledger_mod.RUN_END, **end)
     return code
+
+
+def _history(ctx):
+    """The broker's order history (open, completed, executions): read once per run."""
+    if ctx.history is None:
+        ctx.history = _session(ctx).order_history()
+    return ctx.history
+
+
+def _fill_quantity(entry: dict, history) -> float:
+    """Filled pieces of an entry: the executions first, else what the completed order reports."""
+    key = entry.get("order_ref") or entry["decision_key"]
+    shares = sum(float(e.shares) for e in history.executions if e.order_ref == key)
+    if shares:
+        return shares
+    return sum(
+        float(o.filled) for o in history.completed if o.order_ref == key and o.filled is not None
+    )
+
+
+def _reconcile(ctx) -> None:
+    """Resolve every open ledger entry against the broker before any new order (REQ-43, SC6).
+
+    A ``reconcile`` event is no lifecycle event: an entry that cannot be resolved stays open
+    in every later run, and the run ends with exit 6 and no new ``intent`` (D-19). Resolution
+    by hand follows the manual (IBKR_EXECUTION.md, Ledger and reconciliation); ``--resolve``
+    comes with phase 6.
+    """
+    pending = ctx.ledger.unresolved()
+    if not pending:
+        return  # no gateway contact without an open entry
+    guards = ctx.mods.guards
+    ledger_mod = ctx.mods.ledger
+    history = _history(ctx)
+    unresolved: list[tuple[str, str]] = []
+    for entry in pending:
+        key = entry["decision_key"]
+        res = ledger_mod.resolve_entry(entry, history)
+        ctx.ledger.append(
+            ledger_mod.RECONCILE,
+            decision_key=key,
+            ticker=entry.get("ticker"),
+            outcome=res.outcome,
+            open=res.open,
+            completed=res.completed,
+            executions=res.executions,
+            detail=res.detail,
+        )
+        follow = {"decision_key": key, "ticker": entry.get("ticker"), "source": "reconcile"}
+        if res.outcome == ledger_mod.OPEN:
+            # The entry is open already after a ``placed``; do not repeat the line every run.
+            last = ctx.ledger.last_event(key)
+            if last is not None and last["event"] == ledger_mod.INTENT:
+                ctx.ledger.append(ledger_mod.PLACED, **follow)
+        elif res.outcome in (ledger_mod.FILLED_OUT, ledger_mod.PARTIAL_OUT):
+            event = ledger_mod.FILLED if res.outcome == ledger_mod.FILLED_OUT else ledger_mod.PARTIAL
+            ctx.ledger.append(
+                event,
+                con_id=entry["con_id"],
+                filled_qty=_fill_quantity(entry, history),
+                detail=res.detail,
+                **follow,
+            )
+        elif res.outcome == ledger_mod.NOT_FILLED:
+            ctx.ledger.append(ledger_mod.REJECTED, state="not-filled", detail=res.detail, **follow)
+        else:
+            unresolved.append((key, res.outcome))
+            ctx.logger.warning(
+                'ibkr-state=RECONCILE_UNRESOLVED key=%s outcome=%s open=%d completed=%d '
+                'executions=%d detail="%s"',
+                key,
+                res.outcome,
+                res.open,
+                res.completed,
+                res.executions,
+                res.detail,
+            )
+    if unresolved:
+        shown = ", ".join(f"{key} ({outcome})" for key, outcome in unresolved)
+        print(
+            f"execute: reconcile-unresolved {shown}; no new order - "
+            "see IBKR_EXECUTION.md, Ledger and reconciliation"
+        )
+        raise _ExecuteStop(
+            EXIT_RECONCILE, guards.RECONCILE_UNRESOLVED, ", ".join(k for k, _ in unresolved)
+        )
 
 
 def _check_attempts(ctx, rows: dict, remaining: list[str]) -> list[str]:
