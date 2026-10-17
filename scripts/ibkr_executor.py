@@ -25,6 +25,13 @@ time in force and budget. The result is one console line and one log line per ti
 paper-log source and the session calendar are injected: tests pass
 ``main(clock=..., paper_log_factory=..., calendar=...)``.
 
+Phase 5 adds ``execute``: the guarded chain to a dry completion. It runs the same local
+and gateway chain as ``preview``, but every decision that survives is first written to the
+ledger as an ``intent`` (write-ahead, fsync, ``orderRef`` == decision key, the paper-log
+SHA as provenance) and only then completed by the placer. In phase 5 the placer is forced
+dry: it writes ``dry_complete`` and sends nothing. Dry runs write ``ledger-dryrun.jsonl`` in
+the state folder, never ``ledger.jsonl``; a state folder inside a git work tree is refused.
+
 Operating manual: ``scripts/IBKR_EXECUTION.md``.
 
     ibkr_executor.py account --out PATH [--log-file PATH] [--env-file PATH]
@@ -32,6 +39,7 @@ Operating manual: ``scripts/IBKR_EXECUTION.md``.
                              [--out PATH] [--log-file PATH] [--env-file PATH]
     ibkr_executor.py preview TICKER... [--contracts PATH] [--out PATH] [--log-file PATH]
                              [--env-file PATH]
+    ibkr_executor.py execute TICKER... [--contracts PATH] [--log-file PATH] [--env-file PATH]
 
 Settings come from the ``.env`` at the repository root (a fixed path, not the
 current directory) or from ``--env-file``. Only IBKR_HOST, IBKR_PORT,
@@ -47,10 +55,10 @@ Exit codes:
     2   precondition not met - a ticker was rejected (including Hold, per D-16), the
         paper-log is unavailable, or contracts.json is missing (resolve, preview)
     3   gateway/session not reachable
-    4   kill switch active or release missing (reserved for later phases)
+    4   kill switch active or release missing/unreadable/invalid
     5   order preview rejected (whatIf): empty, rejected, halted, over budget, tif
-    6   reconciliation unresolved, run aborted (reserved for later phases)
-    7   lock not acquired (second instance), clean exit (reserved for later phases)
+    6   ledger corrupt or reconciliation unresolved
+    7   run lock not acquired (second instance), clean exit
     8   account guard violated (managedAccounts != ["DUQ634065"])
     20  IBKR settings missing or unreadable - same meaning as EXIT_NO_CREDENTIALS in daily_paper_run.py
 
@@ -113,6 +121,12 @@ _CONTRACTS_PATH = Path(__file__).with_name("ibkr_contracts.py")
 _DECISION_PATH = Path(__file__).with_name("ibkr_decision.py")
 _PAPERLOG_PATH = Path(__file__).with_name("ibkr_paperlog.py")
 _STATE_MAINTENANCE_PATH = Path(__file__).with_name("state_maintenance.py")
+_GUARDS_PATH = Path(__file__).with_name("ibkr_guards.py")
+_LEDGER_PATH = Path(__file__).with_name("ibkr_ledger.py")
+
+#: ``execute`` runs dry in phase 5: a placer that is not dry ends the run before any file
+#: is touched. Phase 6 removes only this.
+EXECUTE_FORCED_DRY = True
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 _LOGGER_NAME = "ibkr_executor"
@@ -212,6 +226,16 @@ def load_state_maintenance_module():
     return _load_script_module("state_maintenance", _STATE_MAINTENANCE_PATH)
 
 
+def load_guards_module():
+    """The guard building blocks, loaded once under the name ``ibkr_guards``."""
+    return _load_script_module("ibkr_guards", _GUARDS_PATH)
+
+
+def load_ledger_module():
+    """The ledger, loaded once under the name ``ibkr_ledger``."""
+    return _load_script_module("ibkr_ledger", _LEDGER_PATH)
+
+
 def _ibkr_base(environ=None) -> Path:
     environ = os.environ if environ is None else environ
     base = environ.get("LOCALAPPDATA")
@@ -223,6 +247,26 @@ def _ibkr_base(environ=None) -> Path:
 def default_preview_file(environ=None) -> Path:
     """The default dry-run record, outside every repository."""
     return _ibkr_base(environ) / "preview.json"
+
+
+def default_release_file(environ=None) -> Path:
+    """The operator's release file in the state folder."""
+    return _ibkr_base(environ) / "RELEASE"
+
+
+def default_kill_file(environ=None) -> Path:
+    """The kill-switch file in the state folder."""
+    return _ibkr_base(environ) / "KILL"
+
+
+def default_ledger_file(environ=None) -> Path:
+    """The live ledger; a dry run never writes it."""
+    return _ibkr_base(environ) / "ledger.jsonl"
+
+
+def default_dryrun_ledger_file(environ=None) -> Path:
+    """The dry-run ledger, the only ledger phase 5 writes."""
+    return _ibkr_base(environ) / "ledger-dryrun.jsonl"
 
 
 def default_paper_log_copy(environ=None) -> Path:
@@ -706,7 +750,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ibkr_executor.py",
         description=(
             "IBKR paper executor for DUQ634065 (read-only in phases 2-4; "
-            "phase 4 previews with whatIf and sends nothing)."
+            "phase 4 previews with whatIf and sends nothing; "
+            "phase 5 executes dry: guards, ledger, no order)."
         ),
     )
     sub = parser.add_subparsers(dest="command")
@@ -733,6 +778,15 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument("--out", type=Path, default=None, help="dry-run record (JSON)")
     preview.add_argument("--log-file", type=Path, default=default_log_file())
     preview.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
+
+    # No live, release or date option (D-07): phase 5 executes dry and nothing lifts that.
+    execute = sub.add_parser(
+        "execute", help="guarded chain to a dry completion; phase 5 sends no order"
+    )
+    execute.add_argument("tickers", nargs="*", metavar="TICKER")
+    execute.add_argument("--contracts", type=Path, default=None, help="contracts.json path")
+    execute.add_argument("--log-file", type=Path, default=default_log_file())
+    execute.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     return parser
 
 
@@ -743,6 +797,7 @@ def main(
     clock=None,
     paper_log_factory=None,
     calendar=None,
+    placer=None,
 ) -> int:
     parser = build_parser()
     try:
@@ -755,7 +810,7 @@ def main(
     if not args.command:
         parser.print_usage(sys.stderr)
         print(
-            "error: ibkr_executor.py needs a subcommand: account, resolve, preview",
+            "error: ibkr_executor.py needs a subcommand: account, resolve, preview, execute",
             file=sys.stderr,
         )
         return EXIT_CONFIG
@@ -765,6 +820,10 @@ def main(
     if args.command == "preview" and not args.tickers:
         parser.print_usage(sys.stderr)
         print("error: preview needs at least one TICKER (no default list)", file=sys.stderr)
+        return EXIT_CONFIG
+    if args.command == "execute" and not args.tickers:
+        parser.print_usage(sys.stderr)
+        print("error: execute needs at least one TICKER (no default list)", file=sys.stderr)
         return EXIT_CONFIG
     if args.command == "resolve":
         if not args.tickers:
@@ -794,6 +853,10 @@ def main(
             return _account(args, broker_factory, logger)
         if args.command == "preview":
             return _preview(args, broker_factory, logger, clock, paper_log_factory, calendar)
+        if args.command == "execute":
+            return _execute(
+                args, broker_factory, logger, clock, paper_log_factory, calendar, placer
+            )
         return _resolve(args, broker_factory, logger, clock)
     finally:
         close_logging()
@@ -965,6 +1028,237 @@ def _preview(args, broker_factory, logger, clock, paper_log_factory, calendar) -
     )
 
 
+# --- the execute command ------------------------------------------------------------
+
+
+class _ExecuteStop(Exception):
+    """A run-level stop of ``execute`` with an exit code; the ledger's ``run_end`` names it."""
+
+    def __init__(self, code: int, state: str, detail: str):
+        super().__init__(f"{state}: {detail}")
+        self.code = code
+        self.state = state
+        self.detail = detail
+
+
+class DryPlacer:
+    """The phase-5 placer: completes an intent on paper and never contacts the broker."""
+
+    dry = True
+
+    def complete(self, ctx, intent: dict) -> str:
+        # A second size check at the last step, with the same constant as the first one.
+        problem = ctx.mods.guards.check_size(intent["quantity"])
+        if problem:
+            raise ValueError(f"size check failed at completion: {problem}")
+        ctx.ledger.append(
+            ctx.mods.ledger.DRY_COMPLETE,
+            decision_key=intent["decision_key"],
+            ticker=intent["ticker"],
+        )
+        return ctx.mods.guards.DRY_COMPLETE
+
+
+def _execute(args, broker_factory, logger, clock, paper_log_factory, calendar, placer) -> int:
+    try:
+        broker_mod = load_broker_module()
+        contracts_mod = load_contracts_module()
+        decision_mod = load_decision_module()
+        paperlog_mod = load_paperlog_module()
+        maintenance_mod = load_state_maintenance_module()
+        guards_mod = load_guards_module()
+        ledger_mod = load_ledger_module()
+        calendar = calendar or decision_mod.load_xnys_calendar()
+    except ImportError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=LIBRARY_MISSING {type(exc).__name__}: {exc}",
+            'a library for execute is missing - pip install -e ".[ibkr]"',
+        )
+    if broker_factory is None:
+
+        def broker_factory(host, port, logger):
+            return broker_mod.IbkrBroker(host, port, logger=logger)
+
+    if paper_log_factory is None:
+
+        def paper_log_factory(repo, remote, branch):
+            return paperlog_mod.GitPaperLog(repo, remote, branch)
+
+    placer = DryPlacer() if placer is None else placer
+    mods = SimpleNamespace(
+        broker=broker_mod,
+        contracts=contracts_mod,
+        decision=decision_mod,
+        paperlog=paperlog_mod,
+        maintenance=maintenance_mod,
+        guards=guards_mod,
+        ledger=ledger_mod,
+    )
+    progress = {"connecting": False, "connected": False}
+    return _guarded(
+        logger,
+        broker_mod,
+        progress,
+        lambda: run_execute(
+            args, mods, broker_factory, paper_log_factory, calendar, placer, logger, progress, clock
+        ),
+        "execute ledger",
+    )
+
+
+def _ledger_row_finished(ctx, row: dict, state: str, detail: str) -> None:
+    """Put the end of a ticker into the ledger: ``skipped`` with a reason, or ``rejected``.
+
+    Never a ticker end without a line: a state with neither a reason nor a verdict is recorded
+    as ``skipped`` / ``review`` (fail closed) and flagged.
+    """
+    guards = ctx.mods.guards
+    ledger_mod = ctx.mods.ledger
+    if state == guards.DRY_COMPLETE:
+        return  # the placer wrote ``dry_complete`` already
+    fresh = row["freshness"]
+    fields = {
+        "ticker": row["ticker"],
+        "trade_date": row["trade_date"],
+        "state": state,
+        "detail": detail,
+        "paper_log_sha": ctx.sha,
+        "weekend_gap": fresh["weekend_gap"] if fresh else None,
+    }
+    if row["trade_date"]:
+        # An undated or malformed decision has no key; the state says why.
+        with contextlib.suppress(ValueError):
+            fields["decision_key"] = guards.decision_key(row["trade_date"], row["ticker"])
+    # The verdict wins: the two tables are disjoint, the order is only a guard.
+    if state in ledger_mod.REJECTED_STATES:
+        ctx.ledger.append(ledger_mod.REJECTED, **fields)
+    elif state in ledger_mod.REASON_BY_STATE:
+        ctx.ledger.append(ledger_mod.SKIPPED, reason=ledger_mod.REASON_BY_STATE[state], **fields)
+    else:
+        ctx.logger.warning("ibkr-state=LEDGER_REASON_UNMAPPED state=%s", state)
+        ctx.ledger.append(ledger_mod.SKIPPED, reason="review", unmapped_state=True, **fields)
+
+
+def run_execute(
+    args, mods, broker_factory, paper_log_factory, calendar, placer, logger, progress, clock
+) -> int:
+    """The guarded chain to a dry completion; nothing is sent (phase 5).
+
+    ``clock`` is the injected callable: ``now_utc`` is read once here, later guard checks
+    read ``ctx.clock()`` again.
+    """
+    # Phase 6 removes only this check (EXECUTE_FORCED_DRY): before any file is touched.
+    if EXECUTE_FORCED_DRY and getattr(placer, "dry", None) is not True:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            "ibkr-state=NOT_DRY the placer is not dry",
+            "phase 5: execute is forced dry",
+        )
+    now_utc = clock()
+    raw = read_settings(args.env_file)
+    host, port, _account = validate_settings(raw, mods.broker.EXPECTED_ACCOUNT)
+    remote, branch = paper_log_settings(raw, mods.paperlog)
+    problems = mods.contracts.table_problems()
+    if problems:
+        raise ConfigError("contract table: " + "; ".join(problems))
+    guards = mods.guards
+    ledger_mod = mods.ledger
+    state_dir = default_ledger_file().parent
+    try:
+        ledger_mod.ensure_outside_git(state_dir)
+    except ledger_mod.StateInGitTree as exc:
+        return _fail(
+            logger, EXIT_CONFIG, f"ibkr-state=STATE_IN_GIT_TREE {exc}", f"state folder: {exc}"
+        )
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=STATE_DIR_UNUSABLE {state_dir}: {type(exc).__name__}: {exc}",
+            f"state folder not usable: {state_dir} ({type(exc).__name__})",
+        )
+    # The context exists before the ledger is opened, so the guards of the later plans can
+    # work without one.
+    ctx = SimpleNamespace(
+        mods=mods,
+        logger=logger,
+        clock=clock,
+        now_utc=now_utc,
+        args=args,
+        host=host,
+        port=port,
+        remote=remote,
+        branch=branch,
+        calendar=calendar,
+        progress=progress,
+        broker_factory=broker_factory,
+        placer=placer,
+        guards=guards,
+        label="execute",
+        stack=contextlib.ExitStack(),
+        broker=None,
+        ledger=None,
+        switches=None,
+        cancelled=False,
+        halted=None,
+        history=None,
+        sha=None,
+        out=None,
+        on_row_finished=_ledger_row_finished,
+        state_dir=state_dir,
+    )
+    try:
+        ctx.ledger = ledger_mod.Ledger.open(
+            default_dryrun_ledger_file(),
+            mode=ledger_mod.MODE_DRYRUN,
+            clock=clock,
+            run_id=uuid.uuid4().hex,
+        )
+    except ledger_mod.LedgerError as exc:
+        logger.error('ibkr-state=LEDGER_CORRUPT detail="%s"', exc)
+        print(f"execute: ledger-corrupt ({exc})")
+        return EXIT_RECONCILE
+    source = paper_log_factory(REPO_ROOT, remote, branch)
+    tickers = list(dict.fromkeys(args.tickers))
+    ctx.ledger.append(ledger_mod.RUN_START, command="execute", tickers=tickers)
+    rows: dict = {}
+    abort_code = None
+    stop_state = None
+    try:
+        try:
+            ctx.sha = source.fetch()
+            rows, remaining = _local_chain(ctx, source, args.tickers)
+            if remaining:
+                _execute_gateway_chain(ctx, rows, remaining)
+        except mods.paperlog.PaperLogUnavailable as exc:
+            # No second attempt and no fall back to a local ref (D-02).
+            stop = _RunAbort(mods.decision.PAPER_LOG_UNAVAILABLE, exc.reason)
+            abort_code, stop_state = _abort_run(ctx, stop, rows), stop.state
+        except _RunAbort as stop:
+            abort_code, stop_state = _abort_run(ctx, stop, rows), stop.state
+        except _ExecuteStop as stop:
+            abort_code, stop_state = stop.code, stop.state
+        finally:
+            ctx.stack.close()
+    except Exception as exc:
+        ctx.ledger.append(ledger_mod.RUN_END, outcome="error", error=type(exc).__name__)
+        raise
+    exits = [row["exit"] for row in rows.values() if row["exit"] is not None]
+    if abort_code is not None:
+        exits.append(abort_code)
+    code = guards.worst_run_exit(exits)
+    end = {"exit": code}
+    if stop_state:
+        end["state"] = stop_state
+    ctx.ledger.append(ledger_mod.RUN_END, **end)
+    return code
+
+
 def _preview_payload(run_state, rows, sha, remote, branch, now_utc: datetime) -> dict:
     """The dry-run record: provenance (``paper_log.sha``), the verdict per ticker, ``sent: false``.
 
@@ -993,6 +1287,7 @@ def _abort_run(ctx, abort: _RunAbort, rows: dict | None = None) -> int:
 
     ``rows`` are the tickers that were already decided before the stop.
     """
+    label = getattr(ctx, "label", "preview")
     code = ctx.mods.decision.EXIT_BY_STATE.get(abort.state, EXIT_PRECONDITION)
     decided = [row for row in (rows or {}).values() if row["state"]]
     name = abort.state.upper().replace("-", "_")
@@ -1005,9 +1300,13 @@ def _abort_run(ctx, abort: _RunAbort, rows: dict | None = None) -> int:
         ctx.sha,
         abort.detail,
     )
-    print(f"preview: {abort.state} ({abort.detail})")
-    payload = _preview_payload(abort.state, decided, ctx.sha, ctx.remote, ctx.branch, ctx.now_utc)
-    _write_preview(ctx.out, payload, ctx.mods.contracts, ctx.logger)
+    print(f"{label}: {abort.state} ({abort.detail})")
+    # ``execute`` has no preview record; its ``run_end`` carries the state instead.
+    if getattr(ctx, "out", None) is not None:
+        payload = _preview_payload(
+            abort.state, decided, ctx.sha, ctx.remote, ctx.branch, ctx.now_utc
+        )
+        _write_preview(ctx.out, payload, ctx.mods.contracts, ctx.logger)
     return code
 
 
@@ -1049,17 +1348,25 @@ def _finish_row(ctx, row: dict, state: str, detail: str) -> None:
     """Give a ticker its end state: exit code, one log line (with the SHA), one console line."""
     # Phase-3 rejections (not-mapped, drift, ...) have no entry in the decision table; D-16
     # puts every precondition under exit 2.
-    code = ctx.mods.decision.EXIT_BY_STATE.get(state, EXIT_PRECONDITION)
+    label = getattr(ctx, "label", "preview")
+    code = ctx.mods.decision.EXIT_BY_STATE.get(state)
+    if code is None:
+        guards = getattr(ctx.mods, "guards", None)
+        code = guards.EXIT_BY_STATE.get(state, EXIT_PRECONDITION) if guards else EXIT_PRECONDITION
     row.update(state=state, exit=code, detail=detail)
     ctx.logger.log(
         logging.WARNING if code else logging.INFO,
-        "ibkr-state=PREVIEW ticker=%s state=%s sha=%s detail=%r",
+        "ibkr-state=%s ticker=%s state=%s sha=%s detail=%r",
+        label.upper(),
         row["ticker"],
         state,
         ctx.sha,
         detail,
     )
-    print(f"preview: {row['ticker']} {state}{_console_suffix(row)}")
+    print(f"{label}: {row['ticker']} {state}{_console_suffix(row)}")
+    hook = getattr(ctx, "on_row_finished", None)
+    if hook is not None:
+        hook(ctx, row, state, detail)
 
 
 def _finish_run(ctx, rows: dict) -> int:

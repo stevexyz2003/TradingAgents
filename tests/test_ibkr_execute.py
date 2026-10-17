@@ -152,7 +152,13 @@ def _read_records(path):
     path = Path(path)
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    records = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            records.append(json.loads(line))
+        except ValueError:
+            continue  # a deliberately broken line of a corruption test
+    return records
 
 
 def _run_execute(
