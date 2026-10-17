@@ -752,11 +752,23 @@ class TestOrderRefAndIntent:
         assert "ibkr-state=LEDGER_APPEND_FAILED event=run_end" in text
         assert "ibkr-state=UNEXPECTED OSError" in text
 
-    def test_the_dry_placer_checks_the_size_a_second_time(self):
-        ctx = SimpleNamespace(mods=SimpleNamespace(guards=guards, ledger=ledger_mod), ledger=None)
-        intent = {"decision_key": KEY, "ticker": "AAPL", "quantity": guards.MAX_QTY_PER_ORDER + 1}
-        with pytest.raises(ValueError, match="size check failed"):
-            executor.DryPlacer().complete(ctx, intent)
+    def test_the_second_size_check_runs_before_the_intent_line(self, tmp_path, loop, monkeypatch):
+        """WR-02: the last size check comes before the write-ahead line, never after it."""
+        seen = []
+        real = guards.check_size
+
+        def recording(quantity):
+            on_disk = _read_records(executor.default_dryrun_ledger_file())
+            seen.append([r["event"] for r in on_disk])
+            return real(quantity)
+
+        monkeypatch.setattr(guards, "check_size", recording)
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code == executor.EXIT_OK
+        assert len(seen) == 2
+        assert "intent" not in seen[-1]
+        assert seen[-1][-1] == "switch_check"
+        assert len(_events(records, "intent")) == 1
 
 
 def _case_buy_flat():
@@ -1549,10 +1561,18 @@ class TestSizeCap:
 
         monkeypatch.setattr(guards, "check_size", chain_blind)
         code, records = _gateway_run(tmp_path, loop, _fake_for())
-        assert code != executor.EXIT_OK
+        # WR-02: the second check sits before the intent line, so it refuses cleanly
+        # (size-cap, exit 5) and leaves no open intent behind.
+        assert code == executor.EXIT_REJECTED
         assert len(calls) == 2
+        assert _events(records, "intent") == []
         assert _events(records, "dry_complete") == []
-        assert _events(records, "run_end")[-1]["outcome"] == "error"
+        (skipped,) = _events(records, "skipped")
+        assert skipped["state"] == "size-cap"
+        assert "size check before intent" in skipped["detail"]
+        end = _events(records, "run_end")[-1]
+        assert "outcome" not in end
+        assert end["exit"] == executor.EXIT_REJECTED
 
     def test_size_checked_before_session(self, tmp_path, loop, monkeypatch):
         _force_quantity(monkeypatch, 3)
@@ -1700,10 +1720,13 @@ class TestOneAttemptPerKey:
         _gateway_run(tmp_path, loop, _fake_for(), placer=CrashingPlacer())
         fake = _fake_for()
         code, records = _gateway_run(tmp_path, loop, fake)
-        # Since 05-07 the reconciliation meets the open intent first: no trace at the broker
-        # is exit 6; the key check behind it is never reached, and no second intent appears.
-        assert code == executor.EXIT_RECONCILE
+        # The reconciliation meets the open dry intent first and closes it as never sent
+        # (WR-02); the key stays used up, so the key check stops a second intent.
+        assert code == executor.EXIT_PRECONDITION
         assert len(_events(records, "intent")) == 1
+        assert [r["outcome"] for r in _events(records, "reconcile")] == ["never_sent"]
+        (skipped,) = _events(records, "skipped")
+        assert skipped["state"] == "already-attempted"
         assert "placeOrder(whatIf)" not in fake.calls
 
     def test_negative_control_key_check_removed_allows_second_intent(
@@ -1780,6 +1803,13 @@ def _msft_run(tmp_path, loop, fake, **kwargs):
 
 
 _CON = CON_IDS["AAPL"]
+#: Broker history that contradicts itself for PREV_KEY: unresolvable in either ledger.
+_CONTRADICTION = {
+    "open_orders": [ibkr_fakes.open_trade(_CON, order_ref=PREV_KEY, quantity=2)],
+    "completed_orders": [
+        ibkr_fakes.completed_trade(_CON, "Cancelled", order_ref=PREV_KEY, quantity=2)
+    ],
+}
 _RECONCILE_CASES = [
     pytest.param(
         {"open_orders": [ibkr_fakes.open_trade(_CON, order_ref=PREV_KEY, quantity=2)]},
@@ -1836,9 +1866,57 @@ _RECONCILE_CASES = [
 ]
 
 
+def _live_reconcile_ctx(tmp_path, history, caplog_name="test-live-reconcile"):
+    """A ``_reconcile`` context on a live ledger with one open intent (phase 6 mode)."""
+    import logging
+
+    path = tmp_path / "live" / "ledger.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    led = ledger_mod.Ledger.open(
+        path, mode=ledger_mod.MODE_LIVE, clock=_fixed(OPEN_NOW), run_id="live"
+    )
+    if not led.records:
+        kind, fields = _prepared_intent()
+        led.append(kind, **fields)
+    return SimpleNamespace(
+        ledger=led,
+        mods=SimpleNamespace(guards=guards, ledger=ledger_mod),
+        history=history,
+        logger=logging.getLogger(caplog_name),
+    )
+
+
+_NO_TRACE = SimpleNamespace(open=[], completed=[], executions=[])
+
+
 class TestReconcile:
-    def test_g3_reconcile_unresolved_intent_aborts_with_exit_six(self, tmp_path, loop, capsys):
-        """SC6 / G3: a run that broke off after the intent blocks the next run before any order."""
+    def test_g3_reconcile_unresolved_intent_aborts_with_exit_six(self, tmp_path, caplog, capsys):
+        """SC6 / G3: in the live ledger an intent without a trace blocks the run (exit 6),
+        and it stays open in every later run (REQ-43). The dry ledger resolves it instead
+        (``test_g3_reconcile_dry_intent_without_trace_is_never_sent``)."""
+        for expected_lines in (1, 2):
+            ctx = _live_reconcile_ctx(tmp_path, _NO_TRACE)
+            with (
+                caplog.at_level("WARNING", logger="test-live-reconcile"),
+                pytest.raises(executor._ExecuteStop) as stop,
+            ):
+                executor._reconcile(ctx)
+            assert stop.value.code == executor.EXIT_RECONCILE == 6
+            assert stop.value.state == "reconcile-unresolved"
+            reconciles = _events(ctx.ledger.records, "reconcile")
+            assert len(reconciles) == expected_lines
+            assert reconciles[-1]["decision_key"] == PREV_KEY
+            assert reconciles[-1]["outcome"] == "no_trace"
+            assert [e["decision_key"] for e in ctx.ledger.unresolved()] == [PREV_KEY]
+        assert (
+            f"ibkr-state=RECONCILE_UNRESOLVED key={PREV_KEY} outcome=no_trace "
+            "open=0 completed=0 executions=0"
+        ) in caplog.text
+        assert RECONCILE_MANUAL in capsys.readouterr().out
+
+    def test_g3_reconcile_dry_intent_without_trace_is_never_sent(self, tmp_path, loop, capsys):
+        """WR-02 / D-08: a dry run that broke off after the intent does not block every later
+        run with exit 6: the dry intent was never sent, it is closed as such and logged."""
         code, records = _gateway_run(tmp_path, loop, _fake_for(), placer=_CrashAfterIntent())
         assert code != executor.EXIT_OK
         assert len(_events(records, "intent")) == 1
@@ -1848,24 +1926,26 @@ class TestReconcile:
         code, records = _gateway_run(
             tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=pl_factory
         )
-        assert code == executor.EXIT_RECONCILE
+        # AAPL's key is used up (already-attempted, exit 2); MSFT goes through.
+        assert code == executor.EXIT_PRECONDITION
         for name in ("open_orders", "completed_orders", "executions"):
             assert name in fake.calls
-        assert "placeOrder(whatIf)" not in fake.calls
-        assert pl_factory.calls == []
-        assert len(_events(records, "intent")) == 1
         (reconcile,) = _events(records, "reconcile")
         assert reconcile["decision_key"] == KEY
-        assert reconcile["outcome"] == "no_trace"
+        assert reconcile["outcome"] == "never_sent"
         assert (reconcile["open"], reconcile["completed"], reconcile["executions"]) == (0, 0, 0)
+        (closed,) = [r for r in _events(records, "rejected") if r.get("source") == "reconcile"]
+        assert closed["decision_key"] == KEY
+        assert closed["state"] == "never-sent"
+        assert closed["seq"] > reconcile["seq"]
+        assert _unresolved_keys() == []
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL", "MSFT"]
         end = _events(records, "run_end")[-1]
-        assert end["exit"] == 6
-        assert end["state"] == "reconcile-unresolved"
-        assert (
-            f"ibkr-state=RECONCILE_UNRESOLVED key={KEY} outcome=no_trace "
-            "open=0 completed=0 executions=0"
-        ) in _log_text(tmp_path)
-        assert RECONCILE_MANUAL in capsys.readouterr().out
+        assert end["exit"] == executor.EXIT_PRECONDITION
+        assert "state" not in end
+        assert f"ibkr-state=RECONCILE_NEVER_SENT key={KEY}" in _log_text(tmp_path)
+        assert "RECONCILE_UNRESOLVED" not in _log_text(tmp_path)
+        assert RECONCILE_MANUAL not in capsys.readouterr().out
 
     @pytest.mark.parametrize(("history", "outcome", "follow", "filled"), _RECONCILE_CASES)
     def test_g3_reconcile_resolves_before_any_new_order(
@@ -1895,20 +1975,23 @@ class TestReconcile:
 
     def test_g3_reconcile_unresolved_stays_unresolved_on_the_next_run(self, tmp_path, loop):
         """Blocker REQ-43: a reconcile line does not close an entry; every run stops again."""
-        _gateway_run(tmp_path, loop, _fake_for(), placer=_CrashAfterIntent())
+        _prepare_ledger(_prepared_intent())
         for expected_lines in (1, 2):
-            fake = _fake_for(("AAPL", "MSFT"))
-            code, records = _gateway_run(
-                tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
-            )
+            fake = _fake_for(("MSFT",), **_CONTRADICTION)
+            pl_factory = _PaperLogFactory(_buy_paper(tmp_path, ticker="MSFT"))
+            code, records = _gateway_run(tmp_path, loop, fake, tickers=("MSFT",), paper=pl_factory)
             assert code == executor.EXIT_RECONCILE
             reconciles = _events(records, "reconcile")
             assert len(reconciles) == expected_lines
-            assert {r["decision_key"] for r in reconciles} == {KEY}
-            assert reconciles[-1]["outcome"] == "no_trace"
+            assert {r["decision_key"] for r in reconciles} == {PREV_KEY}
+            assert reconciles[-1]["outcome"] == "contradiction"
             assert "placeOrder(whatIf)" not in fake.calls
+            assert pl_factory.calls == []
             assert len(_events(records, "intent")) == 1
-            assert _unresolved_keys() == [KEY]
+            assert _unresolved_keys() == [PREV_KEY]
+            end = _events(records, "run_end")[-1]
+            assert end["exit"] == 6
+            assert end["state"] == "reconcile-unresolved"
 
     def test_reconcile_collision_is_exit_six(self, tmp_path, loop):
         _prepare_ledger(_prepared_intent())
@@ -1971,13 +2054,14 @@ class TestReconcile:
     def test_negative_control_reconcile_removed_would_create_new_intent(
         self, tmp_path, loop, monkeypatch
     ):
-        _gateway_run(tmp_path, loop, _fake_for(), placer=_CrashAfterIntent())
+        _prepare_ledger(_prepared_intent())
+        # The real chain: the unresolvable entry stops the run before MSFT.
+        code, records = _msft_run(tmp_path, loop, _fake_for(("MSFT",), **_CONTRADICTION))
+        assert code == executor.EXIT_RECONCILE
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
         monkeypatch.setattr(executor, "_reconcile", lambda ctx: None)
-        fake = _fake_for(("AAPL", "MSFT"))
-        _code, records = _gateway_run(
-            tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
-        )
-        # AAPL from the broken run, MSFT is the new order the real chain never lets through.
+        _code, records = _msft_run(tmp_path, loop, _fake_for(("MSFT",), **_CONTRADICTION))
+        # AAPL from the prepared entry, MSFT is the new order the real chain never lets through.
         assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL", "MSFT"]
 
 

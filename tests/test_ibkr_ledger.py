@@ -581,6 +581,16 @@ def test_reconcile_no_trace_is_unresolvable():
     assert (res.open, res.completed, res.executions) == (0, 0, 0)
 
 
+def test_reconcile_dry_intent_without_trace_is_never_sent():
+    """WR-02 / D-08: a dry intent is never sent, so "no trace" is certain in the dry ledger."""
+    res = led.resolve_entry(ENTRY, _hist(), dry=True)
+    assert res.outcome == led.NEVER_SENT
+    assert res.outcome not in led.UNRESOLVABLE
+    # Any trace at the broker still counts as it does in the live ledger.
+    stranger = _hist(open=[_order(con_id=999)])
+    assert led.resolve_entry(ENTRY, stranger, dry=True).outcome == led.COLLISION
+
+
 def test_reconcile_open_order():
     res = led.resolve_entry(ENTRY, _hist(open=[_order()]))
     assert res.outcome == led.OPEN and res.open == 1

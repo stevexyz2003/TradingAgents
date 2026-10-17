@@ -556,7 +556,8 @@ Order of the chain, per run and per ticker:
 9. size cap
 10. session window
 11. switch check, whatIf with `orderRef`, switch check
-12. `intent` (write-ahead, flushed to disk), then the dry completion
+12. second size check, then `intent` (write-ahead, flushed to disk), then the dry
+    completion; nothing after the `intent` can refuse the order
 
 Console and log lines start with `execute:` and `ibkr-state=EXECUTE...`. The
 ledger is the record of the run; the log is the narrative.
@@ -625,9 +626,14 @@ original error.
 **Reconciliation.** Before any new order, each open entry (an `intent` or `placed`
 without an end) is resolved against open orders, completed orders and executions by
 its `orderRef`. A clear case writes `placed`, `filled`, `partial` or `rejected`
-with `source: reconcile`. A crash after the `intent` that left no trace at the
-broker is not "already attempted": it is exit 6 on the next run (`no_trace`),
-as are a double hit (`collision`) and contradicting sources (`contradiction`).
+with `source: reconcile`. In the live ledger, a crash after the `intent` that left
+no trace at the broker is not "already attempted": it is exit 6 on the next run
+(`no_trace`), as are a double hit (`collision`) and contradicting sources
+(`contradiction`). In the dry-run ledger an `intent` is never sent, so an open dry
+`intent` without any trace at the broker is resolved as `never_sent`: the
+`reconcile` line carries that outcome, a `rejected` line with `state: never-sent`
+closes the entry, and the run goes on without exit 6 (its key stays used up). A
+collision or contradiction stays exit 6 in both ledgers.
 
 **Resolving exit 6 (`reconcile-unresolved`, D-19).**
 

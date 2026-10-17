@@ -1054,10 +1054,8 @@ class DryPlacer:
     dry = True
 
     def complete(self, ctx, intent: dict) -> str:
-        # A second size check at the last step, with the same constant as the first one.
-        problem = ctx.mods.guards.check_size(intent["quantity"])
-        if problem:
-            raise ValueError(f"size check failed at completion: {problem}")
+        # The second size check runs right before the ``intent`` line (``_execute_ticker``),
+        # so nothing can fail here between the intent and its completion (WR-02).
         ctx.ledger.append(
             ctx.mods.ledger.DRY_COMPLETE,
             decision_key=intent["decision_key"],
@@ -1508,9 +1506,10 @@ def _reconcile(ctx) -> None:
     ledger_mod = ctx.mods.ledger
     history = _history(ctx)
     unresolved: list[tuple[str, str]] = []
+    dry = ctx.ledger.mode == ledger_mod.MODE_DRYRUN
     for entry in pending:
         key = entry["decision_key"]
-        res = ledger_mod.resolve_entry(entry, history)
+        res = ledger_mod.resolve_entry(entry, history, dry=dry)
         ctx.ledger.append(
             ledger_mod.RECONCILE,
             decision_key=key,
@@ -1539,6 +1538,12 @@ def _reconcile(ctx) -> None:
             )
         elif res.outcome == ledger_mod.NOT_FILLED:
             ctx.ledger.append(ledger_mod.REJECTED, state="not-filled", detail=res.detail, **follow)
+        elif res.outcome == ledger_mod.NEVER_SENT:
+            # A dry intent left open by a broken run (D-08): closed, the run goes on.
+            ctx.ledger.append(ledger_mod.REJECTED, state="never-sent", detail=res.detail, **follow)
+            ctx.logger.warning(
+                'ibkr-state=RECONCILE_NEVER_SENT key=%s detail="%s"', key, res.detail
+            )
         else:
             unresolved.append((key, res.outcome))
             ctx.logger.warning(
@@ -2228,6 +2233,18 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         order_ref=key,
         weekend_gap=bool(row["freshness"]["weekend_gap"]),
     )
+    # A second size check at the last step before the write-ahead line, with the same
+    # constant as the first one: after the ``intent`` nothing may refuse the order (WR-02).
+    cap_reason = guards.check_size(intent["quantity"])
+    if cap_reason is not None:
+        ctx.logger.warning(
+            "ibkr-state=SIZE_CAP ticker=%s quantity=%s max=%s check=before-intent",
+            ticker,
+            intent["quantity"],
+            guards.MAX_QTY_PER_ORDER,
+        )
+        _finish_row(ctx, row, guards.SIZE_CAP, f"size check before intent: {cap_reason}")
+        return
     # Write-ahead: the line is on disk (fsync) before the placer may complete anything.
     ctx.ledger.append(ledger_mod.INTENT, **intent)
     ctx.logger.info(

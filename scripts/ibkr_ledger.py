@@ -484,6 +484,9 @@ FILLED_OUT = "filled"
 PARTIAL_OUT = "partial"
 NOT_FILLED = "not_filled"
 NO_TRACE = "no_trace"
+#: A dry-run intent without any trace at the broker: it was never sent (D-08). Resolved,
+#: not unresolvable; only the dry-run ledger knows it.
+NEVER_SENT = "never_sent"
 COLLISION = "collision"
 CONTRADICTION = "contradiction"
 UNRESOLVABLE = frozenset({NO_TRACE, COLLISION, CONTRADICTION})
@@ -500,11 +503,13 @@ class Resolution:
     executions: int
 
 
-def resolve_entry(entry: dict, history: object) -> Resolution:
+def resolve_entry(entry: dict, history: object, *, dry: bool = False) -> Resolution:
     """Classify an open ledger entry against open orders, completed orders and executions.
 
     Matching is by exact ``orderRef`` on the client side. Unclear cases are unresolvable
     instead of guessed: "never sent" and "sent outside the query window" look the same.
+    Only for an entry of the dry-run ledger (``dry=True``) is "no trace" certain: a dry
+    intent is never sent, so it resolves as ``never_sent`` (WR-02, D-08).
     """
     key = entry.get("order_ref") or entry["decision_key"]
     side = entry["side"]
@@ -556,6 +561,8 @@ def resolve_entry(entry: dict, history: object) -> Resolution:
                     return result(CONTRADICTION, f"{order.status} order reports a full fill")
                 return result(PARTIAL_OUT, f"{order.status} after {float(filled):g} filled")
         return result(NOT_FILLED, "order was cancelled without a fill")
+    if dry:
+        return result(NEVER_SENT, "dry-run intent, no trace at the broker: never sent")
     return result(NO_TRACE, "no trace at the broker")
 
 
