@@ -1519,6 +1519,30 @@ def test_order_history_returns_the_three_broker_sources(loop):
     assert not any(call in fake.calls for call in FORBIDDEN_CALLS)
 
 
+def test_order_history_open_list_drops_finished_orders_like_open_orders(loop):
+    """WR-06: a just-filled order in the open answer is not open; its completed twin stays,
+    and a finished row the completed read has not seen yet is kept as completed."""
+    fake = _history_fake(
+        open_orders=[
+            ibkr_fakes.open_trade(265598, status="Filled", order_ref=REF, perm_id=7, quantity=2),
+            ibkr_fakes.open_trade(272093, status="Cancelled", order_ref="late", perm_id=9),
+            ibkr_fakes.open_trade(265598, status="Submitted", order_ref="live", perm_id=10),
+        ],
+        completed_orders=[
+            ibkr_fakes.completed_trade(
+                265598, status="Filled", order_ref=REF, filled=2.0, perm_id=7, quantity=2
+            )
+        ],
+        executions=[],
+    )
+    history = _connected(fake, loop).order_history()
+    assert [(o.order_ref, o.status) for o in history.open] == [("live", "Submitted")]
+    assert [(c.source, c.order_ref, c.status) for c in history.completed] == [
+        ("completed", REF, "Filled"),
+        ("open", "late", "Cancelled"),
+    ]
+
+
 @pytest.mark.parametrize("source", ["open_orders", "completed_orders", "executions"])
 def test_order_history_request_timeout_on_each_source(loop, source):
     adapter = _connected(_history_fake(**{source: "hang"}), loop)

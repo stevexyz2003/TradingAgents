@@ -492,6 +492,7 @@ CONTRADICTION = "contradiction"
 UNRESOLVABLE = frozenset({NO_TRACE, COLLISION, CONTRADICTION})
 
 _CANCELLED = frozenset({"Cancelled", "ApiCancelled", "Inactive"})
+_DONE = frozenset({"Filled", *_CANCELLED})
 
 
 @dataclass(frozen=True)
@@ -515,8 +516,19 @@ def resolve_entry(entry: dict, history: object, *, dry: bool = False) -> Resolut
     side = entry["side"]
     quantity = float(entry["quantity"])
     con_id = entry["con_id"]
-    opened = [o for o in history.open if o.order_ref == key]
     completed = [o for o in history.completed if o.order_ref == key]
+    # A finished order in the open answer is not open (WR-06): the same permId in the
+    # completed answer is the same order, not a contradiction (the quantity is checked for
+    # every record below); without that twin it counts as completed.
+    finished = {(o.perm_id, float(o.quantity)) for o in completed if getattr(o, "perm_id", 0)}
+    opened = []
+    for order in history.open:
+        if order.order_ref != key:
+            continue
+        if order.status not in _DONE:
+            opened.append(order)
+        elif (getattr(order, "perm_id", 0), float(order.quantity)) not in finished:
+            completed.append(order)
     executions = [e for e in history.executions if e.order_ref == key]
     counts = f"open={len(opened)} completed={len(completed)} executions={len(executions)}"
 
@@ -531,6 +543,10 @@ def resolve_entry(entry: dict, history: object, *, dry: bool = False) -> Resolut
     for execution in executions:
         if execution.con_id != con_id or execution.side != side:
             return result(COLLISION, "orderRef is not unique at IBKR")
+    # Two different orders (permIds) under one orderRef: which one is ours is unclear.
+    perm_ids = {getattr(o, "perm_id", 0) for o in (*opened, *completed)} - {0}
+    if len(perm_ids) > 1:
+        return result(COLLISION, "orderRef names more than one order at IBKR")
     if opened and completed:
         return result(CONTRADICTION, "order is both open and completed")
     if opened:

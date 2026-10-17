@@ -644,6 +644,28 @@ def test_reconcile_unknown_completed_status_is_contradiction():
     assert res.outcome == led.CONTRADICTION
 
 
+def test_reconcile_finished_order_in_both_answers_is_no_contradiction():
+    """WR-06: the same permId as open-with-Filled and as completed is one finished order."""
+    hist = _hist(open=[_order("Filled", filled=2.0)], completed=[_order("Filled", filled=2.0)])
+    res = led.resolve_entry(ENTRY, hist)
+    assert res.outcome == led.FILLED_OUT
+    assert (res.open, res.completed) == (0, 1)
+
+
+def test_reconcile_finished_order_only_in_the_open_answer_counts_as_completed():
+    res = led.resolve_entry(ENTRY, _hist(open=[_order("Cancelled", filled=0.0)]))
+    assert res.outcome == led.NOT_FILLED
+
+
+def test_reconcile_two_orders_under_one_order_ref_are_a_collision():
+    """A finished open row with another permId is a second order, not the same one."""
+    other = SimpleNamespace(**{**vars(_order("Filled", filled=2.0)), "perm_id": 99})
+    hist = _hist(open=[other], completed=[_order("Cancelled", filled=0.0)])
+    assert led.resolve_entry(ENTRY, hist).outcome == led.COLLISION
+    two_completed = _hist(completed=[_order("Cancelled", filled=0.0), other])
+    assert led.resolve_entry(ENTRY, two_completed).outcome == led.COLLISION
+
+
 def test_reconcile_open_and_cancelled_is_contradiction():
     hist = _hist(open=[_order()], completed=[_order("Cancelled", filled=0.0)])
     assert led.resolve_entry(ENTRY, hist).outcome == led.CONTRADICTION

@@ -1025,9 +1025,22 @@ class IbkrBroker:
                     ),
                 )
             )
+        # Like ``open_orders``, finished orders are not open (WR-06): a just-filled order can
+        # still stand in the open answer with ``Filled`` and also in the completed one. The
+        # three reads are not atomic, so a finished row that the completed read did not see
+        # yet is kept as completed instead of being dropped (its evidence stays).
+        completed = [_order_record("completed", t) for t in completed_trades]
+        seen = {(record.perm_id, record.quantity) for record in completed if record.perm_id}
+        opened = []
+        for trade in open_trades:
+            record = _order_record("open", trade)
+            if record.status not in _DONE_ORDER_STATUSES:
+                opened.append(record)
+            elif (record.perm_id, record.quantity) not in seen:
+                completed.append(record)
         return OrderHistory(
-            open=tuple(_order_record("open", t) for t in open_trades),
-            completed=tuple(_order_record("completed", t) for t in completed_trades),
+            open=tuple(opened),
+            completed=tuple(completed),
             executions=tuple(executions),
         )
 
