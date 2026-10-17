@@ -507,8 +507,11 @@ Remove-Item (Join-Path $env:LOCALAPPDATA 'TradingEngineX\ibkr\KILL')
 ```
 
 Do not write the release with `echo ... > RELEASE` or `Set-Content`: Windows
-PowerShell 5.1 writes UTF-16 with a BOM there, and the executor rejects that as
-`release-invalid` (not UTF-8). That is safe, but the release never works.
+PowerShell 5.1 writes a BOM with `>` (UTF-16, or UTF-8 with BOM if the default
+encoding was changed) and the ANSI code page with `Set-Content`. The executor
+rejects all of these as `release-invalid` (not UTF-8 JSON). That is safe, but the
+release never works. The one-liner above was checked on this machine on
+2026-10-17: it reads as `release-ok`, the `KILL` line as `kill-active`.
 
 What the switch does:
 
