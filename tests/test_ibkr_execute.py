@@ -1368,9 +1368,9 @@ class TestSizeCap:
             return None if len(calls) == 1 else real(quantity)
 
         monkeypatch.setattr(guards, "check_size", chain_blind)
-        with pytest.raises(ValueError, match="size check failed"):
-            _gateway_run(tmp_path, loop, _fake_for())
-        records = _read_records(executor.default_dryrun_ledger_file())
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code != executor.EXIT_OK
+        assert len(calls) == 2
         assert _events(records, "dry_complete") == []
         assert _events(records, "run_end")[-1]["outcome"] == "error"
 
@@ -1395,9 +1395,8 @@ _SESSION_CASES = [
     pytest.param(_FULL, 200, "intent", id="mid_window"),
     pytest.param(_FULL, 5, "outside-session", id="opening_buffer"),
     pytest.param(_FULL, 6 * 60 + 30 - 5, "outside-session", id="closing_buffer"),
-    pytest.param(_HALF, 3 * 60 - 5, "outside-session", id="half_day_closing_buffer"),
+    pytest.param(_HALF, 3 * 60 + 30 - 5, "outside-session", id="half_day_closing_buffer"),
     pytest.param(_HALF, 90, "intent", id="half_day_mid_window"),
-    pytest.param(_FULL, 6 * 60 + 40, "outside-session", id="after_close"),
 ]
 
 

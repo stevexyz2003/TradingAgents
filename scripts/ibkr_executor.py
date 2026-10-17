@@ -1955,6 +1955,28 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
     if plan.state != decision_mod.INTENT:
         _finish_row(ctx, row, plan.state, plan.detail)
         return
+    # Size before trading hours before switches (REQ-45): a quantity above the cap is rejected
+    # and reported, never trimmed (REQ-32); nothing is previewed and no ``intent`` is written.
+    cap_reason = guards.check_size(plan.quantity)
+    if cap_reason is not None:
+        row["intent"] = {"side": plan.side, "quantity": plan.quantity, "order_type": "MKT"}
+        ctx.logger.warning(
+            "ibkr-state=SIZE_CAP ticker=%s quantity=%s max=%s",
+            ticker,
+            plan.quantity,
+            guards.MAX_QTY_PER_ORDER,
+        )
+        _finish_row(ctx, row, guards.SIZE_CAP, cap_reason)
+        return
+    # The session window comes from ``evaluate_session`` with its buffers (D-10): half days
+    # shorten it through the broker's liquid hours; no second constant or clock logic here.
+    if row["session"] and row["session"].get("closed"):
+        detail = (
+            f"outside the regular-session window ({result.detail}); "
+            f"next open {row['session'].get('next_open')}"
+        )
+        _finish_row(ctx, row, guards.OUTSIDE_SESSION, detail)
+        return
     key = guards.decision_key(row["trade_date"], ticker)
     # Read the switches anew right before the whatIf (REQ-34, D-21): no cache between orders.
     switches = _check_switches(ctx)
@@ -2073,8 +2095,7 @@ def _execute_gateway_chain(ctx, rows: dict, remaining: list[str]) -> None:
             # A switch closed earlier in this run: no further broker call for this ticker.
             _halt_on_switches(ctx, row, ctx.halted)
             continue
-        # A closed market is only noted here; the refusal outside the window comes with the
-        # size and session guards.
+        # A closed market is noted here; ``_execute_ticker`` refuses it after the size check.
         closed = result.state == contracts_mod.CLOSED
         row["session"] = _session_info(result, closed)
         if result.rejected:
