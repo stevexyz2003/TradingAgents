@@ -235,7 +235,7 @@ def _buy_paper(tmp_path, rating="Buy", ticker="AAPL"):
 class TestWiring:
     def test_usage_lists_preview(self, capsys):
         assert executor.main([], broker_factory=_RecordingFactory()) == executor.EXIT_CONFIG
-        assert "account, resolve, preview" in capsys.readouterr().err
+        assert "account, resolve, preview, execute" in capsys.readouterr().err
 
     def test_no_tickers_is_a_usage_error(self, tmp_path, capsys):
         factory = _RecordingFactory()
