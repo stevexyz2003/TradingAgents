@@ -1574,3 +1574,161 @@ def test_preview_order_ref_echo_is_none_without_an_echo(loop):
     fake = FakeIB(whatif=_state(), whatif_echo_tif=None)
     result = _preview(fake, loop, order_ref=REF)
     assert (result.echo_order_ref, result.echo_account) == (None, None)
+
+
+# --- phase 5: the one-shot permit for reqGlobalCancel (D-05, REQ-35, REQ-66) -------------
+
+
+def test_negative_control_global_cancel_refused_without_permit():
+    # Name, field level and wire level all stay shut while the permit is closed.
+    ib_async = pytest.importorskip("ib_async")
+    client = ib_async.IB().client
+    permit = broker._CancelPermit()
+    broker._arm_write_barrier(client, permit)
+    with pytest.raises(broker.ReadOnlyViolation, match="reqGlobalCancel"):
+        client.reqGlobalCancel()
+    with pytest.raises(broker.ReadOnlyViolation, match="message 58"):
+        client.send(58, 1)
+    with pytest.raises(broker.ReadOnlyViolation, match="message 58"):
+        client.sendMsg("58\0" + "1\0")
+    assert permit.sent == 0
+
+
+def test_global_cancel_open_permit_reaches_the_library_send():
+    ib_async = pytest.importorskip("ib_async")
+    client = ib_async.IB().client
+    permit = broker._CancelPermit()
+    broker._arm_write_barrier(client, permit)
+    permit.open = True
+    # The call now meets the library's own refusal (not connected), not the barrier.
+    with pytest.raises(ConnectionError, match="Not connected"):
+        client.reqGlobalCancel()
+    assert permit.sent == 0
+
+
+@pytest.mark.parametrize("msg_id", (4, 19, 21))
+def test_global_cancel_open_permit_keeps_the_other_write_messages_shut(msg_id):
+    ib_async = pytest.importorskip("ib_async")
+    client = ib_async.IB().client
+    permit = broker._CancelPermit()
+    broker._arm_write_barrier(client, permit)
+    permit.open = True
+    with pytest.raises(broker.ReadOnlyViolation, match=f"message {msg_id}"):
+        client.send(msg_id, 1, 42)
+    with pytest.raises(broker.ReadOnlyViolation, match=f"message {msg_id}"):
+        client.sendMsg(f"{msg_id}\0" + "1\0")
+    with pytest.raises(broker.ReadOnlyViolation, match="cancelOrder"):
+        client.cancelOrder(1)
+
+
+def test_global_cancel_permit_default_is_never_open():
+    ib_async = pytest.importorskip("ib_async")
+    client = ib_async.IB().client
+    broker._arm_write_barrier(client)  # no permit passed: the shut default
+    with pytest.raises(broker.ReadOnlyViolation, match="message 58"):
+        client.send(58, 1)
+
+
+def test_global_cancel_counts_only_on_the_wire():
+    sent = []
+    client = SimpleNamespace(
+        send=lambda *f, **k: sent.append(("send", f)),
+        sendMsg=lambda *a, **k: sent.append(("sendMsg", a)),
+        reqGlobalCancel=lambda: sent.append(("named", ())),
+    )
+    permit = broker._CancelPermit()
+    broker._arm_write_barrier(client, permit)
+    permit.open = True
+    client.send(58, 1)
+    assert permit.sent == 0 and permit.open is True
+    client.sendMsg("58\0" + "1\0")
+    assert permit.sent == 1 and permit.open is False
+    with pytest.raises(broker.ReadOnlyViolation, match="message 58"):
+        client.sendMsg("58\0" + "1\0")
+
+
+KILL = SimpleNamespace(active=True)
+
+
+def test_cancel_all_sends_one_global_cancel_and_closes_the_permit(loop, caplog):
+    fake = FakeIB(open_orders=[ibkr_fakes.open_trade(265598)])
+    adapter = _connected(fake, loop)
+    with caplog.at_level(logging.WARNING, logger="ibkr_broker"):
+        adapter.cancel_all(kill_evidence=KILL)
+    assert fake.calls.count("reqGlobalCancel") == 1
+    assert adapter._permit.sent == 1
+    assert adapter._permit.open is False
+    assert any(
+        'ibkr-state=GLOBAL_CANCEL_SENT code=- detail="count=1 reason=kill_switch"' in r.getMessage()
+        for r in caplog.records
+    )
+    assert adapter.open_orders() == ()
+
+
+def test_cancel_all_without_effect_leaves_the_orders_to_the_recheck(loop):
+    fake = FakeIB(open_orders=[ibkr_fakes.open_trade(265598)], global_cancel_clears=False)
+    adapter = _connected(fake, loop)
+    adapter.cancel_all(kill_evidence=KILL)
+    assert len(adapter.open_orders()) == 1
+
+
+def test_cancel_all_second_call_in_a_session_is_refused(loop):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    adapter.cancel_all(kill_evidence=KILL)
+    with pytest.raises(broker.ReadOnlyViolation, match="already used in this session"):
+        adapter.cancel_all(kill_evidence=KILL)
+    assert fake.calls.count("reqGlobalCancel") == 1
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [None, SimpleNamespace(active=False), SimpleNamespace(active="yes"), SimpleNamespace()],
+    ids=["none", "inactive", "truthy-not-true", "no-attribute"],
+)
+def test_cancel_all_without_a_positive_kill_evidence_is_refused(loop, evidence):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    with pytest.raises(broker.ReadOnlyViolation, match="kill switch"):
+        adapter.cancel_all(kill_evidence=evidence)
+    assert "reqGlobalCancel" not in fake.calls
+    assert adapter._permit.sent == 0 and adapter._permit.open is False
+
+
+def test_cancel_all_leaves_a_direct_global_cancel_shut_afterwards(loop):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    adapter.cancel_all(kill_evidence=KILL)
+    with pytest.raises(broker.ReadOnlyViolation):
+        adapter._ib.client.reqGlobalCancel()
+    with pytest.raises(broker.ReadOnlyViolation, match="message 58"):
+        adapter._ib.client.sendMsg("58\0" + "1\0")
+    assert fake.calls.count("reqGlobalCancel") == 1
+
+
+def test_cancel_all_that_never_reaches_the_wire_is_a_request_failure(loop, monkeypatch):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    # Library variant that names the call but never sends message 58.
+    monkeypatch.setattr(FakeIB, "reqGlobalCancel", lambda self: self.client.reqGlobalCancel())
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.cancel_all(kill_evidence=KILL)
+    assert info.value.state == "REQUEST_FAILED"
+    assert adapter._permit.open is False
+
+
+def test_cancel_all_when_not_connected(loop):
+    adapter = broker.IbkrBroker("127.0.0.1", 7497, loop=loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.cancel_all(kill_evidence=KILL)
+    assert info.value.state == "NOT_CONNECTED"
+
+
+def test_global_cancel_in_the_fake_model_is_name_then_wire(loop):
+    fake = FakeIB(open_orders=[ibkr_fakes.open_trade(1)])
+    adapter = _connected(fake, loop)
+    adapter._permit.open = True
+    fake.reqGlobalCancel()
+    assert fake.calls.count("reqGlobalCancel") == 1
+    assert fake.calls.count("sendMsg") == 1
+    assert fake.open_orders == []
