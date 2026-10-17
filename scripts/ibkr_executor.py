@@ -780,9 +780,8 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
 
     # No live, release or date option (D-07): phase 5 executes dry and nothing lifts that.
-    execute = sub.add_parser(
-        "execute", help="guarded chain to a dry completion; phase 5 sends no order"
-    )
+    help_execute = "guarded chain to a dry completion; phase 5 sends no order"
+    execute = sub.add_parser("execute", help=help_execute)
     execute.add_argument("tickers", nargs="*", metavar="TICKER")
     execute.add_argument("--contracts", type=Path, default=None, help="contracts.json path")
     execute.add_argument("--log-file", type=Path, default=default_log_file())
@@ -1553,13 +1552,9 @@ def _session_info(result, closed: bool) -> dict:
     }
 
 
-def _preview_ticker(ctx, broker, row: dict, result, snapshot) -> None:
-    """Position by conId, open orders, target, whatIf preview and verdict for one ticker."""
-    contracts_mod = ctx.mods.contracts
-    decision_mod = ctx.mods.decision
+def _position_and_orders(ctx, broker, row: dict, identity, spec, snapshot) -> tuple[float, tuple]:
+    """Position by conId (other conIds are reported, never netted) and the open orders."""
     ticker = row["ticker"]
-    identity = result.identity
-    spec = contracts_mod.CONTRACT_TABLE[ticker]
     held = 0.0
     elsewhere = []
     for position in snapshot.positions:
@@ -1587,6 +1582,17 @@ def _preview_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         }
         for order in orders
     ]
+    return held, orders
+
+
+def _preview_ticker(ctx, broker, row: dict, result, snapshot) -> None:
+    """Position by conId, open orders, target, whatIf preview and verdict for one ticker."""
+    contracts_mod = ctx.mods.contracts
+    decision_mod = ctx.mods.decision
+    ticker = row["ticker"]
+    identity = result.identity
+    spec = contracts_mod.CONTRACT_TABLE[ticker]
+    held, orders = _position_and_orders(ctx, broker, row, identity, spec, snapshot)
     # The block is the operator's fixed share count from the table, never derived from a price.
     plan = decision_mod.plan_order(
         row["rating"], held_qty=held, open_orders=len(orders), block_qty=spec.block_qty
@@ -1717,6 +1723,160 @@ def _gateway_chain(ctx, rows: dict, remaining: list[str]) -> int | None:
             return EXIT_GATEWAY
         _resolve_and_preview(ctx, broker, rows, to_resolve)
     return None
+
+
+def _session(ctx):
+    """The one broker session of an ``execute`` run: opened on first use, closed with the run."""
+    if ctx.broker is not None:
+        return ctx.broker
+    adapter = ctx.broker_factory(ctx.host, ctx.port, ctx.logger)
+    ctx.progress["connecting"] = True
+    broker = ctx.stack.enter_context(adapter)
+    ctx.progress["connected"] = True
+    health = broker.health()
+    if not health.ok:
+        line = f'ibkr-state={health.state} code=- detail="{health.detail}"'
+        ctx.logger.error(line)
+        print(f"error: {line}", file=sys.stderr)
+        raise _ExecuteStop(EXIT_GATEWAY, health.state, health.detail)
+    ctx.broker = broker
+    return broker
+
+
+def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
+    """Target, whatIf with ``orderRef``, write-ahead ``intent`` and the placer's completion."""
+    contracts_mod = ctx.mods.contracts
+    decision_mod = ctx.mods.decision
+    guards = ctx.mods.guards
+    ledger_mod = ctx.mods.ledger
+    ticker = row["ticker"]
+    identity = result.identity
+    spec = contracts_mod.CONTRACT_TABLE[ticker]
+    held, orders = _position_and_orders(ctx, broker, row, identity, spec, snapshot)
+    plan = decision_mod.plan_order(
+        row["rating"], held_qty=held, open_orders=len(orders), block_qty=spec.block_qty
+    )
+    if plan.state != decision_mod.INTENT:
+        _finish_row(ctx, row, plan.state, plan.detail)
+        return
+    key = guards.decision_key(row["trade_date"], ticker)
+    preview = broker.preview_order(
+        con_id=identity.con_id,
+        symbol=spec.symbol,
+        sec_type=spec.sec_type,
+        currency=identity.currency,
+        primary_exchange=identity.primary_exchange,
+        action=plan.side,
+        quantity=plan.quantity,
+        order_ref=key,
+    )
+    verdict = decision_mod.judge_preview(
+        preview,
+        available_funds=snapshot.available_funds,
+        funds_currency=snapshot.available_funds_currency,
+        account_currency=snapshot.cash_currency,
+    )
+    row["intent"] = {
+        "side": plan.side,
+        "quantity": plan.quantity,
+        "order_type": "MKT",
+        "tif_sent": preview.sent_tif,
+    }
+    row["preview"] = {
+        "state": preview.state,
+        "init_margin_change": preview.init_margin_change,
+        "maint_margin_change": preview.maint_margin_change,
+        "commission": preview.commission,
+        "commission_currency": preview.commission_currency,
+        "warning_text": preview.warning_text,
+        "reject_reason": verdict.reject_reason,
+        "reject_source": verdict.reject_source,
+        "errors": [[code, text] for code, text in preview.errors],
+        "tif_sent": preview.sent_tif,
+        "effective_tif": preview.effective_tif,
+        "echo_order_ref": preview.echo_order_ref,
+        "echo_account": preview.echo_account,
+    }
+    row["budget"] = {
+        "available_funds": snapshot.available_funds,
+        "currency": snapshot.available_funds_currency,
+    }
+    if verdict.state != decision_mod.PREVIEW_OK:
+        _finish_row(ctx, row, verdict.state, verdict.detail)
+        return
+    intent = ledger_mod.intent_record(
+        decision_key=key,
+        ticker=ticker,
+        trade_date=row["trade_date"],
+        rating=row["rating"],
+        paper_log_sha=ctx.sha,
+        side=plan.side,
+        quantity=plan.quantity,
+        con_id=identity.con_id,
+        order_ref=key,
+        weekend_gap=bool(row["freshness"]["weekend_gap"]),
+    )
+    # Write-ahead: the line is on disk (fsync) before the placer may complete anything.
+    ctx.ledger.append(ledger_mod.INTENT, **intent)
+    ctx.logger.info(
+        "ibkr-state=EXECUTE_INTENT ticker=%s key=%s sha=%s side=%s quantity=%s",
+        ticker,
+        key,
+        ctx.sha,
+        plan.side,
+        plan.quantity,
+    )
+    state = ctx.placer.complete(ctx, intent)
+    _finish_row(ctx, row, state, f"{plan.side} {plan.quantity} {key}")
+
+
+def _execute_gateway_chain(ctx, rows: dict, remaining: list[str]) -> None:
+    """Resolution, position, target and whatIf for the tickers that need the gateway."""
+    contracts_mod = ctx.mods.contracts
+    decision_mod = ctx.mods.decision
+    ctx.stored = _load_stored_contracts(ctx)
+    to_resolve = []
+    for ticker in remaining:
+        if ticker in ctx.stored:
+            to_resolve.append(ticker)
+        else:
+            detail = "no stored contract; run resolve first (execute never learns one)"
+            _finish_row(ctx, rows[ticker], decision_mod.NOT_RESOLVED_YET, detail)
+    if not to_resolve:
+        return
+    broker = _session(ctx)
+    outcome = contracts_mod.resolve_all(
+        to_resolve,
+        contracts=ctx.stored,
+        broker=broker,
+        now_utc=ctx.now_utc,
+        logger=ctx.logger,
+        mode=contracts_mod.MODE_RUN,
+    )
+    for event in outcome.events:
+        ctx.logger.warning(
+            "ibkr-state=CONTRACT_EVENT_NOT_WRITTEN event=%s ticker=%s", event.event, event.ticker
+        )
+    snapshot = None
+    for result in outcome.results:
+        row = rows[result.ticker]
+        # A closed market is only noted here; the refusal outside the window comes with the
+        # size and session guards.
+        closed = result.state == contracts_mod.CLOSED
+        row["session"] = _session_info(result, closed)
+        if result.rejected:
+            _finish_row(ctx, row, result.state, result.detail)
+            continue
+        if decision_mod.calendar_conflict(ctx.now_utc, ctx.calendar, result.session_day):
+            detail = (
+                f"exchange calendar and liquid hours disagree about today "
+                f"(liquid hours: session day {result.session_day})"
+            )
+            _finish_row(ctx, row, decision_mod.CALENDAR_CONFLICT, detail)
+            continue
+        if snapshot is None:
+            snapshot = broker.positions()
+        _execute_ticker(ctx, broker, row, result, snapshot)
 
 
 def run_preview(

@@ -290,10 +290,11 @@ class TestWiring:
         assert executor.default_kill_file(env) == base / "KILL"
 
     def test_the_loaders_register_their_modules(self):
-        import sys
-
-        assert sys.modules["ibkr_guards"] is guards
-        assert sys.modules["ibkr_ledger"] is ledger_mod
+        # Other test files may have registered their own instance under the same name.
+        assert Path(guards.__file__).name == "ibkr_guards.py"
+        assert Path(ledger_mod.__file__).name == "ibkr_ledger.py"
+        assert executor._GUARDS_PATH.name == "ibkr_guards.py"
+        assert executor._LEDGER_PATH.name == "ibkr_ledger.py"
 
     def test_forced_dry_refuses_a_live_placer(self, tmp_path):
         """Negative control: a placer that is not dry ends the run before any file is touched."""
@@ -792,11 +793,7 @@ class TestSessions:
         paper = _paper(
             tmp_path,
             [("2026-10-09", "AAPL", "Buy"), ("2026-10-09", "MSFT", "Hold")],
-            {
-                "2026-10-09": _summary(
-                    "2026-10-09", ("AAPL", "ok", "Buy"), ("MSFT", "ok", "Hold")
-                )
-            },
+            {"2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Buy"), ("MSFT", "ok", "Hold"))},
         )
         fake = _fake_for(tickers=("AAPL", "MSFT"))
         code, records = _gateway_run(tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=paper)
@@ -805,6 +802,17 @@ class TestSessions:
         assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
         assert [r["ticker"] for r in _events(records, "skipped")] == ["MSFT"]
         _assert_nothing_sent(fake, 1)
+
+    def test_an_unreachable_gateway_is_exit_3_and_the_ledger_records_the_error(
+        self, tmp_path, loop
+    ):
+        fake = _fake_for()
+        fake.refuse = ConnectionRefusedError("refused")
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_GATEWAY
+        assert _events(records, "run_end")[-1]["outcome"] == "error"
+        assert _events(records, "intent") == []
+        assert "whatif" not in fake.calls
 
     def test_a_hold_only_run_opens_no_session(self, tmp_path):
         factory = _RecordingFactory()
