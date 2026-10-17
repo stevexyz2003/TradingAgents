@@ -2,7 +2,7 @@
 quick_task: 261017-r7x
 title: Rebase strand onto upstream v0.7.0
 date: 2026-10-17
-status: ready-for-promotion
+status: promoted
 provides: [branch rebase/upstream-v0.7.0 @4b245f7 (+ this summary), backup/pre-rebase-v0.7.0 @fecb76b]
 ---
 
@@ -117,3 +117,7 @@ nicht mehr auf `main` committet:
 Kein Push, kein Ref-Update auf `main` in diesem Task. Geschrieben wurden im
 Haupt-Repo nur die zwei Refs `backup/pre-rebase-v0.7.0` und
 `rebase/upstream-v0.7.0` sowie der Worktree-Eintrag.
+
+## Promotion (2026-10-17, vom Operator freigegeben)
+
+Nach dem Abschluss von Phase 5 (`5ca0b09`, Verifikation `passed`) sind alle 75 `main`-Commits seit `fecb76b` in zwei Schritten nachgezogen (60, dann 15; 9 Merges, alle mit 0 Auflösungs-Hunks; keiner berührt eine Upstream-Datei). Gates auf dem Endstand: 2606 passed, dieselben 5 Upstream-/Windows-Fehlschläge wie pures v0.7.0, ruff sauber. `main` wurde nur umgesetzt, wenn er noch genau auf `5ca0b09` stand (Compare-and-Swap), danach `git push --force-with-lease` nach `fork/main`.
