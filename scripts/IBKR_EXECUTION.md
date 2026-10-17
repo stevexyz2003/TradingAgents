@@ -136,12 +136,16 @@ Identical to the table in the docstring of `scripts/ibkr_executor.py`; a test
 | 1 | `EXIT_CONFIG` | configuration error - nothing was done; also a `summary.json` with `schema_version` != 1 or a broken contract |
 | 2 | `EXIT_PRECONDITION` | precondition not met, including Hold (D-16): a ticker was rejected by resolve or preview, the paper-log is unavailable, contracts.json is missing, or --init found an existing file |
 | 3 | `EXIT_GATEWAY` | gateway/session not reachable |
-| 4 | `EXIT_KILL_SWITCH` | kill switch active or release missing (reserved for later phases) |
+| 4 | `EXIT_KILL_SWITCH` | kill switch active (KILL present), or release missing, unreadable, invalid, expired, more than 90 days ahead or for another account; only a present KILL file triggers a global cancel |
 | 5 | `EXIT_REJECTED` | whatIf preview rejected: empty or incomplete, rejected with a reason, halted (154), over budget, tif overridden or unconfirmed, read-only gateway, currency mismatch |
-| 6 | `EXIT_RECONCILE` | reconciliation unresolved, run aborted (reserved for later phases) |
-| 7 | `EXIT_LOCKED` | lock not acquired (second instance), clean exit (reserved for later phases) |
+| 6 | `EXIT_RECONCILE` | ledger corrupt or a ledger entry could not be reconciled against open orders, completed orders and executions; no new order |
+| 7 | `EXIT_LOCKED` | run lock not acquired (another run holds `ledger.jsonl.lock`) or the lock attempt failed; nothing was done |
 | 8 | `EXIT_ACCOUNT_GUARD` | account guard violated (managedAccounts != ["DUQ634065"]) |
 | 20 | `EXIT_NO_CREDENTIALS` | IBKR settings missing or unreadable - same meaning as `EXIT_NO_CREDENTIALS` in `daily_paper_run.py` |
+
+Exits 4, 6 and 7 are active since phase 5 (`execute`). When several things go
+wrong in one run, the run exit is the worst by this rank: `4 > 7 > 6 > 8 > 3 >
+1 > 5 > 2 > 0`.
 
 Exit 2 is active since phase 3 (`resolve`): a rejected ticker (any result
 other than `ok` or `closed`), a missing `contracts.json` and `--init` on an
@@ -465,6 +469,199 @@ and Sell = 0. `block_qty` sits per ticker in the contract table
 (`scripts/ibkr_contracts.py`): 1 share per block for AAPL, MSFT and NVDA. It is
 the operator's fixed choice and never derived from a price; changing it is a
 commit.
+
+## RELEASE and KILL
+
+Two plain files in the state folder (`%LOCALAPPDATA%\TradingEngineX\ibkr\`, never
+inside a git tree) decide whether `execute` may go on. Both are read first in
+every run, and again before every whatIf and before every `intent`.
+
+| File | Path | Meaning |
+|---|---|---|
+| `RELEASE` | `...\ibkr\RELEASE` | the operator's permission: account and a "valid until" date |
+| `KILL` | `...\ibkr\KILL` | the stop: any file or folder of that name |
+
+`RELEASE` is UTF-8 JSON without a byte-order mark with exactly two keys:
+
+```json
+{"account": "DUQ634065", "valid_until": "YYYY-MM-DD"}
+```
+
+The day in `valid_until` counts in full, in UTC. The date may lie at most 90 days
+ahead (D-20), and `account` must be the paper account (D-02). Anything else is
+exit 4 with its own state: `release-missing`, `release-unreadable`,
+`release-invalid` (not UTF-8, not JSON, wrong keys), `release-expired`,
+`release-account-mismatch`.
+
+PowerShell one-liners (write the file as UTF-8 without a BOM):
+
+```powershell
+# create the release, valid for 30 days (adjust the date by hand if you prefer)
+$d = Join-Path $env:LOCALAPPDATA 'TradingEngineX\ibkr'; New-Item -ItemType Directory -Force $d | Out-Null; [IO.File]::WriteAllText("$d\RELEASE", '{"account": "DUQ634065", "valid_until": "' + (Get-Date).ToUniversalTime().AddDays(30).ToString('yyyy-MM-dd') + '"}')
+
+# stop everything: create KILL
+New-Item -ItemType File -Force (Join-Path $env:LOCALAPPDATA 'TradingEngineX\ibkr\KILL')
+
+# lift the stop: remove KILL
+Remove-Item (Join-Path $env:LOCALAPPDATA 'TradingEngineX\ibkr\KILL')
+```
+
+Do not write the release with `echo ... > RELEASE` or `Set-Content`: Windows
+PowerShell 5.1 writes UTF-16 with a BOM there, and the executor rejects that as
+`release-invalid` (not UTF-8). That is safe, but the release never works.
+
+What the switch does:
+
+* A present `KILL` stops the run with exit 4 and is the only thing that sends a
+  global cancel. The cancel (D-17) takes back **all** open orders of the account,
+  including orders you placed by hand in TWS. It is sent once per run, the open
+  orders are then re-read for up to 10 seconds, and the `kill_cancel` ledger event
+  records `sent` and `remaining`.
+* An unreadable switch state (`kill-unreadable`, or a `RELEASE` that cannot be
+  read) blocks trading with exit 4 but cancels nothing.
+* The cancel only works when the gateway's "Read-Only API" switch is off (see
+  "Gateway Read-Only switch"); with it on, the cancel is refused and `remaining`
+  stays above zero.
+* A kill that shows up between two orders stops the second one (no `intent`).
+* Known limit: if a run already stopped on a release failure and `KILL` appears
+  only afterwards, that run does not cancel; the next run does.
+
+## execute
+
+```
+ibkr_executor.py execute AAPL [MSFT ...] [--contracts PATH] [--log-file PATH] [--env-file PATH]
+```
+
+At least one ticker is required (no default list). In phase 5 the run is forced
+dry: no option lifts that (phase 6 removes only the force). It goes through the
+whole chain, writes every decision that survives as an `intent` and completes it
+with `dry_complete`; no order leaves the process. Exit 0 with a `dry_complete`
+means "this order would have been sent".
+
+Order of the chain, per run and per ticker:
+
+1. run lock (`ledger.jsonl.lock`, exit 7 if held)
+2. switch preflight: `RELEASE` and `KILL` (exit 4). This comes before the
+   reconciliation on purpose (D-21), so an active kill is not hidden behind exit 6.
+3. startup reconciliation of open ledger entries (exit 6 if unresolved)
+4. paper-log fetch, preconditions, freshness
+5. decision key check (`already_attempted`, `decision_changed`), after freshness
+   because the trade date is only known from the local chain
+6. contract resolution and tradability
+7. position and the source comparisons (they need the resolved `conId`)
+8. target calculation
+9. size cap
+10. session window
+11. switch check, whatIf with `orderRef`, switch check
+12. `intent` (write-ahead, flushed to disk), then the dry completion
+
+Console and log lines start with `execute:` and `ibkr-state=EXECUTE...`. The
+ledger is the record of the run; the log is the narrative.
+
+**Size cap.** `MAX_QTY_PER_ORDER = 2`. A planned order above the cap is rejected,
+never trimmed: if you hold 5 shares by hand and the rating is Sell, the plan is
+`SELL 5`, which ends as `size_cap` (exit 5) and not as a smaller order.
+
+**Session window.** The regular session with a buffer of `SESSION_BUFFER_MINUTES`
+at both ends; half days follow `liquidHours` of the contract. Outside the window the
+ticker is skipped as `outside_session` (exit 2) before the whatIf.
+
+**Second sources (D-22).** Every fact an order depends on is checked against a
+second source. A disagreement stops with its own state (D-11): the account stops the
+whole run (exit 8), the others stop only that ticker.
+
+| Fact | First source | Second source |
+|---|---|---|
+| account | paper guard (`managedAccounts`) | `RELEASE.account`; the echo on the whatIf is optional |
+| position | broker positions | fills in the ledger (D-18, narrow rule: a conflict only counts when the ledger holds own fills) |
+| already executed | ledger | `orderRef` in open orders, completed orders and executions |
+| tradable now | exchange calendar | `liquidHours`; the order status 399 joins in phase 6 |
+
+## Ledger and reconciliation
+
+Files in the state folder: `ledger-dryrun.jsonl` (what phase 5 writes),
+`ledger.jsonl` (from phase 6; a dry run never touches it) and
+`ledger.jsonl.lock` (the run lock, always this name, also in dry mode).
+
+The ledger is JSONL, one line per event, appended and never rewritten. Events:
+`run_start`, `switch_check`, `reconcile`, `intent`, `dry_complete`, `placed`,
+`filled`, `partial`, `rejected`, `skipped` (always with a `reason`), `kill_cancel`,
+`run_end`. An attempt is the `intent`: per decision key (`trade_date|ticker`) there
+is at most one, and the first version wins. A second run of the same key is
+`already_attempted`; if the rating changed since, it is `decision_changed`. A
+`skipped` before the intent does not use the key up.
+
+Reasons of a `skipped` ticker:
+
+| `reason` | Comes from | Exit |
+|---|---|---|
+| `hold`, `review`, `tolerance` | decision states of phase 4 | 2 / 2 / 0 |
+| `stale` | decision older or newer than the execution session | 2 |
+| `not_tradable` | resolution, drift, `liquidHours` unknown | 2 |
+| `outside_session` | session window | 2 |
+| `size_cap` | planned quantity above `MAX_QTY_PER_ORDER` | 5 |
+| `kill_switch` | any `release-*` or `kill-*` state | 4 |
+| `source_conflict` | position, already-executed or calendar sources disagree | 2 |
+| `already_attempted` | the key has an `intent` already | 2 |
+| `decision_changed` | the key has an `intent` for another rating | 2 |
+| `foreign_open_order` | an open order not from this ledger | 2 |
+
+`weekend_gap` is not a reason: it is a flag (with `gap_days`) on the entry when a
+calendar gap over a weekend or holiday separates the decision from the session; the
+decision is still fresh.
+
+**Torn tail.** A crash can cut the last line. That line is tolerated; the first
+append after it carries `seals_torn_line` with the number of the cut line. A broken
+line directly followed by its seal is fine anywhere; every other defect in the
+middle of the file is exit 6 (`ledger-corrupt`).
+
+**Reconciliation.** Before any new order, each open entry (an `intent` or `placed`
+without an end) is resolved against open orders, completed orders and executions by
+its `orderRef`. A clear case writes `placed`, `filled`, `partial` or `rejected`
+with `source: reconcile`. A crash after the `intent` that left no trace at the
+broker is not "already attempted": it is exit 6 on the next run (`no_trace`),
+as are a double hit (`collision`) and contradicting sources (`contradiction`).
+
+**Resolving exit 6 (`reconcile-unresolved`, D-19).**
+
+1. Read the console message: it names the key and what each source found.
+2. Look at the three sources yourself:
+   `.venv\Scripts\python.exe scripts\smoke\ibkr_order_probe.py --history`
+   prints open orders, completed orders and executions as JSON. Check TWS too.
+3. In dry mode, once you know the dry intent can be discarded, rename
+   `ledger-dryrun.jsonl` (for instance to `ledger-dryrun.jsonl.bak`). Never edit or
+   delete lines inside it.
+4. A `--resolve` flag that records a `resolved` event comes with phase 6.
+
+### States (phase 5)
+
+| State | Exit | Meaning |
+|---|---|---|
+| `dry-complete` | 0 | the dry run reached its end for this ticker; nothing was sent |
+| `kill-absent` | 0 | no KILL file |
+| `release-ok` | 0 | the release file is valid |
+| `not-dry` | 1 | the placer is not dry; phase 5 refuses to run |
+| `state-in-git-tree` | 1 | a state path lies inside a git work tree; refused |
+| `already-attempted` | 2 | the decision key has an `intent` already |
+| `decision-changed` | 2 | the decision key has an `intent` for another rating |
+| `outside-session` | 2 | outside the regular session with its buffer |
+| `source-conflict` | 2 | two sources disagree on position, already-executed or tradability; this ticker stops |
+| `kill-active` | 4 | a KILL file exists; global cancel |
+| `kill-unreadable` | 4 | the state of KILL cannot be read; trading stops, nothing is cancelled |
+| `release-account-mismatch` | 4 | the release is for another account |
+| `release-expired` | 4 | `valid_until` lies in the past (UTC) |
+| `release-invalid` | 4 | not UTF-8 JSON, wrong keys or a bad date |
+| `release-missing` | 4 | no RELEASE file |
+| `release-unreadable` | 4 | the RELEASE file cannot be read |
+| `size-cap` | 5 | planned quantity above `MAX_QTY_PER_ORDER`; rejected, never trimmed |
+| `ledger-corrupt` | 6 | the ledger has a defect that is not a torn tail |
+| `reconcile-unresolved` | 6 | an open ledger entry cannot be resolved against the broker |
+| `lock-error` | 7 | the lock attempt itself failed |
+| `lock-held` | 7 | another run holds the lock |
+| `account-conflict` | 8 | account sources disagree; the whole run stops |
+
+Source: `EXIT_BY_STATE` in `scripts/ibkr_guards.py`; a test keeps the table in
+step with it. The run exit is the worst of these by the rank under "Exit codes".
 
 ## Commands
 
