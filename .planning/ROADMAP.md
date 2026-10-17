@@ -254,7 +254,7 @@ Plans:
 - Kein Branch, kein Heartbeat, kein Scheduler.
 - Keine Backup-Erweiterung — die kommt mit Phase 7, wenn der Ledger seine endgültige Form hat.
 
-**Plans:** 5/10 plans executed
+**Plans:** 6/10 plans executed
 
 Plans:
 **Wave 1**
@@ -270,7 +270,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 05-05-PLAN.md — Lauf-Lock (Exit 7), Schalter-Preflight und Prüfung vor jeder Order (Exit 4), Kill-Storno; G3 Kill (W3)
+- [x] 05-05-PLAN.md — Lauf-Lock (Exit 7), Schalter-Preflight und Prüfung vor jeder Order (Exit 4), Kill-Storno; G3 Kill (W3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
