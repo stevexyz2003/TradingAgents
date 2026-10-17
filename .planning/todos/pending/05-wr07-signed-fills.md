@@ -36,3 +36,9 @@ Ledger leer bleibt. Mit dem Placer von Phase 6 kommen echte Fills und Verkäufe.
 
 Eingangsaufgabe von Phase 6, vor der ersten echten Order (zusammen mit der Schärfung von
 D-18 für Verkäufe und Fremdbestände).
+
+## Mitgenommen aus WR-05 (2026-10-17)
+
+Das Sitzungsfenster wird seit `39c4eac` direkt vor dem `intent` mit `ctx.clock()` neu
+geprüft. Die **Frische** (`stale-decision`) wird dagegen weiter mit dem Startzeitpunkt des Laufs
+bewertet. Mit dem Placer in Phase 6 ebenfalls direkt vor dem `intent` neu prüfen.
