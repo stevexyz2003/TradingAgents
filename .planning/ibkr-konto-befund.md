@@ -483,3 +483,16 @@ sind `ledger-dryrun.jsonl` (die drei Zeilen oben) und `ledger.jsonl.lock` (die L
 - **Keine Abweichungen** von den Annahmen, also keine Lücke für einen Gap-Closure-Plan.
   Zur Einordnung: Gemessen wurde über TWS statt Gateway (gleiche API, Serverversion 178).
   Am Samstag blieb eine DAY-Limit-Order außerhalb der Handelszeit als `PreSubmitted` offen.
+
+### Abnahme (Task 3) — 2026-10-17, 12:01 UTC
+
+Der Operator konnte TWS nicht mehr einsehen, weil das wieder gestartete IB Gateway die
+TWS-Sitzung getrennt hatte. Die Abnahme lief deshalb serverseitig über das Gateway auf
+`127.0.0.1:7497`:
+
+- `ibkr_order_probe.py --history`: `open` ist leer, `completed` enthält `perm_id 1440521754`
+  mit `status Cancelled` und `filled 0.0`. Das Storno ist damit serverseitig bestätigt.
+- `ibkr_order_probe.py --whatif AAPL --order-ref "2026-10-09|AAPL"`: `state OK`, keine
+  Fehler. Daraus folgt: „Read-Only API“ ist im Gateway **aus** (bei eingeschaltetem
+  Schalter käme `READ_ONLY_API` mit Fehler 321, siehe Phase 4, D-14). Der Schalter
+  bleibt aus, weil Phase 6 senden wird.
