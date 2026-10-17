@@ -412,7 +412,7 @@ class TestDryrunLedger:
         )
         factory = _RecordingFactory()
         code, _records = _run_execute(
-            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path), release=False
+            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path)
         )
         assert code == executor.EXIT_RECONCILE
         assert "ibkr-state=LEDGER_CORRUPT" in _log_text(tmp_path)
@@ -425,7 +425,7 @@ class TestDryrunLedger:
         path.write_text(json.dumps(line) + "\n", encoding="utf-8")
         factory = _RecordingFactory()
         code, _records = _run_execute(
-            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path), release=False
+            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path)
         )
         assert code == executor.EXIT_RECONCILE
         assert "ibkr-state=LEDGER_CORRUPT" in _log_text(tmp_path)
@@ -587,6 +587,8 @@ def _gateway_run(
     clock=OPEN_NOW,
     calendar=None,
     placer=None,
+    release=True,
+    kill=False,
 ):
     """Run ``execute`` against a fake gateway with a stored contract for each ticker."""
     paper = _buy_paper(tmp_path, rating) if paper is None else paper
@@ -600,6 +602,8 @@ def _gateway_run(
         calendar=calendar,
         contracts=contracts,
         placer=placer,
+        release=release,
+        kill=kill,
     )
 
 
@@ -632,7 +636,13 @@ class TestOrderRefAndIntent:
 
     def test_the_run_is_framed_by_run_start_and_run_end(self, tmp_path, loop):
         _code, records = _gateway_run(tmp_path, loop, _fake_for())
-        assert [r["event"] for r in records] == ["run_start", "intent", "dry_complete", "run_end"]
+        assert [r["event"] for r in records] == [
+            "run_start",
+            "switch_check",
+            "intent",
+            "dry_complete",
+            "run_end",
+        ]
         assert records[-1]["exit"] == executor.EXIT_OK
 
     def test_write_ahead_intent_before_placer_complete(self, tmp_path, loop):
@@ -646,7 +656,7 @@ class TestOrderRefAndIntent:
         code, _records = _gateway_run(tmp_path, loop, _fake_for(), placer=ReadingPlacer())
         assert code == executor.EXIT_OK
         (on_disk,) = seen
-        assert [r["event"] for r in on_disk] == ["run_start", "intent"]
+        assert [r["event"] for r in on_disk] == ["run_start", "switch_check", "intent"]
         assert on_disk[-1]["decision_key"] == KEY
 
     def test_write_ahead_negative_control_a_failing_placer_leaves_the_intent_open(
@@ -826,4 +836,259 @@ class TestSessions:
         source = _SCRIPT.read_text(encoding="utf-8")
         for name in ("placeOrder", "cancelOrder", "whatIfOrder", "reqMktData", "reqTickers"):
             assert name not in source
-        assert "cancel_all(" not in source
+
+
+# --- the run lock, the release and kill files, fail closed (05-05, Task 1) -----------------------
+
+
+def _write_release(clock=OPEN_NOW, *, account="DUQ634065", days=30, raw=None):
+    path = executor.default_release_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if raw is not None:
+        path.write_bytes(raw)
+        return
+    until = (clock.date() + timedelta(days=days)).isoformat()
+    path.write_text(json.dumps({"account": account, "valid_until": until}), "utf-8")
+
+
+def _kill_stat_fails(monkeypatch):
+    """``os.stat`` raises for the KILL path only; every other path goes to the original."""
+    import os
+
+    real = os.stat
+
+    def stat(path, *args, **kwargs):
+        if isinstance(path, str | os.PathLike) and os.fspath(path).endswith("KILL"):
+            raise PermissionError("denied")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+
+
+def _setup_release_missing(monkeypatch):
+    return "release-missing"
+
+
+def _setup_release_unreadable(monkeypatch):
+    executor.default_release_file().mkdir(parents=True)
+    return "release-unreadable"
+
+
+def _setup_release_utf16(monkeypatch):
+    text = json.dumps({"account": "DUQ634065", "valid_until": "2026-11-01"})
+    _write_release(raw=text.encode("utf-16"))
+    return "release-invalid"
+
+
+def _setup_release_expired(monkeypatch):
+    _write_release(days=-1)
+    return "release-expired"
+
+
+def _setup_release_too_long(monkeypatch):
+    _write_release(days=91)
+    return "release-invalid"
+
+
+def _setup_release_wrong_account(monkeypatch):
+    _write_release(account="DUX000000")
+    return "release-account-mismatch"
+
+
+def _setup_kill_unreadable(monkeypatch):
+    _write_release()
+    _kill_stat_fails(monkeypatch)
+    return "kill-unreadable"
+
+
+_BLOCKED_SETUPS = [
+    _setup_release_missing,
+    _setup_release_unreadable,
+    _setup_release_utf16,
+    _setup_release_expired,
+    _setup_release_too_long,
+    _setup_release_wrong_account,
+    _setup_kill_unreadable,
+]
+
+
+class TestRunLock:
+    def test_lock_held_second_run_exit_seven(self, tmp_path):
+        from tradingagents.dataflows import files
+
+        path = executor.default_ledger_file()
+        path.parent.mkdir(parents=True)
+        factory = _RecordingFactory()
+        pl_factory = _PaperLogFactory(_buy_paper(tmp_path))
+        with files.locked(path, wait=False) as held:
+            assert held
+            code, records = _run_execute(tmp_path, factory, ["AAPL"], paper_log=pl_factory)
+        assert code == executor.EXIT_LOCKED
+        assert "ibkr-state=LOCK_HELD" in _log_text(tmp_path)
+        assert records == []
+        assert not executor.default_dryrun_ledger_file().exists()
+        assert factory.calls == []
+        assert pl_factory.calls == []
+
+    def test_lock_oserror_is_exit_seven_without_traceback(self, tmp_path, monkeypatch, capsys):
+        import contextlib
+
+        @contextlib.contextmanager
+        def broken(path, wait=True):
+            raise PermissionError("denied")
+            yield  # pragma: no cover
+
+        monkeypatch.setattr(executor, "locked", broken)
+        factory = _RecordingFactory()
+        code, records = _run_execute(tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path))
+        assert code == executor.EXIT_LOCKED
+        assert "ibkr-state=LOCK_ERROR" in _log_text(tmp_path)
+        assert "Traceback" not in capsys.readouterr().err
+        assert records == []
+        assert factory.calls == []
+
+    def test_lock_oserror_inside_the_run_is_not_exit_seven(self, tmp_path, loop):
+        class DiskPlacer:
+            dry = True
+
+            def complete(self, ctx, intent):
+                raise OSError("disk full")
+
+        code, records = _gateway_run(tmp_path, loop, _fake_for(), placer=DiskPlacer())
+        assert code != executor.EXIT_LOCKED
+        assert code != executor.EXIT_OK
+        end = _events(records, "run_end")[-1]
+        assert end["outcome"] == "error"
+        assert end["error"] == "OSError"
+
+    def test_lock_sidecar_lives_in_the_state_dir(self, tmp_path):
+        _run_execute(
+            tmp_path,
+            _RecordingFactory(),
+            ["AAPL"],
+            paper_log=_buy_paper(tmp_path, rating="Hold"),
+        )
+        state_dir = tmp_path / "TradingEngineX" / "ibkr"
+        assert (state_dir / "ledger.jsonl.lock").exists()
+        assert not (state_dir / "ledger.jsonl").exists()
+        assert list(executor.REPO_ROOT.glob("ledger*.lock")) == []
+
+
+class TestFailClosed:
+    @pytest.mark.parametrize(
+        "setup", _BLOCKED_SETUPS, ids=lambda f: f.__name__.removeprefix("_setup_")
+    )
+    def test_fail_closed_matrix(self, tmp_path, monkeypatch, capsys, setup):
+        state = setup(monkeypatch)
+        factory = _RecordingFactory()
+        pl_factory = _PaperLogFactory(_buy_paper(tmp_path))
+        code, records = _run_execute(
+            tmp_path, factory, ["AAPL"], paper_log=pl_factory, release=False
+        )
+        assert code == executor.EXIT_KILL_SWITCH
+        assert factory.calls == []
+        assert pl_factory.calls == []
+        assert _events(records, "intent") == []
+        start = _events(records, "run_start")[0]
+        assert "release" in start
+        assert "kill" in start
+        end = _events(records, "run_end")[-1]
+        assert end["exit"] == 4
+        assert end["state"] == state
+        assert f"execute: {state} (" in capsys.readouterr().out
+        assert f"ibkr-state={state.upper().replace('-', '_')}" in _log_text(tmp_path)
+
+    def test_switch_state_logged_on_every_run(self, tmp_path, loop):
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code == executor.EXIT_OK
+        start = _events(records, "run_start")[0]
+        assert start["release"] == "release-ok"
+        assert start["kill"] == "kill-absent"
+        assert start["valid_until"] == (OPEN_NOW.date() + timedelta(days=30)).isoformat()
+        (check,) = _events(records, "switch_check")
+        assert check["release"] == "release-ok"
+        assert check["kill"] == "kill-absent"
+        assert check["decision_key"] == KEY
+        assert check["seq"] < _events(records, "intent")[0]["seq"]
+
+    def test_preflight_switch_state_is_logged_when_blocked(self, tmp_path):
+        code, records = _run_execute(
+            tmp_path,
+            _RecordingFactory(),
+            ["AAPL"],
+            paper_log=_buy_paper(tmp_path),
+            release=False,
+        )
+        assert code == executor.EXIT_KILL_SWITCH
+        start = _events(records, "run_start")[0]
+        assert start["release"] == "release-missing"
+        assert start["kill"] == "kill-absent"
+
+    def test_switch_checked_before_whatif(self, tmp_path, loop):
+        fake = _fake_for()
+        original = fake.reqPositionsAsync
+
+        async def kill_then_read():
+            executor.default_kill_file().write_text("stop", encoding="utf-8")
+            return await original()
+
+        fake.reqPositionsAsync = kill_then_read
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert "placeOrder(whatIf)" not in fake.calls
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "kill_switch"
+        assert _events(records, "intent") == []
+
+    def test_fail_closed_blocked_switches_beat_corrupt_ledger(self, tmp_path):
+        path = executor.default_dryrun_ledger_file()
+        path.parent.mkdir(parents=True)
+        good = {"v": 1, "seq": 1, "mode": "dryrun", "event": "run_start"}
+        path.write_text(
+            json.dumps(good) + "\nnot json\n" + json.dumps({**good, "seq": 3}) + "\n",
+            encoding="utf-8",
+        )
+        before = path.read_bytes()
+        factory = _RecordingFactory()
+        code, _records = _run_execute(
+            tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path), release=False
+        )
+        assert code == executor.EXIT_KILL_SWITCH
+        text = _log_text(tmp_path)
+        assert "ibkr-state=LEDGER_CORRUPT" in text
+        assert "ibkr-state=RELEASE_MISSING" in text
+        assert factory.calls == []
+        assert path.read_bytes() == before
+
+    def test_blocked_by_kill_with_a_corrupt_ledger_still_cancels_once(self, tmp_path, loop):
+        path = executor.default_dryrun_ledger_file()
+        path.parent.mkdir(parents=True)
+        good = {"v": 1, "seq": 1, "mode": "dryrun", "event": "run_start"}
+        path.write_text(
+            json.dumps(good) + "\nnot json\n" + json.dumps({**good, "seq": 3}) + "\n",
+            encoding="utf-8",
+        )
+        before = path.read_bytes()
+        fake = _fake_for()
+        code, _records = _gateway_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert fake.calls.count("reqGlobalCancel") == 1
+        assert path.read_bytes() == before
+
+    def test_negative_control_switches_bypassed_would_reach_intent(
+        self, tmp_path, loop, monkeypatch
+    ):
+        def always_open(state_dir, *, today_utc, expected_account):
+            return guards.Switches(
+                release=guards.ReleaseState(guards.RELEASE_OK, "", today_utc, expected_account),
+                kill=guards.KillState(guards.KILL_ABSENT),
+            )
+
+        # The real chain: KILL present, no intent.
+        _code, real = _gateway_run(tmp_path, loop, _fake_for(), kill=True)
+        assert _events(real, "intent") == []
+        # The bypassed chain: the same run reaches the intent.
+        monkeypatch.setattr(guards, "check_switches", always_open)
+        code, records = _gateway_run(tmp_path, loop, _fake_for(), kill=True)
+        assert code == executor.EXIT_OK
+        assert len(_events(records, "intent")) == 1
