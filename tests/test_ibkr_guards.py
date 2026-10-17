@@ -457,6 +457,18 @@ def test_source_conflict_account_release_mismatch():
     assert reason and "DUX000000" in reason
 
 
+@pytest.mark.parametrize("echo", [None, "", "2026-10-09|AAPL"])
+def test_source_conflict_order_ref_missing_or_same_echo_is_clean(echo):
+    assert g.order_ref_conflict(decision_key="2026-10-09|AAPL", echo_order_ref=echo) is None
+
+
+@pytest.mark.parametrize("echo", ["2026-10-09_AAPL", "2026-10-09|AAP", "2026-10-09|aapl"])
+def test_source_conflict_order_ref_echo_mismatch(echo):
+    """WR-04: an echo that differs from the sent key stops the ticker."""
+    reason = g.order_ref_conflict(decision_key="2026-10-09|AAPL", echo_order_ref=echo)
+    assert reason and repr(echo) in reason
+
+
 @pytest.mark.parametrize("ledger,broker", [(0, 5), (2, 2), (2, 3)])
 def test_source_conflict_position_clean(ledger, broker):
     assert g.position_conflict(ledger_filled_qty=ledger, broker_held=broker) is None

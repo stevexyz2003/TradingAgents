@@ -370,6 +370,18 @@ def account_conflict(
     return None
 
 
+def order_ref_conflict(*, decision_key: str, echo_order_ref: str | None) -> str | None:
+    """A reason if the gateway echoed another ``orderRef`` than the one sent (WR-04).
+
+    The whole reconciliation finds an order by its exact ``orderRef``; a gateway that cuts
+    or changes it would leave every placed order without a trace. A missing echo is
+    allowed (D-22).
+    """
+    if echo_order_ref and echo_order_ref != decision_key:
+        return f"orderRef echo {echo_order_ref!r} differs from the key {decision_key!r}"
+    return None
+
+
 def position_conflict(*, ledger_filled_qty: float, broker_held: float) -> str | None:
     """A reason only if the ledger knows own fills and the broker holds less (D-18, narrow rule).
 

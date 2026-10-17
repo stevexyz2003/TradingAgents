@@ -270,6 +270,7 @@ class FakeIB:
         executions=None,
         whatif_echo_account=None,
         global_cancel_clears=True,
+        whatif_echo_order_ref=None,
     ):
         self.accounts = list(accounts)
         self.refuse = refuse
@@ -293,6 +294,8 @@ class FakeIB:
         self.executions = [] if executions is None else executions
         #: account the whatIf echo carries (None = the account that was sent)
         self.whatif_echo_account = whatif_echo_account
+        #: orderRef the whatIf echo carries (None = the orderRef that was sent)
+        self.whatif_echo_order_ref = whatif_echo_order_ref
         #: whether reqGlobalCancel empties the open orders (False = the cancel has no effect)
         self.global_cancel_clears = global_cancel_clears
         self.probe = probe
@@ -444,6 +447,8 @@ class FakeIB:
             echo.tif = self.whatif_echo_tif
             if self.whatif_echo_account is not None:
                 echo.account = self.whatif_echo_account
+            if self.whatif_echo_order_ref is not None:
+                echo.orderRef = self.whatif_echo_order_ref
             self.wrapper.openOrder(req_id, contract, echo, answer)
         return answer
 

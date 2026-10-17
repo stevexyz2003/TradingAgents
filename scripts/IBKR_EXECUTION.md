@@ -587,6 +587,7 @@ whole run (exit 8), the others stop only that ticker.
 | position | broker positions | fills in the ledger (D-18, narrow rule: a conflict only counts when the ledger holds own fills) |
 | already executed | ledger | `orderRef` in open orders, completed orders and executions |
 | tradable now | exchange calendar | `liquidHours`; the order status 399 joins in phase 6 |
+| order reference | the `orderRef` sent (the decision key) | the `orderRef` echo on the whatIf; optional, but a different one stops the ticker as `source-conflict` before any `intent` |
 
 ## Ledger and reconciliation
 
@@ -612,7 +613,7 @@ Reasons of a `skipped` ticker:
 | `outside_session` | session window | 2 |
 | `size_cap` | planned quantity above `MAX_QTY_PER_ORDER` | 5 |
 | `kill_switch` | any `release-*` or `kill-*` state | 4 |
-| `source_conflict` | position, already-executed or calendar sources disagree | 2 |
+| `source_conflict` | position, already-executed, calendar or `orderRef` echo sources disagree | 2 |
 | `already_attempted` | the key has an `intent` already | 2 |
 | `decision_changed` | the key has an `intent` for another rating | 2 |
 | `foreign_open_order` | an open order not from this ledger | 2 |
@@ -666,7 +667,7 @@ collision or contradiction stays exit 6 in both ledgers.
 | `decision-changed` | 2 | the decision key has an `intent` for another rating |
 | `invalid-decision-key` | 2 | no decision key can be built for the ticker (for instance `^GSPC`); only this ticker stops |
 | `outside-session` | 2 | outside the regular session with its buffer |
-| `source-conflict` | 2 | two sources disagree on position, already-executed or tradability; this ticker stops |
+| `source-conflict` | 2 | two sources disagree on position, already-executed, tradability or the `orderRef` echo; this ticker stops |
 | `kill-active` | 4 | a KILL file exists (`KILL` or `KILL.*`, any case); global cancel |
 | `kill-unreadable` | 4 | the state of KILL cannot be read (or the state folder cannot be listed); trading stops, nothing is cancelled |
 | `release-account-mismatch` | 4 | the release is for another account |

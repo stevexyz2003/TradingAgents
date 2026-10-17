@@ -2113,6 +2113,28 @@ class TestSourceConflict:
         assert code == executor.EXIT_OK
         assert _intent_tickers(records) == ["AAPL"]
 
+    def test_source_conflict_order_ref_echo_stops_only_that_ticker(self, tmp_path, loop):
+        """WR-04: a gateway that changes the orderRef would hide the order from reconciliation."""
+        fake = _fake_for(("AAPL", "MSFT"), whatif_echo_order_ref="2026-10-09_AAPL")
+        code, records = _two_ticker_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_PRECONDITION
+        assert _events(records, "intent") == []
+        skipped = _events(records, "skipped")
+        assert [r["ticker"] for r in skipped] == ["AAPL", "MSFT"]
+        assert {r["state"] for r in skipped} == {"source-conflict"}
+        assert {r["reason"] for r in skipped} == {"source_conflict"}
+        assert "orderRef echo '2026-10-09_AAPL' differs" in skipped[0]["detail"]
+        assert "ibkr-state=ORDER_REF_CONFLICT ticker=AAPL" in _log_text(tmp_path)
+
+    @pytest.mark.parametrize("echo", [None, ""], ids=["same", "empty"])
+    def test_source_conflict_order_ref_echo_same_or_empty_is_not_a_conflict(
+        self, tmp_path, loop, echo
+    ):
+        fake = _fake_for(whatif_echo_order_ref=echo)
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        assert _intent_tickers(records) == ["AAPL"]
+
     def test_source_conflict_position_only_that_ticker(self, tmp_path, loop):
         """D-18: the ledger holds own fills the broker does not show."""
         filled = {"decision_key": PREV_KEY, "ticker": "AAPL", "con_id": _CON, "filled_qty": 2}

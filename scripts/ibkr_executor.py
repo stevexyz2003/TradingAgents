@@ -2179,6 +2179,13 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         ctx.logger.warning('ibkr-state=ACCOUNT_CONFLICT ticker=%s detail="%s"', ticker, reason)
         print(f"execute: {guards.ACCOUNT_CONFLICT} ({reason})")
         raise _ExecuteStop(EXIT_ACCOUNT_GUARD, guards.ACCOUNT_CONFLICT, reason)
+    # The orderRef echo (optional, D-22): a different one stops this ticker before any
+    # intent, or the order could never be found again by the reconciliation (WR-04).
+    reason = guards.order_ref_conflict(decision_key=key, echo_order_ref=preview.echo_order_ref)
+    if reason is not None:
+        ctx.logger.warning('ibkr-state=ORDER_REF_CONFLICT ticker=%s detail="%s"', ticker, reason)
+        _finish_row(ctx, row, guards.SOURCE_CONFLICT, f"orderRef: {reason}")
+        return
     verdict = decision_mod.judge_preview(
         preview,
         available_funds=snapshot.available_funds,
