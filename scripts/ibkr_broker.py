@@ -227,6 +227,53 @@ class OpenOrder:
     order_type: str
     status: str
     client_id: int
+    order_ref: str = ""
+
+
+@dataclass(frozen=True)
+class OrderRecord:
+    """One order of the broker's open or completed list, broker-neutral.
+
+    ``source`` is ``"open"`` or ``"completed"``. ``filled`` is ``None`` where the
+    gateway left the count unset (every open order, and a completed order that
+    never filled).
+    """
+
+    source: str
+    order_ref: str
+    status: str
+    action: str
+    quantity: float
+    filled: float | None
+    con_id: int
+    perm_id: int
+    order_id: int
+    client_id: int
+
+
+@dataclass(frozen=True)
+class ExecutionRecord:
+    """One execution (fill) of the account, broker-neutral; ``side`` is BUY or SELL."""
+
+    exec_id: str
+    order_ref: str
+    con_id: int
+    perm_id: int
+    order_id: int
+    client_id: int
+    shares: float
+    price: float
+    side: str
+    time: str
+
+
+@dataclass(frozen=True)
+class OrderHistory:
+    """The three broker sources of what happened to orders, read in one call (REQ-43)."""
+
+    open: tuple[OrderRecord, ...]
+    completed: tuple[OrderRecord, ...]
+    executions: tuple[ExecutionRecord, ...]
 
 
 @dataclass(frozen=True)
@@ -314,6 +361,38 @@ class PreviewResult:
     errors: tuple[tuple[int, str], ...]
     effective_tif: str | None
     sent_tif: str
+    #: orderRef and account the gateway echoed on the whatIf order; ``None`` = no echo.
+    echo_order_ref: str | None = None
+    echo_account: str | None = None
+
+
+def _unset_to_none(value) -> float | None:
+    """A readable number, else None: ``None`` and the unset sentinel (>= 1e300) are None."""
+    if value is None:
+        return None
+    number = float(value)
+    return None if abs(number) >= 1e300 else number
+
+
+#: Execution side as the library reports it -> broker-neutral side.
+_EXECUTION_SIDES = {"BOT": "BUY", "SLD": "SELL"}
+
+
+def _order_record(source: str, trade) -> OrderRecord:
+    """An ``OrderRecord`` from a library Trade row."""
+    order = trade.order
+    return OrderRecord(
+        source=source,
+        order_ref=_text(order, "orderRef"),
+        status=_text(trade.orderStatus, "status"),
+        action=_text(order, "action"),
+        quantity=float(order.totalQuantity),
+        filled=_unset_to_none(getattr(order, "filledQuantity", None)),
+        con_id=int(trade.contract.conId),
+        perm_id=int(getattr(order, "permId", 0) or 0),
+        order_id=int(getattr(order, "orderId", 0) or 0),
+        client_id=int(getattr(order, "clientId", 0) or 0),
+    )
 
 
 def _money(value) -> float | None:
@@ -504,8 +583,8 @@ class IbkrBroker:
     """One read-only session against the paper gateway.
 
     Public: ``connect``, ``positions``, ``health``, ``search_contract``,
-    ``contract_details``, ``open_orders``, ``preview_order``. Use as a context
-    manager; leaving it disconnects.
+    ``contract_details``, ``open_orders``, ``order_history``, ``preview_order``.
+    Use as a context manager; leaving it disconnects.
     """
 
     def __init__(
@@ -843,12 +922,13 @@ class IbkrBroker:
         rows = self._read("reqContractDetails", ask)
         return tuple(_info_from_contract(d.contract, d) for d in rows)
 
-    def open_orders(self, con_id: int) -> tuple[OpenOrder, ...]:
-        """Every open order of the account on ``con_id``, whoever placed it (D-12).
+    def open_orders(self, con_id: int | None = None) -> tuple[OpenOrder, ...]:
+        """Every open order of the account, whoever placed it (D-12).
 
         Reads all open orders of the account, including orders of other clients
         and TWS (``reqAllOpenOrdersAsync``, a read message). Finished orders are
-        dropped. Phase 4 never sends, so each order found is foreign.
+        dropped. With ``con_id`` only that contract's orders are returned; without
+        it every open order of the account (kill-switch recheck, reconciliation).
         """
         trades = self._read("reqAllOpenOrders", lambda: self._ib.reqAllOpenOrdersAsync())
         return tuple(
@@ -859,10 +939,59 @@ class IbkrBroker:
                 order_type=_text(t.order, "orderType"),
                 status=_text(t.orderStatus, "status"),
                 client_id=int(t.order.clientId),
+                order_ref=_text(t.order, "orderRef"),
             )
             for t in trades
-            if int(t.contract.conId) == con_id
+            if (con_id is None or int(t.contract.conId) == con_id)
             and t.orderStatus.status not in _DONE_ORDER_STATUSES
+        )
+
+    def order_history(self) -> OrderHistory:
+        """Open orders, completed orders and executions of the account (REQ-43).
+
+        Three fail-closed read windows (``reqAllOpenOrders``, ``reqCompletedOrders``,
+        ``reqExecutions``); each one is voided by a link event, a timeout or a
+        request error. Orders of every client are included. The records carry the
+        ``orderRef`` the reconciliation matches on.
+        """
+        open_trades = self._read("reqAllOpenOrders", lambda: self._ib.reqAllOpenOrdersAsync())
+        completed_trades = self._read(
+            "reqCompletedOrders", lambda: self._ib.reqCompletedOrdersAsync(apiOnly=False)
+        )
+        fills = self._read("reqExecutions", lambda: self._ib.reqExecutionsAsync())
+        executions = []
+        for f in fills:
+            execution = f.execution
+            side = _EXECUTION_SIDES.get(_text(execution, "side"))
+            if side is None:
+                raise GatewayUnavailable(
+                    REQUEST_FAILED,
+                    None,
+                    f"reqExecutions: unknown side {_text(execution, 'side')!r}; answer discarded",
+                )
+            moment = getattr(execution, "time", None)
+            executions.append(
+                ExecutionRecord(
+                    exec_id=_text(execution, "execId"),
+                    order_ref=_text(execution, "orderRef"),
+                    con_id=int(f.contract.conId),
+                    perm_id=int(getattr(execution, "permId", 0) or 0),
+                    order_id=int(getattr(execution, "orderId", 0) or 0),
+                    client_id=int(getattr(execution, "clientId", 0) or 0),
+                    shares=float(execution.shares),
+                    price=float(execution.price),
+                    side=side,
+                    time=(
+                        moment.isoformat()
+                        if hasattr(moment, "isoformat")
+                        else _text(execution, "time")
+                    ),
+                )
+            )
+        return OrderHistory(
+            open=tuple(_order_record("open", t) for t in open_trades),
+            completed=tuple(_order_record("completed", t) for t in completed_trades),
+            executions=tuple(executions),
         )
 
     def preview_order(
@@ -875,13 +1004,16 @@ class IbkrBroker:
         primary_exchange: str,
         action: str,
         quantity: int,
+        order_ref: str = "",
     ) -> PreviewResult:
         """The whatIf preview of a market order: margin, commission, errors, tif (D-13).
 
         Builds the order itself (market, ``tif="DAY"`` explicit, paper account) and
         sends it only through ``whatIfOrderAsync``, which the write barrier lets
         pass as a preview. Never a real order. The echo of the gateway is tapped
-        for the tif it actually applied; the tap is removed again in ``finally``.
+        for the tif it actually applied, and for the ``orderRef`` and account it
+        carries (``order_ref`` goes onto the order only when set); the tap is
+        removed again in ``finally``.
 
         Fail-closed like every read: no preview while a link is open, a link event
         in the window discards the answer, a timeout without 321 is
@@ -911,20 +1043,26 @@ class IbkrBroker:
             currency=currency,
             primaryExchange=primary_exchange,
         )
+        order_kwargs = {"orderRef": order_ref} if order_ref else {}
         order = handles.order(
             action=action,
             totalQuantity=quantity,
             orderType="MKT",
             tif=PREVIEW_TIF,
             account=EXPECTED_ACCOUNT,
+            **order_kwargs,
         )
         echoed: list[str] = []
+        echoed_ref: list[str] = []
+        echoed_account: list[str] = []
         original = ib.wrapper.openOrder
 
         def capture(*args):
             echo_order = args[2] if len(args) > 2 else None
             if getattr(echo_order, "whatIf", False):
                 echoed.append(str(getattr(echo_order, "tif", "")))
+                echoed_ref.append(_text(echo_order, "orderRef"))
+                echoed_account.append(_text(echo_order, "account"))
             return original(*args)
 
         ib.wrapper.openOrder = capture
@@ -954,6 +1092,8 @@ class IbkrBroker:
         )
         codes = {code for code, _ in errors} | set(self._seen_codes[seen_mark:])
         effective_tif = echoed[-1] if echoed else None
+        echo_order_ref = echoed_ref[-1] if echoed_ref else None
+        echo_account = echoed_account[-1] if echoed_account else None
         if 154 in codes:
             state = "HALTED"
         elif 10349 in codes:
@@ -981,6 +1121,8 @@ class IbkrBroker:
                 errors=errors,
                 effective_tif=effective_tif,
                 sent_tif=PREVIEW_TIF,
+                echo_order_ref=echo_order_ref,
+                echo_account=echo_account,
             )
         else:
             result = PreviewResult(
@@ -993,15 +1135,18 @@ class IbkrBroker:
                 errors=errors,
                 effective_tif=effective_tif,
                 sent_tif=PREVIEW_TIF,
+                echo_order_ref=echo_order_ref,
+                echo_account=echo_account,
             )
         self._log.info(
             'ibkr-state=PREVIEW code=- detail="state=%s init_margin=%s commission=%s '
-            'tif sent=%s effective=%s"',
+            'tif sent=%s effective=%s order_ref=%s"',
             result.state,
             result.init_margin_change,
             result.commission,
             result.sent_tif,
             result.effective_tif,
+            order_ref or "-",
         )
         return result
 
