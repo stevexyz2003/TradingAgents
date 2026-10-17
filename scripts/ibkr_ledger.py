@@ -118,6 +118,8 @@ REASON_BY_STATE: Mapping[str, str] = MappingProxyType(
                 "not-tradable",
                 "session-unknown",
                 "not-resolved-yet",
+                # No idempotency key can be built (e.g. ^GSPC): never an order (CR-02).
+                "invalid-decision-key",
             ),
             "not_tradable",
         ),

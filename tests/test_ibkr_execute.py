@@ -787,6 +787,39 @@ class TestTickerEnds:
         assert skipped["reason"] == "not_tradable"
         assert skipped["state"] == "not-resolved-yet"
 
+    @pytest.mark.parametrize("symbol", ["^GSPC", "XAUUSD+"])
+    def test_a_ticker_without_a_valid_decision_key_stops_only_itself(
+        self, tmp_path, loop, capsys, symbol
+    ):
+        """CR-02: a contract-table symbol outside the key whitelist must not crash the run."""
+        paper = _paper(
+            tmp_path,
+            [("2026-10-09", symbol, "Buy"), ("2026-10-09", "AAPL", "Buy")],
+            {"2026-10-09": _summary("2026-10-09", (symbol, "ok", "Buy"), ("AAPL", "ok", "Buy"))},
+        )
+        contracts = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        fake = _fake_for()
+        code, records = _run_execute(
+            tmp_path,
+            _fake_factory(fake, loop),
+            [symbol, "AAPL"],
+            paper_log=paper,
+            contracts=contracts,
+        )
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["ticker"] == symbol
+        assert skipped["state"] == guards.INVALID_DECISION_KEY
+        assert skipped["reason"] == "not_tradable"
+        assert "decision_key" not in skipped
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
+        assert len(_events(records, "dry_complete")) == 1
+        end = _events(records, "run_end")[-1]
+        assert end["exit"] == executor.EXIT_PRECONDITION
+        assert "outcome" not in end
+        assert f"execute: {symbol} invalid-decision-key" in capsys.readouterr().out
+        assert "UNEXPECTED" not in _log_text(tmp_path)
+
     def test_a_missing_contracts_file_closes_the_run_with_its_state(self, tmp_path):
         factory = _RecordingFactory()
         code, records = _run_execute(tmp_path, factory, ["AAPL"], paper_log=_buy_paper(tmp_path))

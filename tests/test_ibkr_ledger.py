@@ -382,6 +382,7 @@ def test_ledger_every_decision_state_has_a_reason_or_is_a_verdict():
         "source-conflict",
         "already-attempted",
         "decision-changed",
+        "invalid-decision-key",
         "kill-active",
         "kill-unreadable",
         "release-missing",

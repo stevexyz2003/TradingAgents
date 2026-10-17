@@ -600,7 +600,7 @@ Reasons of a `skipped` ticker:
 |---|---|---|
 | `hold`, `review`, `tolerance` | decision states of phase 4 | 2 / 2 / 0 |
 | `stale` | decision older or newer than the execution session | 2 |
-| `not_tradable` | resolution, drift, `liquidHours` unknown | 2 |
+| `not_tradable` | resolution, drift, `liquidHours` unknown, no valid decision key (`invalid-decision-key`) | 2 |
 | `outside_session` | session window | 2 |
 | `size_cap` | planned quantity above `MAX_QTY_PER_ORDER` | 5 |
 | `kill_switch` | any `release-*` or `kill-*` state | 4 |
@@ -647,6 +647,7 @@ as are a double hit (`collision`) and contradicting sources (`contradiction`).
 | `state-in-git-tree` | 1 | a state path lies inside a git work tree; refused |
 | `already-attempted` | 2 | the decision key has an `intent` already |
 | `decision-changed` | 2 | the decision key has an `intent` for another rating |
+| `invalid-decision-key` | 2 | no decision key can be built for the ticker (for instance `^GSPC`); only this ticker stops |
 | `outside-session` | 2 | outside the regular session with its buffer |
 | `source-conflict` | 2 | two sources disagree on position, already-executed or tradability; this ticker stops |
 | `kill-active` | 4 | a KILL file exists; global cancel |

@@ -48,6 +48,7 @@ SOURCE_CONFLICT = "source-conflict"
 ACCOUNT_CONFLICT = "account-conflict"
 ALREADY_ATTEMPTED = "already-attempted"
 DECISION_CHANGED = "decision-changed"
+INVALID_DECISION_KEY = "invalid-decision-key"
 DRY_COMPLETE = "dry-complete"
 LOCK_HELD = "lock-held"
 LOCK_ERROR = "lock-error"
@@ -87,7 +88,13 @@ EXIT_BY_STATE: Mapping[str, int] = MappingProxyType(
         ),
         SIZE_CAP: _EXIT_REJECTED,
         **dict.fromkeys(
-            (OUTSIDE_SESSION, SOURCE_CONFLICT, ALREADY_ATTEMPTED, DECISION_CHANGED),
+            (
+                OUTSIDE_SESSION,
+                SOURCE_CONFLICT,
+                ALREADY_ATTEMPTED,
+                DECISION_CHANGED,
+                INVALID_DECISION_KEY,
+            ),
             _EXIT_PRECONDITION,
         ),
         ACCOUNT_CONFLICT: _EXIT_ACCOUNT_GUARD,

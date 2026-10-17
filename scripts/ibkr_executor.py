@@ -1570,7 +1570,13 @@ def _check_attempts(ctx, rows: dict, remaining: list[str]) -> list[str]:
     kept: list[str] = []
     for ticker in remaining:
         row = rows[ticker]
-        key = guards.decision_key(row["trade_date"], ticker)
+        try:
+            key = guards.decision_key(row["trade_date"], ticker)
+        except ValueError as exc:
+            # A ticker outside the key whitelist (``^GSPC``, ``XAUUSD+`` from the contract
+            # table) can never get an orderRef: it ends here, the other tickers go on (D-11).
+            _finish_row(ctx, row, guards.INVALID_DECISION_KEY, str(exc))
+            continue
         first = ctx.ledger.attempt_of(key)
         if first is None:
             kept.append(ticker)
