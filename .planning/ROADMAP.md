@@ -254,7 +254,7 @@ Plans:
 - Kein Branch, kein Heartbeat, kein Scheduler.
 - Keine Backup-Erweiterung — die kommt mit Phase 7, wenn der Ledger seine endgültige Form hat.
 
-**Plans:** 3/10 plans executed
+**Plans:** 5/10 plans executed
 
 Plans:
 **Wave 1**
@@ -265,8 +265,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 05-04-PLAN.md — `execute`-Durchstich: zwangsweise trocken, `ledger-dryrun.jsonl`, `intent` mit fsync, `orderRef == decision_key` (W2)
-- [ ] 05-08-PLAN.md — Read-only-Sonde `scripts/smoke/ibkr_order_probe.py` für die Gateway-Messungen (W2)
+- [x] 05-04-PLAN.md — `execute`-Durchstich: zwangsweise trocken, `ledger-dryrun.jsonl`, `intent` mit fsync, `orderRef == decision_key` (W2)
+- [x] 05-08-PLAN.md — Read-only-Sonde `scripts/smoke/ibkr_order_probe.py` für die Gateway-Messungen (W2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
