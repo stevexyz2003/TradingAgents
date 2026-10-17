@@ -34,18 +34,18 @@ def _open(path, mode="dryrun", run_id="r1"):
 
 
 def _intent(key, **over):
-    fields = dict(
-        decision_key=key,
-        ticker=key.split("|")[-1],
-        trade_date="2026-10-09",
-        rating="Buy",
-        paper_log_sha="abc",
-        side="BUY",
-        quantity=2,
-        con_id=265598,
-        order_ref=key,
-        weekend_gap=False,
-    )
+    fields = {
+        "decision_key": key,
+        "ticker": key.split("|")[-1],
+        "trade_date": "2026-10-09",
+        "rating": "Buy",
+        "paper_log_sha": "abc",
+        "side": "BUY",
+        "quantity": 2,
+        "con_id": 265598,
+        "order_ref": key,
+        "weekend_gap": False,
+    }
     fields.update(over)
     return led.intent_record(**fields)
 
@@ -158,9 +158,7 @@ def test_ledger_mid_file_garbage_is_ledger_error(tmp_path):
     with open(path, "ab") as fh:
         fh.write(b"not json\n")
     with open(path, "ab") as fh:
-        fh.write(
-            b'{"event":"run_end","mode":"dryrun","run_id":"r","seq":3,"ts":"t","v":1}\n'
-        )
+        fh.write(b'{"event":"run_end","mode":"dryrun","run_id":"r","seq":3,"ts":"t","v":1}\n')
     with pytest.raises(led.LedgerError, match="line 2"):
         _open(path)
 
@@ -282,8 +280,17 @@ def test_ledger_filled_quantity_sums_filled_and_partial(tmp_path):
 def test_ledger_intent_record_has_required_fields():
     record = _intent("2026-10-09|AAPL", weekend_gap=True)
     for name in (
-        "decision_key", "ticker", "trade_date", "rating", "paper_log_sha",
-        "side", "quantity", "con_id", "order_ref", "weekend_gap", "rating_source",
+        "decision_key",
+        "ticker",
+        "trade_date",
+        "rating",
+        "paper_log_sha",
+        "side",
+        "quantity",
+        "con_id",
+        "order_ref",
+        "weekend_gap",
+        "rating_source",
     ):
         assert name in record
     assert record["rating_source"] is None
@@ -310,9 +317,17 @@ def test_ledger_every_decision_state_has_a_reason_or_is_a_verdict():
             continue
         assert state in led.REASON_BY_STATE or state in led.REJECTED_STATES, state
     for state in (
-        "size-cap", "outside-session", "source-conflict", "already-attempted",
-        "decision-changed", "kill-active", "kill-unreadable", "release-missing",
-        "release-unreadable", "release-invalid", "release-expired",
+        "size-cap",
+        "outside-session",
+        "source-conflict",
+        "already-attempted",
+        "decision-changed",
+        "kill-active",
+        "kill-unreadable",
+        "release-missing",
+        "release-unreadable",
+        "release-invalid",
+        "release-expired",
         "release-account-mismatch",
     ):
         assert state in led.REASON_BY_STATE, state
@@ -368,8 +383,14 @@ ENTRY = {"decision_key": REF, "order_ref": REF, "con_id": 265598, "side": "BUY",
 
 def _order(status="Submitted", filled=None, ref=REF, con_id=265598, action="BUY", qty=2.0):
     return SimpleNamespace(
-        order_ref=ref, con_id=con_id, action=action, quantity=qty, status=status,
-        filled=filled, perm_id=1, order_id=2,
+        order_ref=ref,
+        con_id=con_id,
+        action=action,
+        quantity=qty,
+        status=status,
+        filled=filled,
+        perm_id=1,
+        order_id=2,
     )
 
 
@@ -397,9 +418,7 @@ def test_reconcile_open_order():
 
 def test_reconcile_executions_full_and_partial():
     assert led.resolve_entry(ENTRY, _hist(executions=[_exe(2)])).outcome == led.FILLED_OUT
-    assert (
-        led.resolve_entry(ENTRY, _hist(executions=[_exe(1)])).outcome == led.PARTIAL_OUT
-    )
+    assert led.resolve_entry(ENTRY, _hist(executions=[_exe(1)])).outcome == led.PARTIAL_OUT
     two = _hist(executions=[_exe(1, exec_id="a"), _exe(1, exec_id="b")])
     assert led.resolve_entry(ENTRY, two).outcome == led.FILLED_OUT
 
@@ -451,13 +470,9 @@ def test_reconcile_collision_on_order_ref(record):
 
 
 def test_reconcile_collision_on_execution_con_id_or_side():
+    assert led.resolve_entry(ENTRY, _hist(executions=[_exe(2, con_id=1)])).outcome == led.COLLISION
     assert (
-        led.resolve_entry(ENTRY, _hist(executions=[_exe(2, con_id=1)])).outcome
-        == led.COLLISION
-    )
-    assert (
-        led.resolve_entry(ENTRY, _hist(executions=[_exe(2, side="SELL")])).outcome
-        == led.COLLISION
+        led.resolve_entry(ENTRY, _hist(executions=[_exe(2, side="SELL")])).outcome == led.COLLISION
     )
 
 
@@ -482,4 +497,4 @@ def test_reconcile_falls_back_to_decision_key():
 
 
 def test_reconcile_unresolvable_set():
-    assert led.UNRESOLVABLE == {"no_trace", "collision", "contradiction"}
+    assert {"no_trace", "collision", "contradiction"} == led.UNRESOLVABLE
