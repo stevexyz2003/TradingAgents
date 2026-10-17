@@ -12,6 +12,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -1284,3 +1285,153 @@ class TestKillPath:
 
         Finder().visit(tree)
         assert sites == ["_kill_path"]
+
+
+# --- size cap and session window (05-06, Task 1) --------------------------------------------------
+
+_EASTERN = ZoneInfo("US/Eastern")
+
+
+def _hours(day: date, start: str, end: str) -> str:
+    stamp = day.strftime("%Y%m%d")
+    return f"{stamp}:{start}-{stamp}:{end}"
+
+
+def _window_clock(window_start_et: datetime, minutes: int) -> datetime:
+    return (window_start_et + timedelta(minutes=minutes)).astimezone(UTC)
+
+
+def _force_quantity(monkeypatch, quantity, side="BUY"):
+    """Simulate a calculation error: the plan asks for ``quantity``."""
+    monkeypatch.setattr(
+        decision,
+        "plan_order",
+        lambda rating, **kwargs: decision.Plan(
+            decision.INTENT, side, quantity, quantity, 0.0, f"{side} {quantity}"
+        ),
+    )
+
+
+class TestSizeCap:
+    def test_g3_size_cap_rejects_instead_of_trimming(self, tmp_path, loop, monkeypatch, capsys):
+        _force_quantity(monkeypatch, 3)
+        fake = _fake_for()
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "size_cap"
+        assert skipped["state"] == "size-cap"
+        assert "exceeds MAX_QTY_PER_ORDER 2" in skipped["detail"]
+        assert _events(records, "intent") == []
+        assert "placeOrder(whatIf)" not in fake.calls
+        _assert_nothing_sent(fake, None)
+        assert "execute: AAPL size-cap" in capsys.readouterr().out
+        assert _events(records, "run_end")[-1]["exit"] == executor.EXIT_REJECTED
+
+    def test_size_cap_sell_above_cap_is_rejected_not_trimmed(self, tmp_path, loop):
+        fake = _fake_for(positions=[_aapl_position(5)])
+        code, records = _gateway_run(tmp_path, loop, fake, rating="Sell")
+        assert code == executor.EXIT_REJECTED
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "size_cap"
+        assert "quantity 5" in skipped["detail"]
+        assert _events(records, "intent") == []
+        assert "placeOrder(whatIf)" not in fake.calls
+
+    def test_size_two_passes(self, tmp_path, loop):
+        code, records = _gateway_run(tmp_path, loop, _fake_for())
+        assert code == executor.EXIT_OK
+        (intent,) = _events(records, "intent")
+        assert intent["quantity"] == 2
+
+    def test_negative_control_size_cap_removed_would_send_three(self, tmp_path, loop, monkeypatch):
+        _force_quantity(monkeypatch, 3)
+        monkeypatch.setattr(guards, "check_size", lambda quantity: None)
+        monkeypatch.setattr(
+            executor.DryPlacer,
+            "complete",
+            lambda self, ctx, intent: ctx.mods.guards.DRY_COMPLETE,
+        )
+        _code, records = _gateway_run(tmp_path, loop, _fake_for())
+        (intent,) = _events(records, "intent")
+        assert intent["quantity"] == 3
+
+    def test_negative_control_only_chain_check_removed_placer_still_refuses(
+        self, tmp_path, loop, monkeypatch
+    ):
+        _force_quantity(monkeypatch, 3)
+        real = guards.check_size
+        calls = []
+
+        def chain_blind(quantity):
+            calls.append(quantity)
+            return None if len(calls) == 1 else real(quantity)
+
+        monkeypatch.setattr(guards, "check_size", chain_blind)
+        with pytest.raises(ValueError, match="size check failed"):
+            _gateway_run(tmp_path, loop, _fake_for())
+        records = _read_records(executor.default_dryrun_ledger_file())
+        assert _events(records, "dry_complete") == []
+        assert _events(records, "run_end")[-1]["outcome"] == "error"
+
+    def test_size_checked_before_session(self, tmp_path, loop, monkeypatch):
+        _force_quantity(monkeypatch, 3)
+        day = date(2026, 10, 12)
+        start = datetime(2026, 10, 12, 9, 30, tzinfo=_EASTERN)
+        fake = _fake_for(liquid_hours=_hours(day, "0930", "1600"))
+        code, records = _gateway_run(tmp_path, loop, fake, clock=_window_clock(start, 5))
+        assert code == executor.EXIT_REJECTED
+        (skipped,) = _events(records, "skipped")
+        assert skipped["state"] == "size-cap"
+
+
+_DAY = date(2026, 10, 12)
+_START = datetime(2026, 10, 12, 9, 30, tzinfo=_EASTERN)
+_FULL = _hours(_DAY, "0930", "1600")
+_HALF = _hours(_DAY, "0930", "1300")
+
+#: (liquid hours, minutes after 09:30 ET, expected state)
+_SESSION_CASES = [
+    pytest.param(_FULL, 200, "intent", id="mid_window"),
+    pytest.param(_FULL, 5, "outside-session", id="opening_buffer"),
+    pytest.param(_FULL, 6 * 60 + 30 - 5, "outside-session", id="closing_buffer"),
+    pytest.param(_HALF, 3 * 60 - 5, "outside-session", id="half_day_closing_buffer"),
+    pytest.param(_HALF, 90, "intent", id="half_day_mid_window"),
+    pytest.param(_FULL, 6 * 60 + 40, "outside-session", id="after_close"),
+]
+
+
+class TestSessionWindow:
+    @pytest.mark.parametrize(("hours", "minutes", "expected"), _SESSION_CASES)
+    def test_g3_session_window(self, tmp_path, loop, hours, minutes, expected):
+        fake = _fake_for(liquid_hours=hours)
+        code, records = _gateway_run(tmp_path, loop, fake, clock=_window_clock(_START, minutes))
+        if expected == "intent":
+            assert code == executor.EXIT_OK
+            assert len(_events(records, "intent")) == 1
+            return
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "outside_session"
+        assert skipped["state"] == "outside-session"
+        assert "placeOrder(whatIf)" not in fake.calls
+        assert _events(records, "intent") == []
+
+    def test_g3_session_window_saturday(self, tmp_path, loop):
+        saturday = datetime(2026, 10, 10, 17, 20, tzinfo=UTC)
+        fake = _fake_for(liquid_hours=f"20261010:CLOSED;{_FULL}")
+        code, records = _gateway_run(tmp_path, loop, fake, clock=saturday)
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "outside_session"
+        assert "placeOrder(whatIf)" not in fake.calls
+        assert _events(records, "intent") == []
+
+    def test_session_unknown_stays_not_tradable(self, tmp_path, loop):
+        fake = _fake_for(liquid_hours=_hours(date(2026, 10, 13), "0930", "1600"))
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["state"] == "session-unknown"
+        assert skipped["reason"] == "not_tradable"
+        assert "placeOrder(whatIf)" not in fake.calls
