@@ -1515,7 +1515,8 @@ def _reconcile(ctx) -> None:
             if last is not None and last["event"] == ledger_mod.INTENT:
                 ctx.ledger.append(ledger_mod.PLACED, **follow)
         elif res.outcome in (ledger_mod.FILLED_OUT, ledger_mod.PARTIAL_OUT):
-            event = ledger_mod.FILLED if res.outcome == ledger_mod.FILLED_OUT else ledger_mod.PARTIAL
+            full = res.outcome == ledger_mod.FILLED_OUT
+            event = ledger_mod.FILLED if full else ledger_mod.PARTIAL
             ctx.ledger.append(
                 event,
                 con_id=entry["con_id"],
@@ -2077,6 +2078,28 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
     identity = result.identity
     spec = contracts_mod.CONTRACT_TABLE[ticker]
     held, orders = _position_and_orders(ctx, broker, row, identity, spec, snapshot)
+    key = guards.decision_key(row["trade_date"], ticker)
+    # REQ-45 order deviation: position and already-executed checks run after resolution because
+    # they need the resolved conId (and the order_ref for the history lookup); documented for
+    # the phase-6 order test (ROADMAP note from 05-09). Two sources per fact, the more
+    # cautious one wins (REQ-63); a conflict stops this ticker only (D-11).
+    reason = guards.position_conflict(
+        ledger_filled_qty=ctx.ledger.filled_quantity(identity.con_id), broker_held=held
+    )
+    if reason is not None:
+        _finish_row(ctx, row, guards.SOURCE_CONFLICT, f"position: {reason}")
+        return
+    history = _history(ctx)
+    known = (*history.open, *history.completed, *history.executions)
+    has_ref = any(r.order_ref == key for r in known)
+    # "Ledger yes, broker no" cannot get here (key check and reconciliation come first); if it
+    # does, the same cautious value applies.
+    reason = guards.executed_conflict(
+        ledger_attempted=ctx.ledger.attempt_of(key) is not None, history_has_ref=has_ref
+    )
+    if reason is not None:
+        _finish_row(ctx, row, guards.SOURCE_CONFLICT, f"executed: {reason}")
+        return
     plan = decision_mod.plan_order(
         row["rating"], held_qty=held, open_orders=len(orders), block_qty=spec.block_qty
     )
@@ -2105,7 +2128,6 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         )
         _finish_row(ctx, row, guards.OUTSIDE_SESSION, detail)
         return
-    key = guards.decision_key(row["trade_date"], ticker)
     # Read the switches anew right before the whatIf (REQ-34, D-21): no cache between orders.
     switches = _check_switches(ctx)
     if not switches.allowed:
@@ -2121,6 +2143,18 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         quantity=plan.quantity,
         order_ref=key,
     )
+    # Account from three sources (REQ-63): the connection guard (managedAccounts) came first,
+    # here the release file and the optional whatIf echo (D-22). A conflict stops the whole run
+    # (D-11): no intent, no further ticker.
+    reason = guards.account_conflict(
+        managed_account=ctx.mods.broker.EXPECTED_ACCOUNT,
+        release_account=switches.release.account,
+        echo_account=preview.echo_account,
+    )
+    if reason is not None:
+        ctx.logger.warning('ibkr-state=ACCOUNT_CONFLICT ticker=%s detail="%s"', ticker, reason)
+        print(f"execute: {guards.ACCOUNT_CONFLICT} ({reason})")
+        raise _ExecuteStop(EXIT_ACCOUNT_GUARD, guards.ACCOUNT_CONFLICT, reason)
     verdict = decision_mod.judge_preview(
         preview,
         available_funds=snapshot.available_funds,
@@ -2229,6 +2263,8 @@ def _execute_gateway_chain(ctx, rows: dict, remaining: list[str]) -> None:
         if result.rejected:
             _finish_row(ctx, row, result.state, result.detail)
             continue
+        # REQ-63 tradability: exchange calendar against liquidHours decides per ticker (D-22);
+        # order status 399 joins with the phase-6 placer.
         if decision_mod.calendar_conflict(ctx.now_utc, ctx.calendar, result.session_day):
             detail = (
                 f"exchange calendar and liquid hours disagree about today "
