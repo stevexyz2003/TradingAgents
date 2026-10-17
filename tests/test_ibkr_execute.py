@@ -1088,3 +1088,199 @@ class TestFailClosed:
         code, records = _gateway_run(tmp_path, loop, _fake_for(), kill=True)
         assert code == executor.EXIT_OK
         assert len(_events(records, "intent")) == 1
+
+
+# --- the kill path: one global cancel, a re-read, exit 4 (05-05, Task 2) ------------------------
+
+
+def _two_buys(tmp_path):
+    return _paper(
+        tmp_path,
+        [("2026-10-09", "AAPL", "Buy"), ("2026-10-09", "MSFT", "Buy")],
+        {"2026-10-09": _summary("2026-10-09", ("AAPL", "ok", "Buy"), ("MSFT", "ok", "Buy"))},
+    )
+
+
+class _KillingPlacer(executor.DryPlacer):
+    """Lays the KILL file in the first ``complete()``, then completes like the dry placer."""
+
+    def __init__(self):
+        self.fired = False
+
+    def complete(self, ctx, intent):
+        if not self.fired:
+            self.fired = True
+            executor.default_kill_file().write_text("stop", encoding="utf-8")
+        return super().complete(ctx, intent)
+
+
+class TestKillPath:
+    def test_kill_preflight_cancel_all_once(self, tmp_path, loop):
+        fake = _fake_for(open_orders=[ibkr_fakes.open_trade(CON_IDS["AAPL"], order_ref="")])
+        pl_factory = _PaperLogFactory(_buy_paper(tmp_path))
+        code, records = _gateway_run(tmp_path, loop, fake, paper=pl_factory, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert fake.calls.count("reqGlobalCancel") == 1
+        assert "open_orders" in fake.calls[fake.calls.index("reqGlobalCancel") :]
+        assert "placeOrder(whatIf)" not in fake.calls
+        assert pl_factory.calls == []
+        assert [r["event"] for r in records] == ["run_start", "kill_cancel", "run_end"]
+        assert records[0]["kill"] == "kill-active"
+        cancel = records[1]
+        assert cancel["outcome"] == "sent"
+        assert cancel["sent"] == 1
+        assert cancel["remaining"] == 0
+        assert records[2]["exit"] == 4
+        text = _log_text(tmp_path)
+        assert "GLOBAL_CANCEL_SENT" in text
+        assert "ibkr-state=KILL_CANCEL remaining=0" in text
+
+    def test_kill_cancel_without_effect_reports_remaining(
+        self, tmp_path, loop, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(executor, "KILL_RECHECK_SECONDS", 0.05)
+        monkeypatch.setattr(executor, "_sleep", lambda seconds: None)
+        fake = _fake_for(
+            open_orders=[ibkr_fakes.open_trade(CON_IDS["AAPL"])], global_cancel_clears=False
+        )
+        code, records = _gateway_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        (cancel,) = _events(records, "kill_cancel")
+        assert cancel["remaining"] == 1
+        assert cancel["outcome"] == "sent"
+        assert cancel["rechecks"] >= 1
+        assert "ibkr-state=KILL_CANCEL remaining=1" in _log_text(tmp_path)
+
+    def test_kill_cancel_gateway_unavailable_still_exit_four(self, tmp_path, loop):
+        fake = _fake_for()
+        fake.refuse = ConnectionRefusedError()
+        code, records = _gateway_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        (cancel,) = _events(records, "kill_cancel")
+        assert cancel["outcome"] == "gateway_unavailable"
+        assert "reqGlobalCancel" not in fake.calls
+        assert "ibkr-state=KILL_CANCEL_FAILED" in _log_text(tmp_path)
+
+    def test_kill_cancel_unhealthy_session_still_exit_four(self, tmp_path):
+        class SickBroker:
+            cancelled = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def health(self):
+                return SimpleNamespace(ok=False, state="NOT_CONNECTED", detail="down")
+
+            def cancel_all(self, **kwargs):
+                SickBroker.cancelled = True
+
+        code, records = _run_execute(
+            tmp_path,
+            lambda host, port, logger: SickBroker(),
+            ["AAPL"],
+            paper_log=_buy_paper(tmp_path),
+            kill=True,
+        )
+        assert code == executor.EXIT_KILL_SWITCH
+        assert SickBroker.cancelled is False
+        (cancel,) = _events(records, "kill_cancel")
+        assert cancel["outcome"] == "gateway_unavailable"
+
+    def test_kill_cancel_wrong_account_never_cancels(self, tmp_path, loop):
+        fake = _fake_for(accounts=("DUX000000",))
+        code, _records = _gateway_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_ACCOUNT_GUARD
+        assert "reqGlobalCancel" not in fake.calls
+
+    @pytest.mark.parametrize(
+        "setup", _BLOCKED_SETUPS, ids=lambda f: f.__name__.removeprefix("_setup_")
+    )
+    def test_no_global_cancel_without_kill_file(self, tmp_path, loop, monkeypatch, setup):
+        """Negative control to D-17: every block that is not a present KILL file cancels nothing."""
+        setup(monkeypatch)
+        fake = _fake_for()
+        contracts = _contracts_file(tmp_path, {"AAPL": _identity("AAPL")})
+        code, _records = _run_execute(
+            tmp_path,
+            _fake_factory(fake, loop),
+            ["AAPL"],
+            paper_log=_buy_paper(tmp_path),
+            release=False,
+            contracts=contracts,
+        )
+        assert code == executor.EXIT_KILL_SWITCH
+        assert "reqGlobalCancel" not in fake.calls
+        assert "connect" not in fake.calls
+
+    def test_g3_kill_between_two_orders(self, tmp_path, loop):
+        """SC2 / G3: KILL appears after the first order; the second gets no intent."""
+        fake = _fake_for(tickers=("AAPL", "MSFT"))
+        code, records = _gateway_run(
+            tmp_path,
+            loop,
+            fake,
+            tickers=("AAPL", "MSFT"),
+            paper=_two_buys(tmp_path),
+            placer=_KillingPlacer(),
+        )
+        assert code == executor.EXIT_KILL_SWITCH
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
+        assert [r["ticker"] for r in _events(records, "dry_complete")] == ["AAPL"]
+        (skipped,) = _events(records, "skipped")
+        assert skipped["ticker"] == "MSFT"
+        assert skipped["reason"] == "kill_switch"
+        assert skipped["state"] == "kill-active"
+        assert fake.calls.count("reqGlobalCancel") == 1
+        assert fake.calls.count("placeOrder(whatIf)") == 1
+        assert "placeOrder" not in fake.calls
+        assert len(_events(records, "kill_cancel")) == 1
+        assert _events(records, "run_end")[-1]["exit"] == 4
+
+    def test_negative_control_kill_between_checked_once_per_run(self, tmp_path, loop, monkeypatch):
+        real = guards.check_switches
+        cache = []
+
+        def checked_once(*args, **kwargs):
+            if not cache:
+                cache.append(real(*args, **kwargs))
+            return cache[0]
+
+        monkeypatch.setattr(guards, "check_switches", checked_once)
+        fake = _fake_for(tickers=("AAPL", "MSFT"))
+        _code, records = _gateway_run(
+            tmp_path,
+            loop,
+            fake,
+            tickers=("AAPL", "MSFT"),
+            paper=_two_buys(tmp_path),
+            placer=_KillingPlacer(),
+        )
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL", "MSFT"]
+
+    def test_cancel_all_called_at_one_site(self):
+        import ast
+
+        tree = ast.parse(_SCRIPT.read_text(encoding="utf-8"))
+        sites = []
+
+        class Finder(ast.NodeVisitor):
+            def __init__(self):
+                self.stack = []
+
+            def visit_FunctionDef(self, node):
+                self.stack.append(node.name)
+                self.generic_visit(node)
+                self.stack.pop()
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Call(self, node):
+                if isinstance(node.func, ast.Attribute) and node.func.attr == "cancel_all":
+                    sites.append(self.stack[-1] if self.stack else None)
+                self.generic_visit(node)
+
+        Finder().visit(tree)
+        assert sites == ["_kill_path"]
