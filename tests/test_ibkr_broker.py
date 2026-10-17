@@ -98,7 +98,7 @@ class _WritesDuringConnect(FakeIB):
 def test_forbidden_call_check_sees_a_client_write_without_the_barrier(loop, monkeypatch):
     # Without the barrier the client recorder runs, and the check over ``calls``
     # trips: proof that the assertion in the guard tests can fail.
-    monkeypatch.setattr(broker, "_arm_write_barrier", lambda client: None)
+    monkeypatch.setattr(broker, "_arm_write_barrier", lambda client, permit=None: None)
     fake = _WritesDuringConnect()
     _connected(fake, loop)
     assert any(call in fake.calls for call in FORBIDDEN_CALLS)

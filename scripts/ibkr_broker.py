@@ -511,7 +511,18 @@ def _whatif_in_message(msg) -> bool:
         return False
 
 
-def _arm_write_barrier(client) -> None:
+class _CancelPermit:
+    """One pass of message 58, opened only by cancel_all after a detected kill switch (D-05).
+
+    ``open`` is True only while ``cancel_all`` runs; ``sent`` counts the passes that
+    reached the wire (``sendMsg``), so a second use in one session is visible.
+    """
+
+    open: bool = False
+    sent: int = 0
+
+
+def _arm_write_barrier(client, permit: _CancelPermit | None = None) -> None:
     """Refuse every write on this client instance, by call name and on the wire.
 
     The named write calls are replaced first. ``placeOrder`` and message id 3
@@ -520,8 +531,14 @@ def _arm_write_barrier(client) -> None:
     wrapped, so a write message is refused whatever path produced it:
     ``replaceFA``, a raw ``send(3, ...)`` or a write call added by a later library
     version that reuses one of these ids. Reads pass through unchanged.
+
+    ``reqGlobalCancel`` (name, field level and message 58) is the one exception to
+    "refused": it passes while ``permit.open`` is True, and the pass is counted on
+    the wire level. Without a ``permit`` the exception never opens.
     """
+    permit = permit if permit is not None else _CancelPermit()
     original_place = getattr(client, "placeOrder", None)
+    original_global_cancel = getattr(client, "reqGlobalCancel", None)
 
     def guarded_place(*args, **kwargs):
         contract = args[1] if len(args) > 1 else kwargs.get("contract")
@@ -539,7 +556,18 @@ def _arm_write_barrier(client) -> None:
 
     client.placeOrder = guarded_place
 
+    def guarded_global_cancel(*args, **kwargs):
+        if not permit.open or original_global_cancel is None:
+            raise ReadOnlyViolation(
+                "read-only session: reqGlobalCancel refused before it reached the gateway"
+            )
+        return original_global_cancel(*args, **kwargs)
+
+    client.reqGlobalCancel = guarded_global_cancel
+
     for name in _WRITE_CALLS:
+        if name == "reqGlobalCancel":
+            continue
 
         def refuse(*_args, _name=name, **_kwargs):
             raise ReadOnlyViolation(
@@ -561,6 +589,8 @@ def _arm_write_barrier(client) -> None:
         if msg_id == 3:
             if not _whatif_in_fields(fields):
                 refuse_message(msg_id)
+        elif msg_id == 58 and permit.open:
+            pass
         elif msg_id in _WRITE_MESSAGE_IDS:
             refuse_message(msg_id)
         return original_send(*fields, **kwargs)
@@ -571,6 +601,11 @@ def _arm_write_barrier(client) -> None:
         if msg_id == 3:
             if not _whatif_in_message(msg):
                 refuse_message(msg_id)
+        elif msg_id == 58 and permit.open:
+            result = original_send_msg(msg, *args, **kwargs)
+            permit.open = False
+            permit.sent += 1
+            return result
         elif msg_id in _WRITE_MESSAGE_IDS:
             refuse_message(msg_id)
         return original_send_msg(msg, *args, **kwargs)
@@ -583,8 +618,8 @@ class IbkrBroker:
     """One read-only session against the paper gateway.
 
     Public: ``connect``, ``positions``, ``health``, ``search_contract``,
-    ``contract_details``, ``open_orders``, ``order_history``, ``preview_order``.
-    Use as a context manager; leaving it disconnects.
+    ``contract_details``, ``open_orders``, ``order_history``, ``preview_order``,
+    ``cancel_all``. Use as a context manager; leaving it disconnects.
     """
 
     def __init__(
@@ -616,6 +651,8 @@ class IbkrBroker:
         self._settle = settle
         self._handles: IbHandles | None = None
         self._ib = None
+        #: One-shot permit for message 58; shut until cancel_all opens it.
+        self._permit = _CancelPermit()
         self.link_lost = False
         self.server_link_broken = False
         self.port_changed = False
@@ -656,7 +693,7 @@ class IbkrBroker:
         # Subscribed first: a 326 arrives before the handshake completes.
         ib.errorEvent += self._on_error
         # D-01: the barrier stands before a single byte flows.
-        _arm_write_barrier(ib.client)
+        _arm_write_barrier(ib.client, self._permit)
         host, port, timeout = self._host, self._port, self._connect_timeout
         bound = timeout + self._connect_grace
         try:
@@ -1149,6 +1186,37 @@ class IbkrBroker:
             order_ref or "-",
         )
         return result
+
+    def cancel_all(self, *, kill_evidence) -> None:
+        """Cancel every open order of the account once: ``reqGlobalCancel`` (D-05).
+
+        The only write this adapter ever lets through. It needs a positively
+        detected kill switch (``kill_evidence.active is True``) and works once per
+        session; message 58 is shut again right after. The request is
+        fire-and-forget: its effect is proven only by reading the open orders
+        again (the executor's job, Pitfall 5). Only the executor's kill path calls
+        this (D-05).
+        """
+        if self._ib is None or self._handles is None:
+            raise GatewayUnavailable("NOT_CONNECTED", 504, "no session; connect() first")
+        if getattr(kill_evidence, "active", False) is not True:
+            raise ReadOnlyViolation("global cancel needs a positively detected kill switch")
+        if self._permit.sent:
+            raise ReadOnlyViolation("global cancel already used in this session")
+        self._permit.open = True
+        try:
+            self._ib.reqGlobalCancel()
+        except ConnectionError as exc:
+            raise GatewayUnavailable(
+                "NOT_CONNECTED", 504, f"global cancel not sent ({type(exc).__name__})"
+            ) from exc
+        finally:
+            self._permit.open = False
+        if self._permit.sent != 1:
+            raise GatewayUnavailable(
+                REQUEST_FAILED, None, "global cancel did not reach the wire exactly once"
+            )
+        self._log.warning('ibkr-state=GLOBAL_CANCEL_SENT code=- detail="count=1 reason=kill_switch"')
 
     def _read(self, name: str, make_awaitable):
         """One fail-closed read: timeout, no open link before, no link event during."""
