@@ -2228,6 +2228,16 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
     if not switches.allowed:
         _halt_on_switches(ctx, row, switches)
         return
+    # The session window anew with a fresh clock (WR-05): the window was judged at the
+    # start of the run, and lock, reconciliation, fetch, resolution and the whatIf take time.
+    now = ctx.clock()
+    if result.window is None or not contracts_mod.window_open(result.window, now):
+        detail = (
+            f"the regular-session window closed during the run (now {now.isoformat()}, "
+            f"window end {_iso(result.window.end) if result.window else None})"
+        )
+        _finish_row(ctx, row, guards.OUTSIDE_SESSION, detail)
+        return
     intent = ledger_mod.intent_record(
         decision_key=key,
         ticker=ticker,

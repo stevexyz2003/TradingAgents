@@ -243,6 +243,26 @@ def _utc(ny, *args):
     return datetime(*args, tzinfo=ny).astimezone(UTC)
 
 
+@pytest.mark.parametrize(
+    ("hour", "minute", "expected"),
+    [(9, 44, False), (9, 45, True), (15, 45, True), (15, 46, False), (16, 0, False)],
+)
+def test_window_open_applies_the_buffer_at_both_ends(ny, hour, minute, expected):
+    """WR-05: the one buffered-window rule that execute asks again before the intent."""
+    window = c.SessionWindow(
+        datetime(2026, 10, 12, 9, 30, tzinfo=ny), datetime(2026, 10, 12, 16, 0, tzinfo=ny)
+    )
+    assert c.window_open(window, _utc(ny, 2026, 10, 12, hour, minute)) is expected
+
+
+def test_window_open_needs_an_aware_moment(ny):
+    window = c.SessionWindow(
+        datetime(2026, 10, 12, 9, 30, tzinfo=ny), datetime(2026, 10, 12, 16, 0, tzinfo=ny)
+    )
+    with pytest.raises(ValueError):
+        c.window_open(window, datetime(2026, 10, 12, 12, 0))
+
+
 def test_parse_new_format_with_closed_day(ny):
     lh = c.parse_liquid_hours("20261011:CLOSED;20261012:0930-20261012:1600", ZONE)
     assert len(lh.windows) == 1

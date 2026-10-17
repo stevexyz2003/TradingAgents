@@ -183,10 +183,12 @@ def _run_execute(
     """
     env_file = _env_file(tmp_path)
     contracts = tmp_path / "ibkr" / "contracts.json" if contracts is None else contracts
+    # ``clock`` is a moment (fixed clock) or a callable (a clock that moves during the run).
+    clock_fn = clock if callable(clock) else _fixed(clock)
     if release:
         path = executor.default_release_file()
         path.parent.mkdir(parents=True, exist_ok=True)
-        until = (clock.date() + timedelta(days=30)).isoformat()
+        until = (clock_fn().date() + timedelta(days=30)).isoformat()
         path.write_text(json.dumps({"account": "DUQ634065", "valid_until": until}), "utf-8")
     if kill:
         path = executor.default_kill_file()
@@ -209,7 +211,7 @@ def _run_execute(
     code = executor.main(
         argv,
         broker_factory=factory,
-        clock=_fixed(clock),
+        clock=clock_fn,
         paper_log_factory=paper_log_factory,
         calendar=_stub_calendar() if calendar is None else calendar,
         placer=placer,
@@ -1637,6 +1639,35 @@ class TestSessionWindow:
         assert skipped["reason"] == "outside_session"
         assert "placeOrder(whatIf)" not in fake.calls
         assert _events(records, "intent") == []
+
+    def test_the_window_closing_during_the_run_stops_before_the_intent(self, tmp_path, loop):
+        """WR-05: the window is judged again with a fresh clock right before the intent."""
+        moment = {"now": _window_clock(_START, 370)}  # 15:40 ET: inside the buffered window
+        fake = _fake_for(liquid_hours=_FULL)
+        original = fake.reqPositionsAsync
+
+        async def time_passes_then_read():
+            moment["now"] = _window_clock(_START, 380)  # 15:50 ET: inside the closing buffer
+            return await original()
+
+        fake.reqPositionsAsync = time_passes_then_read
+        code, records = _gateway_run(tmp_path, loop, fake, clock=lambda: moment["now"])
+        assert code == executor.EXIT_PRECONDITION
+        assert fake.calls.count("placeOrder(whatIf)") == 1
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "outside_session"
+        assert skipped["state"] == "outside-session"
+        assert "closed during the run" in skipped["detail"]
+        assert _events(records, "intent") == []
+        assert len(_events(records, "switch_check")) == 1
+
+    def test_negative_control_a_fixed_clock_inside_the_window_reaches_the_intent(
+        self, tmp_path, loop
+    ):
+        fake = _fake_for(liquid_hours=_FULL)
+        code, records = _gateway_run(tmp_path, loop, fake, clock=_window_clock(_START, 370))
+        assert code == executor.EXIT_OK
+        assert len(_events(records, "intent")) == 1
 
     def test_session_unknown_stays_not_tradable(self, tmp_path, loop):
         fake = _fake_for(liquid_hours=_hours(date(2026, 10, 13), "0930", "1600"))

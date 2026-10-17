@@ -575,7 +575,10 @@ never trimmed: if you hold 5 shares by hand and the rating is Sell, the plan is
 
 **Session window.** The regular session with a buffer of `SESSION_BUFFER_MINUTES`
 at both ends; half days follow `liquidHours` of the contract. Outside the window the
-ticker is skipped as `outside_session` (exit 2) before the whatIf.
+ticker is skipped as `outside_session` (exit 2) before the whatIf. The window is judged
+again with a fresh clock right before the `intent`, next to the last switch check: a
+run that started shortly before the window end and reaches the `intent` after it
+ends the ticker as `outside-session` too.
 
 **Second sources (D-22).** Every fact an order depends on is checked against a
 second source. A disagreement stops with its own state (D-11): the account stops the

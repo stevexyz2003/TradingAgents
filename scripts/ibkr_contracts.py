@@ -283,6 +283,20 @@ def parse_liquid_hours(raw: str, time_zone_id: str) -> LiquidHours:
     return LiquidHours(tuple(windows), frozenset(closed), time_zone_id)
 
 
+def window_open(
+    window: SessionWindow, now_utc: datetime, buffer_minutes: int = SESSION_BUFFER_MINUTES
+) -> bool:
+    """Whether ``now_utc`` lies inside ``window`` shrunk by the buffer at both ends.
+
+    The one place of that rule: ``evaluate_session`` uses it, and ``execute`` asks it again
+    with a fresh clock right before the ``intent`` (WR-05).
+    """
+    if now_utc.tzinfo is None:
+        raise ValueError("now_utc must carry a time zone")
+    buffer = timedelta(minutes=buffer_minutes)
+    return window.start + buffer <= now_utc <= window.end - buffer
+
+
 def evaluate_session(
     liquid_hours: str,
     time_zone_id: str,
@@ -306,7 +320,7 @@ def evaluate_session(
     buffer = timedelta(minutes=buffer_minutes)
     usable = [w for w in parsed.windows if w.start + buffer <= w.end - buffer]
     for window in usable:
-        if window.start + buffer <= now_utc <= window.end - buffer:
+        if window_open(window, now_utc, buffer_minutes):
             return SessionVerdict(OK, window, None, "inside a liquid window", True)
 
     upcoming = [w.start + buffer for w in usable if w.start + buffer > now_utc]
