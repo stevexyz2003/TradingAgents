@@ -119,9 +119,23 @@ def test_ledger_torn_tail_invalid_fragment_is_tolerated(tmp_path):
     assert [r["seq"] for r in ledger.records] == [1, 2]
     appended = ledger.append("run_start")
     assert appended["seq"] == 3
-    # The closed fragment is now a mid-file defect: a later open is fail-closed.
-    with pytest.raises(led.LedgerError, match="line 3"):
-        _open(path)
+    assert appended[led.SEALS_LINE] == 3
+    # The closed fragment sits mid-file now, but its seal follows directly: still readable.
+    again = _open(path)
+    assert [r["seq"] for r in again.records] == [1, 2, 3]
+    assert led.SEALS_LINE not in again.append("run_end")
+
+
+def test_ledger_broken_middle_line_without_matching_seal_is_ledger_error(tmp_path):
+    path = tmp_path / "l.jsonl"
+    head = {"v": 1, "seq": 1, "ts": "x", "run_id": "r", "mode": "dryrun", "event": "run_start"}
+    tail = {"v": 1, "seq": 2, "ts": "x", "run_id": "r", "mode": "dryrun", "event": "run_end"}
+    for seal in (None, 1, 3):
+        follow = tail if seal is None else {**tail, led.SEALS_LINE: seal}
+        rows = [json.dumps(head).encode(), b'{"v":1,"seq":2', json.dumps(follow).encode()]
+        path.write_bytes(b"\n".join(rows) + b"\n")
+        with pytest.raises(led.LedgerError, match="line 2"):
+            _open(path)
 
 
 def test_ledger_torn_tail_fragment_gets_closed_before_next_append(tmp_path):
@@ -316,7 +330,7 @@ def test_ledger_every_decision_state_has_a_reason_or_is_a_verdict():
         if state == "preview-ok":
             continue
         assert state in led.REASON_BY_STATE or state in led.REJECTED_STATES, state
-    for state in (
+    ticker_end_states = (
         "size-cap",
         "outside-session",
         "source-conflict",
@@ -329,13 +343,16 @@ def test_ledger_every_decision_state_has_a_reason_or_is_a_verdict():
         "release-invalid",
         "release-expired",
         "release-account-mismatch",
-    ):
+    )
+    guards = _load("ibkr_guards")
+    for state in ticker_end_states:
         assert state in led.REASON_BY_STATE, state
-    guards = _SCRIPTS / "ibkr_guards.py"
-    if guards.exists():
-        mod = _load("ibkr_guards")
-        for state in mod.EXIT_BY_STATE:
-            assert state in led.REASON_BY_STATE or state in led.REJECTED_STATES, state
+        assert state in guards.EXIT_BY_STATE, state
+    # The other guard states are no ticker end: exit 0 states, or run-level stops
+    # (lock, ledger, reconciliation, account conflict per D-11, state in git, not dry).
+    for state in guards.EXIT_BY_STATE:
+        if state not in ticker_end_states:
+            assert state not in led.REASON_BY_STATE, state
 
 
 def test_ledger_weekend_gap_is_a_field_not_a_reason():

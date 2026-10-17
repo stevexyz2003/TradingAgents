@@ -163,6 +163,12 @@ def reason_for_state(state: str) -> str:
     return REASON_BY_STATE[state]
 
 
+#: Field on the first record after a torn tail: the number of the cut-off line it closes.
+#: Only a broken line followed directly by its seal is tolerated in the middle of the file.
+SEALS_LINE = "seals_torn_line"
+_BROKEN = object()
+
+
 class LedgerError(ValueError):
     """The ledger file cannot be trusted (broken middle line, foreign mode, bad record)."""
 
@@ -185,6 +191,7 @@ class Ledger:
         run_id: str,
         records: list[dict],
         needs_newline: bool,
+        torn_line: int | None = None,
     ) -> None:
         self.path = path
         self.mode = mode
@@ -192,6 +199,7 @@ class Ledger:
         self.records = records
         self._clock = clock
         self._needs_newline = needs_newline
+        self._torn_line = torn_line
         self._seq = max((int(r.get("seq", 0)) for r in records), default=0)
 
     @classmethod
@@ -203,6 +211,7 @@ class Ledger:
         path = Path(path)
         records: list[dict] = []
         needs_newline = False
+        torn_line = None
         if path.exists():
             raw = path.read_bytes()
             if raw:
@@ -211,14 +220,18 @@ class Ledger:
                 parts = raw.split(b"\n")
                 if ends_with_newline:
                     parts = parts[:-1]
-                last = len(parts) - 1
-                for index, part in enumerate(parts):
-                    number = index + 1
-                    torn = needs_newline and index == last
+                parsed: list[object] = []
+                for part in parts:
                     try:
-                        record = json.loads(part.decode("utf-8"))
+                        parsed.append(json.loads(part.decode("utf-8")))
                     except ValueError:
-                        if torn:
+                        parsed.append(_BROKEN)
+                last = len(parsed) - 1
+                for index, record in enumerate(parsed):
+                    number = index + 1
+                    if record is _BROKEN:
+                        if needs_newline and index == last:
+                            torn_line = number
                             log.warning(
                                 "ibkr-state=LEDGER_TORN_TAIL path=%s line=%d detail=%r",
                                 path,
@@ -226,9 +239,13 @@ class Ledger:
                                 "last line is cut off and is ignored",
                             )
                             continue
-                        raise LedgerError(f"{path}: line {number} is not a ledger record") from None
+                        following = parsed[index + 1] if index < last else None
+                        if isinstance(following, dict) and following.get(SEALS_LINE) == number:
+                            # A torn tail from an earlier run, closed by the next append.
+                            continue
+                        raise LedgerError(f"{path}: line {number} is not a ledger record")
                     records.append(cls._check(path, number, record, mode))
-        return cls(path, mode, clock, run_id, records, needs_newline)
+        return cls(path, mode, clock, run_id, records, needs_newline, torn_line)
 
     @staticmethod
     def _check(path: Path, number: int, record: object, mode: str) -> dict:
@@ -258,6 +275,8 @@ class Ledger:
             "event": event,
             **fields,
         }
+        if self._torn_line is not None:
+            record[SEALS_LINE] = self._torn_line
         line = (
             json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode("utf-8")
@@ -269,6 +288,7 @@ class Ledger:
             os.fsync(fh.fileno())
         self._seq += 1
         self._needs_newline = False
+        self._torn_line = None
         self.records.append(record)
         return record
 
