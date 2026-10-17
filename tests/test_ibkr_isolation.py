@@ -379,3 +379,24 @@ def test_no_market_data_in_execution_path():
         source = path.read_text(encoding="utf-8")
         for needle in needles:
             assert needle not in source, f"{path.name} contains a market data call: {needle}"
+
+
+MARKET_DATA = ROOT / "scripts" / "ibkr_market_data.py"
+
+
+@pytest.mark.unit
+def test_execution_path_does_not_load_the_market_data_session():
+    # REQ-IBKR-26: the stream runs on its own session; the order path never reaches it.
+    for path in (EXECUTOR, ADAPTER, DECISION, PAPERLOG):
+        assert MARKET_DATA.stem not in path.read_text(encoding="utf-8"), path.name
+
+
+@pytest.mark.unit
+def test_market_data_client_id_is_documented_and_distinct():
+    from tests import ibkr_fakes
+    from tests.test_ibkr_market_data import md
+
+    broker = ibkr_fakes.load_broker()
+    assert md.MARKET_DATA_CLIENT_ID != broker.EXECUTOR_CLIENT_ID
+    assert md.MARKET_DATA_CLIENT_ID > 9999
+    assert str(md.MARKET_DATA_CLIENT_ID) in _handbook_text()

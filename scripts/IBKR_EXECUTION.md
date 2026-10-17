@@ -82,6 +82,11 @@ The executor connects with clientId **20001**, the constant
   collide with it;
 * not 98: that was the phase-1 probe.
 
+The market-data stream (`scripts/ibkr_market_data.py`) connects with clientId
+**20002**, the constant `MARKET_DATA_CLIENT_ID`, for the same reasons. It is a
+session of its own, so the stream can run while the executor is connected, and
+market data never enters the order path (REQ-IBKR-26).
+
 A clientId already in use shows up as error **326** and ends the run with
 state `CLIENT_ID_IN_USE`, exit 3. Assumption A2 ("the gateway accepts values
 above 9999") was confirmed by the first real run on 2026-10-12 (see
