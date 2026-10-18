@@ -151,6 +151,6 @@ bekommen ist (Befund 2). Kein Marktdaten-Abo nötig.
    Operators, keine technische. Seit der Korrektur zu Befund 1 geht es dabei nur
    noch um das **Alter** der Quotes, nicht mehr um fehlendes Bid/Ask. Dafür fehlt
    die Messung, wie alt sie wirklich sind.
-3. Nach der ersten USD-Position prüfen, ob `ExchangeRate` dann im Kontobericht
+2. Nach der ersten USD-Position prüfen, ob `ExchangeRate` dann im Kontobericht
    erscheint; damit wäre die Umrechnung für Auswertungen (nicht für die
    Order-Erzeugung) verfügbar.
