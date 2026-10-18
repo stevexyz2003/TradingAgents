@@ -387,3 +387,11 @@ def test_calendar_conflict_cases(cal, now, session_day, expected):
 def test_calendar_conflict_naive_now_raises(cal):
     with pytest.raises(ValueError):
         dec.calendar_conflict(datetime(2026, 10, 12, 15), cal, True)
+
+
+@pytest.mark.parametrize("funds", [float("nan"), float("inf")], ids=["nan", "inf"])
+def test_a_non_finite_budget_is_over_budget(funds):
+    # Review P4 IN-04: with nan or inf funds `margin >= funds` is always False, so
+    # every preview passed the budget. An unknown budget is no budget: fail closed.
+    verdict = _judge(_Preview(init_margin_change=500.0), funds=funds)
+    assert verdict.state == "over-budget"

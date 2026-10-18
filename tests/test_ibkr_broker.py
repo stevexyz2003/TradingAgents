@@ -1756,3 +1756,21 @@ def test_global_cancel_in_the_fake_model_is_name_then_wire(loop):
     assert fake.calls.count("reqGlobalCancel") == 1
     assert fake.calls.count("sendMsg") == 1
     assert fake.open_orders == []
+
+
+# --- account values must be finite numbers (review P2 IN-02, P4 IN-04) -----------------
+
+
+@pytest.mark.parametrize("tag", ["TotalCashValue", "AvailableFunds"])
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf", "", "n/a"])
+def test_positions_refuses_an_account_value_that_is_not_a_finite_number(loop, tag, raw):
+    # float() took "nan"/"inf" silently and let "" or "n/a" escape as a bare
+    # ValueError. A snapshot with such a value is not a snapshot: name it and stop.
+    rows = (("TotalCashValue", "1005459.44"), ("BuyingPower", "6705922.13"),
+            ("AvailableFunds", "1004000.00"))
+    summary = [account_value(t, raw if t == tag else v) for t, v in rows]
+    fake = FakeIB(positions=[], summary=summary)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        _connected(fake, loop).positions()
+    assert info.value.state == "SNAPSHOT_INCOMPLETE"
+    assert tag in info.value.detail
