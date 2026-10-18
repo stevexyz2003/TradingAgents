@@ -89,6 +89,23 @@ Ausweitung der Leiter oder der Blockgröße (`MAX_QTY_PER_ORDER = 2` bleibt).
   Executions und abgeschlossenen Orders (Befund 2026-10-17 plus erster echter Fill)
   mit einer künstlichen Korrektur `.01` → `.02`.
 
+### Nachträge nach der Research (2026-10-18)
+- **D-14:** `--resolve KEY=never_sent` (Versprechen aus Phase-5-D-19 und dem
+  Handbuch) wird in Phase 6 als **eigener kleiner Plan** umgesetzt: ein
+  `resolved`-Event im Ledger plus das Flag, mit Tests und Handbuch-Eintrag, und zwar
+  vor der ersten echten Order. Ein Live-`intent` ohne Broker-Spur bleibt sonst ein
+  dauerhafter Exit 6.
+- **D-15:** **Klarstellung zu D-11/SC1:** Mit Read-Only an blockt das Gateway schon
+  den whatIf (321), der Lauf endet als `preview-read-only` mit Exit 5 und erreicht
+  `placeOrder` nie. Dieser frisch am Tag der ersten Order im `--live`-Lauf gemessene
+  Zustand **gilt als 321-Beleg**. Die Abweichung vom Wortlaut von D-11 („scheitert
+  beim Platzieren“) wird im Handbuch und im Konto-Befund notiert; die Verifikation
+  soll sie nicht als Lücke werten. Es wird kein Pfad gebaut, der den whatIf umgeht.
+- **D-16:** Order-Fehler 399 („geparkt“) ist am Gateway nicht messbar und wird nur
+  per Fake-Test abgedeckt; die Lücke wird wie `halted` (REQ-67) dokumentiert.
+- **D-17:** Summiertes Budget (P4 IN-05) wird dokumentiert akzeptiert und nicht in
+  Phase 6 geändert.
+
 ### Claude's Discretion
 - Namen und Exit-Codes der neuen Zustände (Fill-Timeout, Abweichung nach der Order),
   solange sie in `EXIT_BY_STATE`, der Ledger-Grund-Tabelle und dem Handbuch
