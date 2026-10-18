@@ -81,3 +81,40 @@ def test_bollinger_contrarian_and_unsorted_input():
     assert compute_patterns(_frame([100.0] * 30 + [130.0]), FAR)["bollinger_out"] == -1
     frame = _frame([100.0] * 30 + [70.0]).sample(frac=1, random_state=3)
     assert compute_patterns(frame, FAR)["bollinger_out"] == 1
+
+
+def test_duplicate_daily_bars_do_not_satisfy_warmup():
+    frame = pd.DataFrame({"Date": [pd.Timestamp("2025-03-03")] * 200, "Close": np.arange(200.0)})
+    result = compute_patterns(frame, FAR)
+    assert result["trend_sma200"] is None
+    assert result["breakout_20"] is None
+
+
+def test_duplicate_bars_after_normalising_keep_last_and_tz_as_of():
+    base = _frame(_wave(60))
+    dup = base.copy()
+    dup["Date"] = dup["Date"] + pd.Timedelta(hours=16)  # same sessions, intraday stamp
+    both = pd.concat([base, dup], ignore_index=True)
+    assert compute_patterns(both, FAR) == compute_patterns(base, FAR)
+    as_of = pd.Timestamp(base["Date"].iloc[40]).tz_localize("America/New_York").isoformat()
+    assert compute_patterns(base, as_of) == compute_patterns(
+        base, str(base["Date"].iloc[40].date())
+    )
+
+
+def test_rsi_uses_wilder_seed():
+    from tradingagents.patterns import signals
+
+    closes = [100.0, 101.0] + [101.0 - i for i in range(1, 14)]  # +1 then 13 x -1
+    assert len(closes) == 15
+    assert abs(signals._rsi(pd.Series(closes)) - 7.142857) < 1e-4
+    assert compute_patterns(_frame(closes), FAR)["rsi_extreme"] == 1
+
+
+def test_macd_cross_over_exact_zero():
+    from tradingagents.patterns.signals import _cross_state
+
+    assert _cross_state([-0.1, 0.0, 0.1]) == 1
+    assert _cross_state([0.1, 0.0, -0.1]) == -1
+    assert _cross_state([-0.1, 0.0, -0.1]) == 0
+    assert _cross_state([0.0, 0.0, 0.1]) == 0

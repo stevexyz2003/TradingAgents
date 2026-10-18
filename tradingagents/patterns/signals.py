@@ -5,6 +5,11 @@ Every pattern is +1 (bullish), -1 (bearish), 0 (computable but inactive) or
 ``Date <= as_of`` itself, before any indicator is computed, so the result can
 only depend on prices up to and including the decision date.
 
+The breakout is the *close-based* Donchian variant (extreme of prior closes, not of
+highs/lows). RSI is Wilder's: seeded with the simple mean of the first 14 gains and
+losses, then smoothed recursively. Daily bars are de-duplicated on the normalised
+date (last row wins), so the warm-up counts sessions, not rows.
+
 Directions are modelling choices. RSI and Bollinger are read *contrarian*
 (oversold -> +1); the momentum reading would be the opposite sign.
 """
@@ -51,19 +56,42 @@ def _closes_up_to(ohlcv: pd.DataFrame, as_of: str) -> pd.Series:
     if getattr(dates.dt, "tz", None) is not None:
         dates = dates.dt.tz_localize(None)
     frame["Date"] = dates.dt.normalize()
-    frame = frame.dropna(subset=["Date", "Close"]).sort_values("Date")
-    frame = frame[frame["Date"] <= pd.Timestamp(as_of).normalize()]
+    frame = frame.dropna(subset=["Date", "Close"]).sort_values("Date", kind="stable")
+    frame = frame.drop_duplicates(subset="Date", keep="last")
+    cutoff = pd.Timestamp(as_of)
+    if cutoff.tzinfo is not None:
+        cutoff = cutoff.tz_localize(None)
+    frame = frame[frame["Date"] <= cutoff.normalize()]
     return frame["Close"].astype(float).reset_index(drop=True)
 
 
 def _rsi(close: pd.Series) -> float:
-    delta = close.diff()
-    gain = delta.clip(lower=0.0).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
-    loss = (-delta.clip(upper=0.0)).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
-    g, ls = float(gain.iloc[-1]), float(loss.iloc[-1])
-    if ls == 0.0:
-        return 50.0 if g == 0.0 else 100.0
-    return 100.0 - 100.0 / (1.0 + g / ls)
+    """Wilder RSI: SMA seed over the first 14 changes, then recursive smoothing."""
+    delta = close.diff().dropna().to_numpy()
+    gains, losses = delta.clip(min=0.0), (-delta).clip(min=0.0)
+    avg_g = float(gains[:RSI_PERIOD].mean())
+    avg_l = float(losses[:RSI_PERIOD].mean())
+    for g, ls in zip(gains[RSI_PERIOD:], losses[RSI_PERIOD:], strict=True):
+        avg_g = (avg_g * (RSI_PERIOD - 1) + g) / RSI_PERIOD
+        avg_l = (avg_l * (RSI_PERIOD - 1) + ls) / RSI_PERIOD
+    if avg_l == 0.0:
+        return 50.0 if avg_g == 0.0 else 100.0
+    return 100.0 - 100.0 / (1.0 + avg_g / avg_l)
+
+
+def _cross_state(values: list[float]) -> int:
+    """+1/-1 if the sign flipped (zeros skipped: last non-zero sign counts), else 0."""
+    state, last = 0, 0
+    for v in values:
+        sign = 1 if v > 0 else -1 if v < 0 else 0
+        if sign == 0:
+            continue
+        if last == -1 and sign == 1:
+            state = 1
+        elif last == 1 and sign == -1:
+            state = -1
+        last = sign
+    return state
 
 
 def _sign(value: float) -> int:
@@ -87,12 +115,7 @@ def compute_patterns(ohlcv: pd.DataFrame, as_of: str) -> dict[str, int | None]:
         )
         hist = macd - macd.ewm(span=MACD_SIGNAL, adjust=False).mean()
         window = hist.iloc[-(MACD_CROSS_LOOKBACK + 1):].tolist()
-        state = 0
-        for prev, cur in zip(window, window[1:], strict=False):
-            if prev < 0 < cur:
-                state = 1
-            elif prev > 0 > cur:
-                state = -1
+        state = _cross_state(window)
         out["macd_cross"] = state
 
     if n >= BREAKOUT_MIN_BARS:

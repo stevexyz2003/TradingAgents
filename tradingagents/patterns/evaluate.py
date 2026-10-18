@@ -12,9 +12,20 @@ Two modes per cell:
 * ``pattern``: every settled entry (Hold included) where the pattern is active
   on that side; a hit is ``sign(metric) == pattern side``.
 
-Both metrics are reported side by side: alpha (return minus benchmark) and the
-raw return. Exact zeros (after the log's 0.1 pp rounding) are ties: they leave
-the denominator and are counted per metric.
+Both metrics are reported side by side and evaluated independently: alpha (return
+minus benchmark) and the raw return. An unreadable value in one metric never
+discards the other. Exact zeros (after the log's 0.1 pp rounding) are ties: they
+leave the denominator and are counted per metric. The MIN_N gate applies per
+metric to its own denominator (``den_alpha`` / ``den_raw``).
+
+Reference groups: ``n_all``, ``ties_*`` and ``mean_alpha`` cover all cases of a cell;
+hit rates, intervals and ``den_*`` cover only the independent cases. ``mean_alpha``
+is the plain mean alpha, not multiplied by the rating direction (a bearish cell
+with negative mean alpha is the "right" direction).
+
+Independence and the entry convention use real trading sessions (taken from the
+loaded price index) where available; otherwise they fall back to weekdays and are
+marked approximate.
 
 No LLM, no settlement, no reflector: the module only reads the log and prices.
 """
@@ -48,8 +59,8 @@ ALPHA_BETA_WARNING = (
     "high-beta tickers carry market moves in their alpha."
 )
 SELECTION_WARNING = (
-    "The ticker pool is fixed and chosen in hindsight (survivorship / selection bias); "
-    "no statement generalizes beyond it."
+    "The ticker pool is small and fixed; results do not generalize beyond it "
+    "(selection effects cannot be ruled out)."
 )
 
 
@@ -73,16 +84,18 @@ class PatternCell:
     n_independent: int = 0
     ties_alpha: int = 0
     ties_raw: int = 0
-    den_alpha: int = 0  # independent, non-tie, alpha parseable
-    den_raw: int = 0
+    den_alpha: int = 0  # independent, non-tie, alpha readable
+    den_raw: int = 0  # independent, non-tie, raw readable
     hits_alpha: int = 0
     hits_raw: int = 0
     hit_rate_alpha: float | None = None
     hit_rate_raw: float | None = None
     ci_alpha: tuple[float, float] | None = None
     ci_raw: tuple[float, float] | None = None
-    mean_alpha: float | None = None  # over all cases with parseable alpha
-    status: str = "insufficient"  # "ok" | "insufficient"
+    mean_alpha: float | None = None  # plain (undirected) mean over all cases with alpha
+    status_alpha: str = "insufficient"  # "ok" once den_alpha >= min_n
+    status_raw: str = "insufficient"  # "ok" once den_raw >= min_n
+    approximate: bool = False  # independence fell back to weekdays for some case
 
 
 @dataclass
@@ -98,6 +111,7 @@ class PatternReport:
     conventions: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     flagged_entries: list[str] = field(default_factory=list)
+    n_convention_approximate: int = 0
     missing_price_tickers: list[str] = field(default_factory=list)
     entry_states: list[dict] = field(default_factory=list)
 
@@ -125,17 +139,34 @@ def parse_holding(value: str | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def entry_convention(entry_date: str, resolved: str | None, holding: int | None) -> str:
-    """Infer the entry convention from weekdays (a holiday can shift it).
+def _session_gap(
+    sessions: np.ndarray | None, start: str, end: str
+) -> tuple[int, bool]:
+    """Sessions between two dates; weekdays (approximate) without covering session data."""
+    if sessions is not None and len(sessions) and np.datetime64(end) <= sessions[-1]:
+        lo = np.searchsorted(sessions, np.datetime64(start), side="right")
+        hi = np.searchsorted(sessions, np.datetime64(end), side="right")
+        return int(hi - lo), False
+    return int(np.busday_count(start, end)), True
+
+
+def entry_convention(
+    entry_date: str,
+    resolved: str | None,
+    holding: int | None,
+    sessions: np.ndarray | None = None,
+) -> str:
+    """Infer the entry convention from the session gap (weekdays if no sessions given).
 
     ``decision_close`` (legacy, before fix #1518): the window starts at the
-    decision day's close, so exit is ``holding`` business days later.
-    ``next_close``: entry is the first close after the decision, one more day.
+    decision day's close, so exit is ``holding`` sessions later.
+    ``next_close``: entry is the first close after the decision, one more session.
+    Without session data a holiday can shift the weekday-based inference.
     """
     if not resolved or holding is None:
         return "unknown"
     try:
-        gap = int(np.busday_count(entry_date, resolved))
+        gap, _ = _session_gap(sessions, entry_date, resolved)
     except ValueError:
         return "unknown"
     if gap == holding:
@@ -149,16 +180,21 @@ def _sign(value: float) -> int:
     return 1 if value > 0 else -1 if value < 0 else 0
 
 
-def _independent(cases: list[dict]) -> list[dict]:
-    """Greedy per-ticker selection of non-overlapping windows."""
+def _independent(cases: list[dict]) -> tuple[list[dict], bool]:
+    """Greedy per-ticker selection of non-overlapping windows; flags weekday fallback."""
     kept: list[dict] = []
     last: dict[str, dict] = {}
+    approximate = False
     for case in sorted(cases, key=lambda c: (c["ticker"], c["date"])):
         prev = last.get(case["ticker"])
-        if prev is None or int(np.busday_count(prev["date"], case["date"])) >= prev["holding"]:
+        gap = 0
+        if prev is not None:
+            gap, approx = _session_gap(prev.get("sessions"), prev["date"], case["date"])
+            approximate = approximate or approx
+        if prev is None or gap >= prev["holding"]:
             kept.append(case)
             last[case["ticker"]] = case
-    return kept
+    return kept, approximate
 
 
 def _build_cell(pattern: str, side: int, mode: str, cases: list[dict], min_n: int) -> PatternCell:
@@ -166,7 +202,7 @@ def _build_cell(pattern: str, side: int, mode: str, cases: list[dict], min_n: in
     cell.n_all = len(cases)
     alphas = [c["alpha"] for c in cases if c["alpha"] is not None]
     cell.mean_alpha = sum(alphas) / len(alphas) if alphas else None
-    indep = _independent(cases)
+    indep, cell.approximate = _independent(cases)
     cell.n_independent = len(indep)
     cell.ties_alpha = sum(1 for c in cases if c["alpha"] == 0.0)
     cell.ties_raw = sum(1 for c in cases if c["raw"] == 0.0)
@@ -179,14 +215,14 @@ def _build_cell(pattern: str, side: int, mode: str, cases: list[dict], min_n: in
         if c["raw"] is not None and c["raw"] != 0.0:
             cell.den_raw += 1
             cell.hits_raw += int(_sign(c["raw"]) == want)
-    if cell.n_independent >= min_n:
-        cell.status = "ok"
-        if cell.den_alpha:
-            cell.hit_rate_alpha = cell.hits_alpha / cell.den_alpha
-            cell.ci_alpha = wilson(cell.hits_alpha, cell.den_alpha)
-        if cell.den_raw:
-            cell.hit_rate_raw = cell.hits_raw / cell.den_raw
-            cell.ci_raw = wilson(cell.hits_raw, cell.den_raw)
+    if cell.den_alpha >= max(min_n, 1):
+        cell.status_alpha = "ok"
+        cell.hit_rate_alpha = cell.hits_alpha / cell.den_alpha
+        cell.ci_alpha = wilson(cell.hits_alpha, cell.den_alpha)
+    if cell.den_raw >= max(min_n, 1):
+        cell.status_raw = "ok"
+        cell.hit_rate_raw = cell.hits_raw / cell.den_raw
+        cell.ci_raw = wilson(cell.hits_raw, cell.den_raw)
     return cell
 
 
@@ -201,6 +237,7 @@ def evaluate(
     missing: set[str] = set()
     bad_tickers: set[str] = set()
     frames: dict[str, pd.DataFrame | None] = {}
+    sessions_by_ticker: dict[str, np.ndarray | None] = {}
     cases: list[dict] = []
     holdings: Counter = Counter()
     conventions: Counter = Counter()
@@ -222,6 +259,7 @@ def evaluate(
                 missing.add(ticker)
                 frame = None
         frames[ticker] = frame
+        sessions_by_ticker[ticker] = _sessions(frame)
         return frame
 
     for entry in entries:
@@ -242,7 +280,15 @@ def evaluate(
         holding = parse_holding(entry.get("holding"))
         convention = None
         if not entry.get("pending"):
-            convention = entry_convention(day, entry.get("resolved"), holding)
+            sessions = sessions_by_ticker.get(ticker)
+            convention = entry_convention(day, entry.get("resolved"), holding, sessions)
+            resolved_day = entry.get("resolved")
+            if resolved_day and holding is not None:
+                try:
+                    if _session_gap(sessions, day, resolved_day)[1]:
+                        report.n_convention_approximate += 1
+                except ValueError:
+                    pass
         report.entry_states.append(
             {
                 "date": day,
@@ -260,7 +306,7 @@ def evaluate(
             continue
         alpha = parse_pct(entry.get("alpha"))
         raw = parse_pct(entry.get("raw"))
-        if alpha is None or holding is None:
+        if (alpha is None and raw is None) or holding is None:
             report.n_unparseable += 1
             continue
         holdings[f"{holding}d"] += 1
@@ -273,6 +319,7 @@ def evaluate(
                 "date": day,
                 "direction": direction,
                 "holding": holding,
+                "sessions": sessions_by_ticker.get(ticker),
                 "alpha": alpha,
                 "raw": raw,
                 "patterns": patterns,
@@ -297,8 +344,25 @@ def evaluate(
         report.warnings.append(f"mixed holding windows: {dict(holdings)}")
     if len([k for k in conventions if k != "unknown"]) > 1:
         report.warnings.append(f"mixed entry conventions: {dict(conventions)}")
+    if report.n_convention_approximate:
+        report.warnings.append(
+            f"{report.n_convention_approximate} entry convention(s) inferred from weekdays "
+            "(no covering session data); a holiday can shift them"
+        )
+    if any(c.approximate for c in report.cells):
+        report.warnings.append("some independence checks fell back to weekdays (approximate)")
     report.warnings.extend([ALPHA_BETA_WARNING, SELECTION_WARNING])
     return report
+
+
+def _sessions(frame: pd.DataFrame | None) -> np.ndarray | None:
+    """Sorted unique trading sessions (datetime64[D]) of a loaded price frame."""
+    if frame is None or len(frame) == 0:
+        return None
+    dates = pd.to_datetime(frame["Date"])
+    if getattr(dates.dt, "tz", None) is not None:
+        dates = dates.dt.tz_localize(None)
+    return np.unique(dates.dt.normalize().to_numpy().astype("datetime64[D]"))
 
 
 def default_price_loader() -> Callable[[str, str], pd.DataFrame]:
@@ -345,15 +409,23 @@ def render_markdown(report: PatternReport) -> str:
         "",
         "## Cells (pattern, side, mode)",
         "",
-        "| pattern | side | mode | n_all | n_indep | ties a/r | hit alpha | CI alpha "
-        "| hit raw | CI raw | mean alpha | status |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "Reference groups: n_all, ties and mean alpha cover all cases of the cell; "
+        "hit rates, CIs and den_* cover only the independent cases (non-overlapping "
+        "windows per ticker, ties excluded). mean alpha is undirected (not multiplied by "
+        "the rating direction). `~` marks a weekday fallback for independence.",
+        "",
+        "| pattern | side | mode | n_all | n_indep | ties a/r | den a/r | hit alpha | CI alpha "
+        "| status a | hit raw | CI raw | status r | mean alpha |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for c in report.cells:
+        approx = "~" if c.approximate else ""
         lines.append(
-            f"| {c.pattern} | {c.side:+d} | {c.mode} | {c.n_all} | {c.n_independent} "
-            f"| {c.ties_alpha}/{c.ties_raw} | {_fmt(c.hit_rate_alpha)} | {_fmt_ci(c.ci_alpha)} "
-            f"| {_fmt(c.hit_rate_raw)} | {_fmt_ci(c.ci_raw)} | {_fmt(c.mean_alpha)} | {c.status} |"
+            f"| {c.pattern} | {c.side:+d} | {c.mode} | {c.n_all} | {c.n_independent}{approx} "
+            f"| {c.ties_alpha}/{c.ties_raw} | {c.den_alpha}/{c.den_raw} "
+            f"| {_fmt(c.hit_rate_alpha)} | {_fmt_ci(c.ci_alpha)} | {c.status_alpha} "
+            f"| {_fmt(c.hit_rate_raw)} | {_fmt_ci(c.ci_raw)} | {c.status_raw} "
+            f"| {_fmt(c.mean_alpha)} |"
         )
     lines += ["", "## Entry pattern states", "", "| date | ticker | rating | state | convention | "
               + " | ".join(PATTERNS) + " |", "|" + "---|" * (5 + len(PATTERNS))]

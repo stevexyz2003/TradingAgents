@@ -59,7 +59,7 @@ def test_insufficient_below_min_n_reports_n_but_no_rate():
     report = evaluate([_entry("2024-12-02")], _loader())
     cell = _cell(report, "breakout_20", 1, "engine")
     assert cell.n_all == 1 and cell.n_independent == 1
-    assert cell.status == "insufficient"
+    assert cell.status_alpha == "insufficient" and cell.status_raw == "insufficient"
     assert cell.hit_rate_alpha is None and cell.ci_alpha is None
 
 
@@ -76,7 +76,7 @@ def test_ties_tracked_separately_for_alpha_and_raw():
     assert (cell.den_alpha, cell.den_raw) == (2, 3)
     assert (cell.hits_alpha, cell.hits_raw) == (1, 3)
     assert cell.hit_rate_alpha == 0.5 and cell.hit_rate_raw == 1.0
-    assert cell.status == "ok"
+    assert cell.status_alpha == "ok" and cell.status_raw == "ok"
 
 
 def test_raw_hit_and_alpha_miss_for_same_entry():
@@ -109,7 +109,7 @@ def test_convention_flag():
 def test_exclusions_and_counts_and_hold_modes():
     entries = [
         _entry("2024-12-02", rating="REVIEW"),
-        _entry("2024-12-02", ticker="MSFT", alpha="n/a"),
+        _entry("2024-12-02", ticker="MSFT", alpha="n/a", raw="n/a"),
         _entry("2024-12-03", pending=True),
         _entry("2024-12-02", rating="Hold", ticker="NVDA", alpha="+2.0%"),
     ]
@@ -164,7 +164,7 @@ def test_fixture_log_round_trip(tmp_path):
     report = evaluate(entries, _loader(_prices(start="2025-06-01", n=400)), min_n=MIN_N)
     assert report.n_entries == 16 and report.n_pending == 15 and report.n_resolved == 1
     assert report.conventions == {"decision_close": 1}
-    assert all(c.status == "insufficient" for c in report.cells)
+    assert all(c.status_alpha == "insufficient" for c in report.cells)
     assert all(c.hit_rate_alpha is None for c in report.cells)
 
 
@@ -213,3 +213,69 @@ def test_markdown_mentions_insufficient():
 @pytest.mark.parametrize("value,expected", [("+2.0%", 0.02), ("-0.0%", -0.0), ("x", None)])
 def test_parse_pct(value, expected):
     assert ev.parse_pct(value) == expected
+
+
+def test_min_n_gate_applies_per_metric_denominator():
+    days = pd.bdate_range("2024-10-01", periods=200, freq="7D")
+    entries = []
+    for i, d in enumerate(days[:21]):
+        alpha = "+1.0%" if i == 0 else "+0.0%"
+        entries.append(_entry(str(d.date()), alpha=alpha, raw="+1.0%"))
+    report = evaluate(entries, _loader(_prices(n=600)), min_n=20)
+    cell = _cell(report, "breakout_20", 1, "engine")
+    assert cell.n_independent == 21 and cell.den_alpha == 1 and cell.ties_alpha == 20
+    assert cell.status_alpha == "insufficient" and cell.hit_rate_alpha is None
+    assert cell.status_raw == "ok" and cell.hit_rate_raw == 1.0
+
+
+def test_only_ties_is_insufficient_not_ok():
+    entries = [_entry("2024-12-02", alpha="+0.0%", raw="+0.0%")]
+    cell = _cell(evaluate(entries, _loader(), min_n=1), "breakout_20", 1, "engine")
+    assert cell.den_alpha == 0 and cell.status_alpha == "insufficient"
+    assert cell.hit_rate_alpha is None
+
+
+def test_metrics_are_evaluated_independently_and_symmetrically():
+    entries = [
+        _entry("2024-12-02", alpha="n/a", raw="+1.0%"),
+        _entry("2024-12-16", alpha="+1.0%", raw="n/a"),
+        _entry("2024-12-23", alpha="n/a", raw="n/a"),
+    ]
+    report = evaluate(entries, _loader(), min_n=1)
+    cell = _cell(report, "breakout_20", 1, "engine")
+    assert report.n_unparseable == 1
+    assert (cell.den_alpha, cell.den_raw) == (1, 1)
+    assert cell.hit_rate_alpha == 1.0 and cell.hit_rate_raw == 1.0
+
+
+def test_independence_uses_real_sessions_around_a_holiday():
+    dates = pd.bdate_range("2024-11-01", periods=120)
+    dates = dates[dates != pd.Timestamp("2024-12-06")]  # a Friday without trading
+    frame = pd.DataFrame({"Date": dates, "Close": np.arange(len(dates)) + 100.0})
+    # Monday 12-02 and Monday 12-09: 5 weekdays apart but only 4 sessions
+    entries = [_entry("2024-12-02"), _entry("2024-12-09")]
+    cell = _cell(evaluate(entries, _loader(frame), min_n=1), "breakout_20", 1, "engine")
+    assert cell.n_all == 2 and cell.n_independent == 1 and not cell.approximate
+    # without session data the weekday fallback keeps both and is marked approximate
+    cases = [
+        {"ticker": "A", "date": "2024-12-02", "holding": 5},
+        {"ticker": "A", "date": "2024-12-09", "holding": 5},
+    ]
+    kept, approximate = ev._independent(cases)
+    assert len(kept) == 2 and approximate
+
+
+def test_convention_uses_sessions_when_available():
+    dates = pd.bdate_range("2024-11-01", periods=120)
+    dates = dates[dates != pd.Timestamp("2024-12-06")]
+    sessions = ev._sessions(pd.DataFrame({"Date": dates}))
+    # weekdays say 5 (decision_close); with the holiday only 4 sessions -> unknown
+    assert entry_convention("2024-12-02", "2024-12-09", 5) == "decision_close"
+    assert entry_convention("2024-12-02", "2024-12-09", 5, sessions) == "unknown"
+    assert entry_convention("2024-12-02", "2024-12-10", 5, sessions) == "decision_close"
+
+
+def test_markdown_shows_denominators_and_reference_groups():
+    text = ev.render_markdown(evaluate([_entry("2024-12-02")], _loader()))
+    assert "den a/r" in text and "status a" in text and "status r" in text
+    assert "independent cases" in text and "undirected" in text
