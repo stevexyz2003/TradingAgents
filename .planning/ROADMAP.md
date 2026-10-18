@@ -34,7 +34,8 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - [x] **Phase 2: Verbindung, Paper-Guard und Kontolesen** — ein lokaler Prozess liest `DUQ634065` read-only und füllt `PortfolioContext` (completed 2026-10-12)
 - [x] **Phase 3: Symbol-Auflösung, Handelbarkeit und Handelszeiten** — vom Roh-Ticker zu genau einem Contract, oder begründet gar nicht (completed 2026-10-12)
 - [x] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet (completed 2026-10-12)
-- [x] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order (completed 2026-10-17)
+- [x] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order
+ (completed 2026-10-17)
 - [ ] **Phase 6: Die erste echte Order** — umschalten, platzieren, im Ledger wiederfinden
 - [ ] **Phase 7: Rückkanal und Soll-Ist-Zusammenführung** — eigener Branch, Join beim Lesen
 - [ ] **Phase 8: Unbeaufsichtigter Betrieb** — Scheduler, Heartbeat, lauter Ausfall
@@ -316,7 +317,19 @@ Plans:
 - Kein zweiter oder dritter Ticker zwingend — ein Durchstich genügt, die Mechanik ist tickerunabhängig.
 - Keine Ausweitung der Leiter und keine Änderung der Blockgröße „weil es gut lief".
 
-**Plans:** TBD
+**Plans:** 10 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Ledger: execId-Korrekturregel, signierte Fills (WR-07), `fill_records`, `alarm` (Welle 1)
+- [ ] 06-02-PLAN.md — Jev-Abgleich über `summary.json`, State `rating-jev` (D-05/D-06) (Welle 1)
+- [ ] 06-03-PLAN.md — Socket-Sperre mit Order-Permit, `place_order` mit Fill-Warten, Fake (Welle 1)
+- [ ] 06-04-PLAN.md — Neue Zustände/Exits 9 und 10, Frische-Neuprüfung vor `intent`, `rating_source` im Ledger (Welle 2)
+- [ ] 06-05-PLAN.md — `execute --live`, `LivePlacer`, Post-Order-Kontrolle, Fills im selben Lauf (Welle 3)
+- [ ] 06-06-PLAN.md — Fill-Timeout ohne Storno, `place-rejected`, 399, zweiter Lauf am selben Tag (Welle 4)
+- [ ] 06-07-PLAN.md — `execute --resolve KEY=never_sent --note` (D-14) (Welle 5)
+- [ ] 06-08-PLAN.md — Reihenfolgetest REQ-45 und Negativ-Kontrollen im `--live`-Pfad (D-12, D-15) (Welle 5)
+- [ ] 06-09-PLAN.md — Operator-Checkpoint: 321-Beleg am Messtag und Ticker-Wahl (Welle 6)
+- [ ] 06-10-PLAN.md — Operator-Checkpoint: Freischaltung im Handbuch, erste echte Order, zweiter Lauf (Welle 7)
 
 ---
 
