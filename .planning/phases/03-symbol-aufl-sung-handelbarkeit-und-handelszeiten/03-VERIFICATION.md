@@ -2,8 +2,17 @@
 phase: 03-symbol-aufl-sung-handelbarkeit-und-handelszeiten
 verified: 2026-10-12T19:00:00Z
 status: human_needed
-score: 8/8 Roadmap-Kriterien belegt (SC1, SC2, SC4 zusätzlich am echten Paper-Gateway; SC3, SC5-SC8 durch Tests und Code); 2 Operator-Entscheidungen und 1 Samstagslauf offen
-overrides_applied: 0
+score: 8/8 Roadmap-Kriterien belegt (SC1, SC2, SC4 zusätzlich am echten Paper-Gateway; SC3, SC5-SC8 durch Tests und Code); beide Operator-Entscheidungen per Override angenommen (2026-10-18), Wochenend-Lauf offen
+overrides_applied: 2
+overrides:
+  - must_have: "REQ-IBKR-31 Handelbarkeit über ineligibilityReasonList geprüft"
+    reason: "ineligibilityReasonList existiert in ib_async 2.1.0 nicht (Kontobefund §4), der alte Wortlaut war nicht prüfbar. Ersatz: validExchanges ohne reines VALUE und mit SMART, orderTypes mit MKT und LMT, leere Felder gelten als nicht handelbar (D-19); letzte Schicht ist das whatIf-Preview aus Phase 4."
+    accepted_by: "Operator"
+    accepted_at: "2026-10-18T12:36:39Z"
+  - must_have: "REQ-IBKR-37 HALTED-Tick bzw. Fehler 154 verhindert die Order (Halt-Teil)"
+    reason: "Verzögerte Daten liefern am Paper-Konto keinen Halt-Tick (03-RESEARCH.md). Der Halt-Teil ist an die whatIf-Vorschau in Phase 4 übergeben (D-20): Zustand halted, test_code_154_is_halted; die 154-Messlücke ist dort per Override angenommen. Phase 3 liefert den Zustand halted in der Ergebnisschnittstelle."
+    accepted_by: "Operator"
+    accepted_at: "2026-10-18T12:36:39Z"
 human_verification:
   - test: "Samstagslauf: `python scripts/ibkr_executor.py resolve AAPL` an einem Tag ohne US-Sitzung (Samstag oder Sonntag)"
     expected: "Exit 0, Zeile `resolve: AAPL closed` mit dem nächsten Fenster (Montag, Öffnung plus 15 Minuten Puffer); kein `session-unknown`, kein Exit 2"
