@@ -462,18 +462,22 @@ Die konkrete `execId`-Form ist ein Platzhalter; der Operator-Checkpoint ersetzt 
 | A6 | Order-Fehler 399 („geparkt") erscheint als `ValidationError`-Status bzw. Request-Fehler und ist nie am realen Gateway gemessen (REQ-67-Lücke) | Pitfall 2, Open Question 3 | Falsche Behandlung geparkter Orders; Test baut auf der offiziellen Liste |
 | A7 | `Filled` im `orderStatus` kann vor der Execution in `reqExecutions` sichtbar sein | Pitfall 8 | Falscher `post-order-mismatch`-Alarm; Retry mildert |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`execute --resolve KEY=never_sent --note TEXT` (Phase-5-D-19) — in Phase 6 oder bewusst später?**
    - What we know: Phase-5-CONTEXT D-19 und das Handbuch (Zeile „A `--resolve` flag … comes with phase 6") versprechen es für Phase 6. 06-CONTEXT, Roadmap-SC und die fünf Requirements erwähnen es nicht. Im Ledger fehlt ein `resolved`-Event. Im Live-Ledger ist ein `intent` ohne Spur (Absturz zwischen `intent` und `placed`) unlösbar: Exit 6 in jedem Folgelauf; „Zeilen löschen" ist verboten, „Ledger umbenennen" würde die Idempotenz-Historie opfern.
    - What's unclear: Ob der Nutzer das als Eingangsaufgabe will.
    - Recommendation: Entscheiden lassen. Mindestweg: Placer schließt definitive Ablehnungen selbst (Pitfall 2) und das Handbuch beschreibt den Notausgang ehrlich. Sauberer Weg (klein, ein Plan): `resolved` als lifecycle-Event plus Flag.
+   - RESOLVED: D-14 — eigener kleiner Plan (06-07)
 
 2. **D-11 Wortlaut vs. Kette (Pitfall 1).** Der Nutzer sollte bestätigen, dass der 321-Beleg am whatIf (`preview-read-only`, Exit 5) als Erfüllung zählt.
+   - RESOLVED: D-15 — `preview-read-only` (Exit 5) zählt als 321-Beleg
 
 3. **Behandlung von 399/„geparkt" (REQ-63, D-22).** Vorschlag: Beobachtet der Placer in den Request-Fehlern 399 oder einen anderen als `Submitted/PreSubmitted/Filled` laufenden Status ohne Fill nach Ablauf, zählt das als Timeout bzw. `post-order-mismatch` mit Detail „parked (399)". Nicht am Gateway messbar ⇒ Fake-Test, in der Verifikation als REQ-67-Lücke benennen (wie `halted`).
+   - RESOLVED: D-16 — nur Fake-Test, dokumentierte Lücke (06-06)
 
 4. **Sollen mehrere Ticker pro Lauf live gehen?** D-03 sagt „ein Ticker genügt". Der Code unterstützt eine Liste; das Permit ist deshalb pro Order. Empfehlung: Der Operator-Checkpoint übergibt genau einen Ticker.
+   - RESOLVED: D-03 — genau ein Ticker im Operator-Checkpoint (06-09/06-10)
 
 ## Environment Availability
 

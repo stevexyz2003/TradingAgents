@@ -319,15 +319,35 @@ Plans:
 **Plans:** 10 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 06-01-PLAN.md — Ledger: execId-Korrekturregel, signierte Fills (WR-07), `fill_records`, `alarm` (Welle 1)
 - [ ] 06-02-PLAN.md — Jev-Abgleich über `summary.json`, State `rating-jev` (D-05/D-06) (Welle 1)
 - [ ] 06-03-PLAN.md — Socket-Sperre mit Order-Permit, `place_order` mit Fill-Warten, Fake (Welle 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 06-04-PLAN.md — Neue Zustände/Exits 9 und 10, Frische-Neuprüfung vor `intent`, `rating_source` im Ledger (Welle 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 06-05-PLAN.md — `execute --live`, `LivePlacer`, Post-Order-Kontrolle, Fills im selben Lauf (Welle 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 06-06-PLAN.md — Fill-Timeout ohne Storno, `place-rejected`, 399, zweiter Lauf am selben Tag (Welle 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 06-07-PLAN.md — `execute --resolve KEY=never_sent --note` (D-14) (Welle 5)
 - [ ] 06-08-PLAN.md — Reihenfolgetest REQ-45 und Negativ-Kontrollen im `--live`-Pfad (D-12, D-15) (Welle 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 06-09-PLAN.md — Operator-Checkpoint: 321-Beleg am Messtag und Ticker-Wahl (Welle 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 06-10-PLAN.md — Operator-Checkpoint: Freischaltung im Handbuch, erste echte Order, zweiter Lauf (Welle 7)
 
 ---
