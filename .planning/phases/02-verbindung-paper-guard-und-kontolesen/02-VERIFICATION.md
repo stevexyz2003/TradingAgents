@@ -185,15 +185,9 @@ Alle 12 IDs aus ROADMAP Phase 2 sind in mindestens einem PLAN beansprucht. Die R
 **Erwartet:** datierter Befund oder Override-Eintrag
 **Warum menschlich:** Dafür muss der Operator die Verbindung des Gateways absichtlich stören.
 
-Override-Vorschlag, falls akzeptiert:
+**Angenommen per Override am 2026-10-12** (`accepted_by: Operator`, `accepted_at: 2026-10-12T14:50:00Z`); maßgeblich ist der `overrides:`-Eintrag in der Frontmatter, nicht dieser Vorschlag.
 
-```yaml
-overrides:
-  - must_have: "REQ-IBKR-67 Fehlercodes gemessen, nicht angenommen (Link-Codes 1100/1101/1102/1300/2110)"
-    reason: "Offiziell dokumentierte IBKR-Codes, von ib_async selbst behandelt; Messung erfordert absichtliche Störung und folgt mit Phase 8 K6 (1100-Fehlerbild)"
-    accepted_by: "<name>"
-    accepted_at: "<ISO timestamp>"
-```
+**Nachtrag 2026-10-18:** Die Override-Begründung „Fail-closed bleibt gewahrt: Ein unerwarteter Code lässt die Liveness-Probe weiter scheitern" traf beim Abschluss nicht zu — das Lesefenster kannte nur `LINK_CODES`, ein unbekannter System-Code ließ eine aus dem Cache beantwortete Probe als gesund durch (Annahme A4). Seit `d344433` (2026-10-16) verwirft jede System-Meldung außerhalb von `WINDOW_BENIGN_CODES` das Lesefenster; die Begründung gilt damit per Konstruktion.
 
 #### 4. Gateway „Allow connections from localhost only“
 
