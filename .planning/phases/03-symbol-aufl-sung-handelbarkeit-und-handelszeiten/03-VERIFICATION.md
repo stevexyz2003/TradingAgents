@@ -1,8 +1,8 @@
 ---
 phase: 03-symbol-aufl-sung-handelbarkeit-und-handelszeiten
 verified: 2026-10-12T19:00:00Z
-status: human_needed
-score: 8/8 Roadmap-Kriterien belegt (SC1, SC2, SC4 zusätzlich am echten Paper-Gateway; SC3, SC5-SC8 durch Tests und Code); beide Operator-Entscheidungen per Override angenommen (2026-10-18), Wochenend-Lauf offen
+status: passed
+score: 8/8 Roadmap-Kriterien belegt (SC1, SC2, SC4 zusätzlich am echten Paper-Gateway; SC3, SC5-SC8 durch Tests und Code); beide Operator-Entscheidungen per Override angenommen, Wochenend-Lauf am echten Gateway bestanden (2026-10-18)
 overrides_applied: 2
 overrides:
   - must_have: "REQ-IBKR-31 Handelbarkeit über ineligibilityReasonList geprüft"
@@ -13,6 +13,7 @@ overrides:
     reason: "Verzögerte Daten liefern am Paper-Konto keinen Halt-Tick (03-RESEARCH.md). Der Halt-Teil ist an die whatIf-Vorschau in Phase 4 übergeben (D-20): Zustand halted, test_code_154_is_halted; die 154-Messlücke ist dort per Override angenommen. Phase 3 liefert den Zustand halted in der Ergebnisschnittstelle."
     accepted_by: "Operator"
     accepted_at: "2026-10-18T12:36:39Z"
+re_verification: "2026-10-18T12:39:09Z — alle 3 human_verification-Punkte erledigt (2 Overrides, 1 echter Wochenend-Lauf), siehe 03-HUMAN-UAT.md"
 human_verification:
   - test: "Samstagslauf: `python scripts/ibkr_executor.py resolve AAPL` an einem Tag ohne US-Sitzung (Samstag oder Sonntag)"
     expected: "Exit 0, Zeile `resolve: AAPL closed` mit dem nächsten Fenster (Montag, Öffnung plus 15 Minuten Puffer); kein `session-unknown`, kein Exit 2"
