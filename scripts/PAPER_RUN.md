@@ -152,6 +152,36 @@ does not pay for API calls. Put the same five variables the workflow pins
 into your local `.env` (block at the end of `.env.example`); the preflight
 line `provider=… deep=… quick=…` shows which ones took effect.
 
+**Check that the data vendors actually answer.** On a machine whose antivirus
+or proxy inspects HTTPS, yfinance and SEC EDGAR fail certificate checks
+(`CertificateVerifyError`, `curl: (60)`, `SSLError` in the log) and the run
+quietly falls back to other vendors - the report still appears, built on
+substitute data. On the development machine this is AVG Web/Mail Shield: it
+re-signs every HTTPS connection with its own root, which sits in the Windows
+certificate store but not in the `certifi` bundle that `requests` and
+`curl_cffi` use. CI on Linux is not affected. The fix is machine-local, not
+code: build a bundle of `certifi` plus that root outside the repository and
+point three variables at it in the local `.env`, which `tradingagents` loads on
+import:
+
+```powershell
+$c = Get-ChildItem Cert:\LocalMachine\Root | Where-Object Subject -match 'AVG Web/Mail Shield Root'
+$d = "$env:LOCALAPPDATA\TradingEngineX\tls"; New-Item -ItemType Directory -Force $d | Out-Null
+"-----BEGIN CERTIFICATE-----`n" + [Convert]::ToBase64String($c.RawData, 'InsertLineBreaks') + "`n-----END CERTIFICATE-----" | Set-Content -Encoding ascii "$d\avg-web-shield-root.pem"
+Get-Content (& .venv\Scripts\python.exe -m certifi), "$d\avg-web-shield-root.pem" | Set-Content -Encoding ascii "$d\ca-bundle.pem"
+```
+
+```dotenv
+REQUESTS_CA_BUNDLE=C:\Users\<you>\AppData\Local\TradingEngineX\tls\ca-bundle.pem
+CURL_CA_BUNDLE=C:\Users\<you>\AppData\Local\TradingEngineX\tls\ca-bundle.pem
+SSL_CERT_FILE=C:\Users\<you>\AppData\Local\TradingEngineX\tls\ca-bundle.pem
+```
+
+Rebuild the bundle after a `certifi` upgrade. A local run with the bundle in
+place shows no certificate errors in its log; on 2026-10-18 SEC answered 200
+and yfinance returned real AAPL/MSFT prices through it, where both failed
+before.
+
 Add `--preflight` to validate everything without spending anything. Point
 `--state` at the same directory every time or the track record will not build
 up. `--date auto` is the previous weekday; pass `YYYY-MM-DD` for a backfill.
