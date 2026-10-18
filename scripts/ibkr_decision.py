@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -395,6 +396,10 @@ def judge_preview(
         return verdict(
             CURRENCY_MISMATCH, f"funds in {funds_currency}, account in {account_currency}"
         )
+    if not math.isfinite(available_funds):
+        # An unknown budget is no budget: with nan/inf the comparison below is always
+        # False and every preview would pass (review P4 IN-04).
+        return verdict(OVER_BUDGET, f"available funds {available_funds!r} is not a finite number")
     if preview.init_margin_change >= available_funds:
         return verdict(
             OVER_BUDGET,

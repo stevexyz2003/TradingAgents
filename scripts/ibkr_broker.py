@@ -395,6 +395,26 @@ def _order_record(source: str, trade) -> OrderRecord:
     )
 
 
+def _finite_account_value(row) -> float:
+    """An account-summary amount as a finite float, or ``SNAPSHOT_INCOMPLETE``.
+
+    ``float()`` accepts ``"nan"`` and ``"inf"`` and raises a bare ``ValueError`` on
+    ``""``; a cash or funds figure like that is no figure, and a budget compared
+    against nan passes everything (review P2 IN-02, P4 IN-04).
+    """
+    try:
+        number = float(row.value)
+    except (TypeError, ValueError):
+        number = math.nan
+    if not math.isfinite(number):
+        raise GatewayUnavailable(
+            SNAPSHOT_INCOMPLETE,
+            None,
+            f"{row.tag} for {EXPECTED_ACCOUNT} is not a finite number: {row.value!r}",
+        )
+    return number
+
+
 def _money(value) -> float | None:
     """A readable number, else None: text, NaN and the unset sentinel (1.797e308) are None."""
     try:
@@ -906,9 +926,9 @@ class IbkrBroker:
         return AccountSnapshot(
             account=EXPECTED_ACCOUNT,
             positions=held,
-            cash=float(cash.value),
+            cash=_finite_account_value(cash),
             cash_currency=cash.currency,
-            available_funds=float(funds.value),
+            available_funds=_finite_account_value(funds),
             available_funds_currency=funds.currency,
             as_of=datetime.now(UTC),
         )
