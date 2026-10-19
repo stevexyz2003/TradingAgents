@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: M2
 milestone_name: IBKR Paper Execution
 status: ready_to_plan
-last_updated: "2026-10-19T07:12:58.659Z"
+last_updated: "2026-10-19T07:20:17.016Z"
 last_activity: 2026-10-19
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 41
-  completed_plans: 35
+  completed_plans: 36
   percent: 50
 ---
 
@@ -22,7 +22,7 @@ progress:
 ## Current Position
 
 Phase: 06 (die-erste-echte-order) — EXECUTING
-Plan: 5 of 10
+Plan: 6 of 10
 **Nächster Schritt: M2 Phase 5 planen — `/gsd:plan-phase 5`** (Kontext steht in
 `.planning/phases/05-leitplanken-scharf/05-CONTEXT.md`). Kill-Switch, Ledger,
 Lock, Reconciliation und neu das Sitzungsfenster aus REQ-IBKR-25, alles ohne eine

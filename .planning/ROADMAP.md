@@ -316,7 +316,7 @@ Plans:
 - Kein zweiter oder dritter Ticker zwingend — ein Durchstich genügt, die Mechanik ist tickerunabhängig.
 - Keine Ausweitung der Leiter und keine Änderung der Blockgröße „weil es gut lief".
 
-**Plans:** 4/10 plans executed
+**Plans:** 5/10 plans executed
 
 Plans:
 **Wave 1**
@@ -331,7 +331,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 06-05-PLAN.md — `execute --live`, `LivePlacer`, Post-Order-Kontrolle, Fills im selben Lauf (Welle 3)
+- [x] 06-05-PLAN.md — `execute --live`, `LivePlacer`, Post-Order-Kontrolle, Fills im selben Lauf (Welle 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
