@@ -82,11 +82,15 @@ if kind == "rejected":
 **Issue:** `_deviation` writes the "trusted" executions as `filled`/`partial`. Both are lifecycle events outside `OPEN_EVENTS`, so `unresolved()` no longer returns the key, and the next run's reconciliation never looks at it again. Example: status `Filled`, but after 5 s of `_read_back` only one of the two executions is visible. The run writes `partial` for 1 share and an alarm, and the entry is closed. The second execution never reaches the ledger, and `filled_quantity` stays 1 against broker 2, so every later run ends as `source-conflict` with no in-tool fix. This contradicts the `ALARM` docstring (`ibkr_ledger.py:45-47`, "the entry stays open for the reconciliation of the next run").
 **Fix:** Write no `filled`/`partial` lines in `_deviation` unless the order is confirmed done *and* the effective executions equal the order's reported filled quantity. Otherwise keep the trusted executions only in the alarm's `seen` and let the next reconciliation write the fills from `fill_records(..., known_exec_ids=...)`. The alternative is to add `ALARM` to the open check in `unresolved()`.
 
+**Fixed (e127653):** `_deviation` schreibt Fill-Zeilen nur noch, wenn `_fills_are_final` gilt: Order beim Broker in einem Endstatus (`_DONE`), `filled` gesetzt und gleich der Summe der effektiven vertrauenswuerdigen Executions. Sonst keine Fill-Zeile; die Executions stehen im Alarm unter `seen.trusted`, der Alarm traegt `fills_booked`, der Eintrag bleibt nach `placed` offen (Exit 10, Laufstopp unveraendert). Nachgewiesen: der Folgelauf (gleicher Tag und spaeterer Tag) bucht beide Executions per `fill_records(..., known_exec_ids=...)` genau einmal, ein dritter Lauf bucht nichts mehr, `filled_quantity == 2`, kein `source-conflict`. Die bestaetigte Teilfuellung (Cancelled, filled 1 == 1 Execution) schreibt weiter `partial` und schliesst. `ALARM`-Docstring und Handbuch angepasst.
+
 ### WR-03: A `placed` entry with no broker trace the next day is a permanent exit 6, and `--resolve` refuses it
 
 **File:** `scripts/ibkr_executor.py:1571-1578`, `scripts/ibkr_ledger.py:704-706`, `scripts/ibkr_executor.py:2078-2098`
 **Issue:** After `fill-timeout`, `placed` is always written. Say the DAY order then expires unfilled and the next run is on a later day. `reqCompletedOrders` and `reqExecutions` (current session/day) then show nothing, `resolve_entry` returns `no_trace`, and the run ends with exit 6. `run_resolve_entry` refuses anything whose last event is not `intent` (`RESOLVE_NOT_INTENT`, exit 2). The only remaining remedy is editing the append-only ledger by hand. The same time window also cuts the other way: a crash between `placeOrder` and the `placed` write, reconciled only a day later, shows `no_trace`, and the documented remedy `--resolve ...=never_sent` would then book an order that actually filled as "never sent".
 **Fix:** Tell the operator (console line at FILL_TIMEOUT, plus the manual) to reconcile on the **same** trading day. Either extend `--resolve` with an outcome for `placed` entries (for example `expired_unfilled`, which needs the operator to confirm in TWS), or check `positions()` before `never_sent` is accepted.
+
+**Fixed (4c692d1):** Beides umgesetzt. `--resolve KEY=expired_unfilled` schliesst einen Eintrag mit letztem Lifecycle-Ereignis `placed` (ein `resolved`-Event, keine Zeile geaendert, Key bleibt verbraucht); `never_sent` bleibt fuer `intent`, jede Variante lehnt den Fall der anderen mit Exit 2 ab (`RESOLVE_NOT_INTENT`/`RESOLVE_NOT_PLACED`). Vor dem Schreiben liest `run_resolve_entry` fuer beide Outcomes read-only Historie und `positions()` (keine neue Adapter-Methode) und verweigert ohne Schreiben: Treffer einer offenen/abgeschlossenen Order oder Execution per orderRef/permId/orderId (orderId nur auf der eigenen conId) -> Exit 6; Broker-Position der conId != signierte effektive Ledger-Fills (`filled_quantity`) -> Exit 6 (`RESOLVE_POSITION_MISMATCH`); Broker nicht lesbar -> Exit 3. Kein neuer Exit/Run-State; neuer Ledger-Wert `expired_unfilled` in `RESOLVE_OUTCOMES`, Executor-Tabelle `RESOLVE_LAST_EVENT` per Test an das Ledger gebunden. Konsolenzeile bei `fill-timeout` fordert Abgleich am selben Handelstag; Handbuch dokumentiert Abgleich, `expired_unfilled` und Broker-Guard. Bewusste Grenze: von Hand in TWS gekaufte Aktien derselben conId loesen den Positions-Guard ebenfalls aus (fail-closed, im Handbuch genannt).
 
 ## Info
 
@@ -96,17 +100,23 @@ if kind == "rejected":
 **Issue:** When `result.perm_id == 0`, orders are matched by `order_id`. Rows from `reqCompletedOrders` usually carry no orderId (0), so the fallback finds nothing, and the result is a false `post-order-mismatch`. That fails closed, but it raises an alarm.
 **Fix:** Fall back to `order_ref == intent["order_ref"]` when `perm_id` is 0, or take `perm_id` from `trade.order.permId` as well.
 
+**Fixed (ea352e9):** Beides. `place_order` nimmt die permId aus `trade.order.permId`, wenn der Status keine traegt. `_own` sucht ohne permId per orderId (nur wenn != 0; vorher passte orderId 0 auf jede Order ohne orderId) oder per `orderRef`; abgeschlossene Orders zuerst. `_unconfirmed_rejection` nutzt bereits `_matches` mit orderRef-Fallback. Tests: Broker-Test fuer die permId aus der Order, Executor-Test (permId 0, completed mit orderId 0) -> sauberer Fill ohne Alarm; beide scheitern ohne den Fix.
+
 ### IN-02: `rating_source: null` in `summary.json` aborts the whole run
 
 **File:** `scripts/ibkr_decision.py:216-219`
 **Issue:** `_check_type(raw["rating_source"], str, ...)` raises `SummarySchemaError`, which becomes a run-level `_RunAbort(summary-schema)` instead of skipping that one ticker. This fails closed. It only matters if the paper run ever writes `null`.
 **Fix:** Optionally treat `None` as missing (engine), or as `rating-jev` per ticker.
 
+**Fixed (2761811):** `null` wird als `RunRecord.rating_source_null` gelesen und endet nur fuer diesen Ticker als `rating-jev` (Detail "rating_source is null in summary.json; not traded", Ledger-Grund `review`); andere Ticker laufen weiter. Fehlender Key bleibt `engine`, andere Nicht-String-Typen bleiben `SummaryContractError`. Kein neuer State. Tests in `test_ibkr_decision.py` und ein Lauf-Test mit zwei Tickern; Handbuch ergaenzt.
+
 ### IN-03: The kill path can still cancel the order of an earlier ticker in a `--live` run
 
 **File:** `scripts/ibkr_executor.py:1954-1955`
 **Issue:** If KILL appears after ticker 1 was placed and is still open (`fill-timeout` stops the run first, so this needs a clean fill or a rejection), `_kill_path` sends `reqGlobalCancel` at the end of the run. This is the designed behaviour of D-17. It is noted here only because the brief says "cancel must never be called from the live path": that holds for the placer, not for a live run that sees KILL.
 **Fix:** None required. Mention it in the runbook for the first order.
+
+**Fixed (75684d9):** Kein Code. Handbuch, Abschnitt "RELEASE and KILL": ein `KILL` waehrend eines `--live`-Laufs sendet am Laufende den globalen Cancel (D-17) und kann eine noch offene Order eines frueheren Tickers zuruecknehmen; "nie stornieren" gilt nur fuer den Placer (D-08).
 
 ---
 
