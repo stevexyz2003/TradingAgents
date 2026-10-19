@@ -676,3 +676,93 @@ Folgen:
   eingeschaltetem Schalter mit `REQUEST_TIMEOUT` enden.
 - (c) Ob `reqCompletedOrders` über das Gateway bei ausgeschaltetem Schalter
   antwortet, prüft 06-10 Task 1. In Phase 5 lief die Historie über TWS.
+#### Messung 2: Erste echte Order (SC3)
+
+Handbuch-Commit der Freischaltung `698cffe` um 15:37:00 UTC, also vor der Order.
+`RELEASE` angelegt um 15:37:08 UTC, danach
+`execute AAPL --live --env-file pipeline-test.env` (Pipeline-Test-Branch `8453e76`),
+**Exit 10**:
+
+```text
+execute: post-order-mismatch (AAPL: order quantity 0.0, expected 1.0); run stopped - see IBKR_EXECUTION.md
+```
+
+Log (gekürzt):
+
+```text
+17:37:11,923 ibkr-state=PREVIEW detail="state=OK init_margin=100.9 commission=1.000003 tif sent=DAY effective=DAY order_ref=2026-10-16|AAPL"
+17:37:11,926 ibkr-state=EXECUTE_INTENT ticker=AAPL key=2026-10-16|AAPL sha=8453e764... side=BUY quantity=1
+17:37:11,927 placeOrder: orderId=18 clientId=20001 BUY 1 MKT DAY orderRef='2026-10-16|AAPL' account='DUQ634065'
+17:37:12,140 orderStatus: PreSubmitted permId=717633249
+17:37:12,284 execDetails execId='0000e0d5.6ad60c69.01.01' exchange='IEX' side='BOT' shares=1.0 price=342.86 orderRef='2026-10-16|AAPL'
+17:37:12,290 commissionReport commission=1.000003 USD
+17:37:12,353 ibkr-state=ORDER_SENT key=2026-10-16|AAPL detail="order_id=18 perm_id=717633249 status=Filled filled=1.0 timed_out=False"
+17:37:12,354 ibkr-state=ORDER_PLACED ticker=AAPL order_id=18 perm_id=717633249 status=Filled
+17:37:12,362 ERROR ibkr-state=POST_ORDER_MISMATCH ticker=AAPL detail="order quantity 0.0, expected 1.0"
+```
+
+Ledger (`ledger.jsonl`, Zeilen dieses Laufs, gekürzt):
+
+```json
+{"event":"intent","decision_key":"2026-10-16|AAPL","order_ref":"2026-10-16|AAPL","side":"BUY","quantity":1,"con_id":265598,"rating":"Overweight","rating_source":"engine","paper_log_sha":"8453e7642f257f6cf1cdd5ebb1738feee3632b3f","ts":"2026-10-19T15:37:11.925690+00:00"}
+{"event":"placed","order_id":18,"perm_id":717633249,"status":"Filled","source":"placer","ts":"2026-10-19T15:37:12.353884+00:00"}
+{"event":"filled","exec_id":"0000e0d5.6ad60c69.01.01","exec_time":"2026-10-19T15:37:12+00:00","filled_qty":1.0,"price":342.86,"order_id":18,"perm_id":717633249,"order_ref":"2026-10-16|AAPL","side":"BUY","source":"placer","ts":"2026-10-19T15:37:12.361115+00:00"}
+{"event":"alarm","state":"post-order-mismatch","detail":"order quantity 0.0, expected 1.0","fills_booked":true,"seen":{"status":"Filled","filled":1.0,"perm_id":717633249,"order_ref":"2026-10-16|AAPL"}}
+{"event":"run_end","exit":10,"state":"post-order-mismatch"}
+```
+
+Die Kette `intent → placed → filled` ist vollständig: `order_id`, `perm_id`,
+`order_ref == decision_key`, `exec_id`, `filled_qty` und Preis sind vorhanden. Die
+Order war 0,43 s nach dem Senden gefüllt (IEX, 342.86 USD, Kommission 1.00 USD).
+`RELEASE` wurde um 15:37:23 UTC entfernt.
+
+#### Messung 3: Historie nach dem Fill (SC5, SC6, A3)
+
+`ibkr_order_probe.py --history` (15:37:25 UTC), Exit 0:
+
+```json
+{
+  "open": [],
+  "completed": [
+    {"source": "completed", "order_ref": "2026-10-16|AAPL", "status": "Filled", "action": "BUY",
+     "quantity": 0.0, "filled": 1.0, "con_id": 265598, "perm_id": 717633249, "order_id": 0, "client_id": 0}
+  ],
+  "executions": [
+    {"exec_id": "0000e0d5.6ad60c69.01.01", "order_ref": "2026-10-16|AAPL", "con_id": 265598,
+     "perm_id": 717633249, "order_id": 18, "client_id": 20001, "shares": 1.0, "price": 342.86,
+     "side": "BUY", "time": "2026-10-19T15:37:12+00:00"}
+  ]
+}
+```
+
+Position (`account`, 15:37:34 UTC): AAPL 1.0, Cash 1,005,152.87 EUR. Das
+entspricht dem Ziel der Leiter (Overweight = 1 Block = 1 Aktie, vorher 0).
+
+#### Ursache des Alarms
+
+Die abgeschlossene Order aus `reqCompletedOrders` meldet über das Gateway
+**`quantity` 0.0** (totalQuantity), `order_id` 0 und `client_id` 0, obwohl sie mit
+`filled` 1.0 und Status `Filled` gefüllt ist. Die Prüfung nach der Order
+(`scripts/ibkr_executor.py`, Vergleich `float(order.quantity) != want`) nimmt
+`quantity` als Ordergröße und schlägt deshalb Alarm. Alle anderen Prüfungen
+stimmten: Status, Seite, `filled`, `orderRef`, `conId`, Executions und Summe der
+Executions. Es ist ein **Fehlalarm**, aber Exit 10 stoppt den Lauf.
+
+Folgen:
+
+- (a) Die Kette `intent → placed → filled` ist mit allen Feldern vollständig (SC3).
+  Dazu kommt ein falsches `alarm`.
+- (b) Die Execution trägt den `orderRef` (A3 bestätigt). Die abgeschlossene Order
+  trägt ihn auch, hat aber `order_id` 0 und `client_id` 0. Abgleichen lässt sie
+  sich über `orderRef` oder `permId`, nicht über `orderId`.
+- (c) Keine Korrektur beobachtet, es gibt nur `.01.01`. SC5 bleibt beim Fixture.
+- (d) Der Fill kam nach 0,43 s, weit unter den 60 s.
+- (e) **Lücke (Gap-Closure):** Die Prüfung nach der Order darf `quantity` einer
+  abgeschlossenen Order nicht gegen die Ordergröße prüfen, wenn das Gateway dort
+  0 meldet. Prüfen sollte sie `filled` und die Summe der Executions. Laut Plan
+  lief deshalb **kein zweiter Lauf** (SC4 offen) und es gab keine Codeänderung
+  am Messtag. Weil `fills_booked` true ist, bleibt der Eintrag nach WR-02 offen,
+  bis der Fix da ist.
+- D-13: Die gemessene execId-Form `0000e0d5.6ad60c69.01.01` (vier Segmente, Punkt,
+  8+8+2+2 Hex-Zeichen) entspricht dem Platzhalter im Fixture
+  `0000e0d5.6710a3c5.01.01`. Das Fixture bleibt unverändert.
