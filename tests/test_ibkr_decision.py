@@ -171,6 +171,22 @@ def test_rating_source_non_string_is_contract_error():
         _src_summary(rating_source=5)
 
 
+@pytest.mark.parametrize("value", [5, True, ["jev"], {"a": 1}], ids=["int", "bool", "list", "dict"])
+def test_rating_source_other_non_string_types_still_raise(value):
+    with pytest.raises(dec.SummaryContractError):
+        _src_summary(rating_source=value)
+
+
+def test_rating_source_null_is_read_and_fails_closed_per_ticker():
+    # IN-02: null is no proof of an engine rating; the ticker is not traded, nothing raises.
+    summary = _src_summary(rating_source=None)
+    assert summary.runs[0].rating_source is None and summary.runs[0].rating_source_null
+    v = dec.evaluate_decision(_entry(), summary)
+    assert v.state == dec.RATING_JEV
+    assert "rating_source is null" in v.detail
+    assert v.rating_source is None
+
+
 def test_rating_source_missing_field_means_engine():
     v = dec.evaluate_decision(_entry(), _src_summary())
     assert v.state == dec.EXECUTABLE and v.rating_source == "engine"

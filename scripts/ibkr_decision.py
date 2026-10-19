@@ -155,6 +155,9 @@ class RunRecord:
     signal: str | None
     #: Optional in summary.json: the paper run writes it only when the Jev fallback was active.
     rating_source: str | None = None
+    #: ``"rating_source": null`` in summary.json: no proof of an engine rating; only this
+    #: ticker fails closed (``rating-jev``), the run goes on (IN-02).
+    rating_source_null: bool = False
 
 
 @dataclass(frozen=True)
@@ -214,10 +217,13 @@ def read_summary(text: str) -> Summary:
             raise SummaryContractError(f"runs[{i}]: unknown status {raw['status']!r}")
         # REQ-IBKR-18: runs[*].report is never read.
         rating_source = None
-        if "rating_source" in raw:
+        source_null = "rating_source" in raw and raw["rating_source"] is None
+        if "rating_source" in raw and not source_null:
             _check_type(raw["rating_source"], str, f"runs[{i}].rating_source")
             rating_source = raw["rating_source"]
-        runs.append(RunRecord(raw["ticker"], raw["status"], raw["signal"], rating_source))
+        runs.append(
+            RunRecord(raw["ticker"], raw["status"], raw["signal"], rating_source, source_null)
+        )
     return Summary(data["schema_version"], data["trade_date"], data["status"], tuple(runs))
 
 
@@ -264,7 +270,9 @@ def evaluate_decision(entry: Mapping, summary: Summary | None) -> DecisionVerdic
         return verdict(SUMMARY_MISSING, f"{ticker} is not in the summary")
     # A missing field means engine (RESEARCH A1): the paper run writes rating_source only
     # when the Jev fallback was active.
-    source = run.rating_source if run.rating_source is not None else "engine"
+    # An explicit null is no such proof: no source, the ticker fails closed below (IN-02).
+    if not run.rating_source_null:
+        source = run.rating_source if run.rating_source is not None else "engine"
     if run.status != "ok":
         return verdict(RUN_NOT_OK, f"run status {run.status}")
     if run.signal is None:
@@ -279,6 +287,8 @@ def evaluate_decision(entry: Mapping, summary: Summary | None) -> DecisionVerdic
     if rating == "Hold":
         return verdict(SKIPPED_HOLD, "skipped: hold")
     # D-05/D-06: positive proof of an engine rating; Jev or an unknown source fails closed.
+    if run.rating_source_null:
+        return verdict(RATING_JEV, "rating_source is null in summary.json; not traded")
     if source == "jev":
         return verdict(
             RATING_JEV,

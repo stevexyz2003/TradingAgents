@@ -1745,6 +1745,24 @@ class TestSessionWindow:
         assert skipped["state"] == "rating-jev"
         assert _events(records, "intent") == []
 
+    def test_null_rating_source_skips_only_that_ticker(self, tmp_path, loop):
+        # IN-02: "rating_source": null fails closed per ticker; the run goes on.
+        summary = _summary("2026-10-09", ("AAPL", "ok", "Buy"), ("MSFT", "ok", "Buy"))
+        summary["runs"][0]["rating_source"] = None
+        paper = _paper(
+            tmp_path,
+            [("2026-10-09", "AAPL", "Buy"), ("2026-10-09", "MSFT", "Buy")],
+            {"2026-10-09": summary},
+        )
+        code, records = _gateway_run(
+            tmp_path, loop, _fake_for(("AAPL", "MSFT")), paper=paper, tickers=("AAPL", "MSFT")
+        )
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = [r for r in _events(records, "skipped") if r["ticker"] == "AAPL"]
+        assert skipped["state"] == "rating-jev"
+        assert "rating_source is null" in skipped["detail"]
+        assert [r["ticker"] for r in _events(records, "intent")] == ["MSFT"]
+
     def test_rating_source_jev_in_the_summary_is_what_the_intent_would_carry(self):
         # the intent takes the source from the verdict: an engine rating is "engine"
         assert "rating_source" in executor._ROW_KEYS
