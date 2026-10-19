@@ -615,7 +615,11 @@ Order of the chain, per run and per ticker:
     2. waits up to 60 s for the fill (outcomes: see "After the order is sent")
     3. reads the completed order and the executions at the broker (a few reads,
        the three broker sources are not read atomically)
-    4. compares them with the `intent`: status, quantity, side, `orderRef`, `conId`
+    4. compares them with the `intent`: status, quantity, side, `orderRef`, `conId`.
+       The quantity is checked through the order's `filled` count and the sum of
+       the executions; the order's own size is only compared when it is not 0,
+       because the gateway reports 0 there on completed orders (measured
+       2026-10-19)
     5. writes the fills, one line per `exec_id`, into the same run
     Any deviation writes an `alarm` (`post-order-mismatch`, with `expected` and
     `seen`) and stops the whole run with exit 10: the remaining tickers are not sent.

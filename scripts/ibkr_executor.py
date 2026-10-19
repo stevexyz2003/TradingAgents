@@ -1481,7 +1481,10 @@ class LivePlacer:
                 problems.append(f"order status {order.status!r}, expected 'Filled'")
             if order.action != intent["side"]:
                 problems.append(f"order side {order.action!r}, expected {intent['side']!r}")
-            if float(order.quantity) != want:
+            # The gateway reports totalQuantity 0 on completed orders (measured 2026-10-19,
+            # ibkr-konto-befund.md), so a zero there says nothing about the order size;
+            # `filled` and the executions below carry the check.
+            if order.quantity and float(order.quantity) != want:
                 problems.append(f"order quantity {order.quantity}, expected {want}")
             if order.filled is not None and float(order.filled) != want:
                 problems.append(f"order filled {order.filled}, expected {want}")

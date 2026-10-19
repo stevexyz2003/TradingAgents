@@ -2570,6 +2570,20 @@ class TestLivePlacer:
         assert "ibkr-state=ORDER_FILLED" in _log_text(tmp_path)
         assert not executor.default_dryrun_ledger_file().exists()
 
+    def test_completed_order_with_zero_quantity_is_a_clean_fill(self, tmp_path, loop):
+        # The gateway reports totalQuantity 0, orderId 0 on completed orders (first live
+        # order, 2026-10-19); filled and the executions still prove the size.
+        completed = _own_completed(quantity=0.0, order_id=0)
+        fake = _filling_fake(completed=completed)
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        assert _events(records, "alarm") == []
+        chain = [
+            r for r in records if r.get("decision_key") == KEY and r["event"] != "switch_check"
+        ]
+        assert [r["event"] for r in chain] == ["intent", "placed", "filled"]
+        assert chain[-1]["filled_qty"] == 2
+
     def test_intent_before_place(self, tmp_path, loop):
         fake = _filling_fake()
         seen = []
@@ -2602,7 +2616,15 @@ class TestLivePlacer:
 
     @pytest.mark.parametrize(
         "case",
-        ["short-fill", "wrong-side", "other-ref", "other-con-id", "empty-ref", "order-short"],
+        [
+            "short-fill",
+            "wrong-side",
+            "other-ref",
+            "other-con-id",
+            "empty-ref",
+            "order-short",
+            "order-quantity",
+        ],
     )
     def test_post_order_mismatch_stops_the_whole_run(self, tmp_path, loop, case):
         executions = [_own_fill()]
@@ -2619,6 +2641,8 @@ class TestLivePlacer:
             executions = [_own_fill(order_ref="")]
         elif case == "order-short":
             completed = _own_completed(filled=1)
+        elif case == "order-quantity":
+            completed = _own_completed(quantity=3)
         fake = _filling_fake(("AAPL", "MSFT"), executions=executions, completed=completed)
         code, records = _live_run(
             tmp_path,
