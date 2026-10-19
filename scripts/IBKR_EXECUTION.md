@@ -960,6 +960,37 @@ Findings for later plans:
   localhost only" was confirmed as set on 2026-10-12 (see "Gateway Read-Only
   switch").
 
+## First live order
+
+The first real order of the pipeline (phase 6, D-02), sent by Claude by hand while
+the operator watched the gateway. Details and raw output: `ibkr-konto-befund.md`,
+section "Erste echte Order (Phase 6)".
+
+| | |
+|---|---|
+| Date | 2026-10-19, order sent 15:37:11 UTC (17:37 local time) |
+| Decision | **pipeline test, not an engine decision.** 20 of 20 engine decisions for 2026-10-16 had no buy, so the operator relaxed D-03: one marked entry `[2026-10-16 \| AAPL \| Overweight \| pending]` on the branch `fork/paper-log-pipeline-test` (`8453e76`); `paper-log` itself is unchanged |
+| Command | `ibkr_executor.py execute AAPL --live --env-file <file with the IBKR keys and IBKR_PAPER_LOG_BRANCH=paper-log-pipeline-test>` |
+| Order | BUY 1 AAPL, MKT, DAY, `orderRef` `2026-10-16\|AAPL`, account `DUQ634065` |
+| Result | orderId 18, permId 717633249, filled 0.43 s after the send: 1 @ 342.86 USD on IEX, commission 1.00 USD, execId `0000e0d5.6ad60c69.01.01` |
+| Exit code, first run | **10** `post-order-mismatch`, a false alarm: the completed order from the gateway reports quantity 0.0 (and orderId 0, clientId 0) although it is filled 1.0. Fixed the same day (`28ef33a`, `46c432b`); the fill rows were booked (`fills_booked: true`) |
+| Ledger | `intent` -> `placed` -> `filled` with `order_id`, `perm_id`, `order_ref` = key, `exec_id`, `filled_qty` 1.0, price 342.86; then the `alarm` row |
+| Exit code, second run | **2** `already-attempted` (15:59:10 UTC), no order sent |
+| Position | AAPL 1.0 before 0; matches the ladder (Overweight = 1 block) |
+| Read-Only API | off since 17:36 local time and stays off (D-04) |
+
+Findings:
+
+* The execution carries the `orderRef`; the completed order carries it too, but with
+  orderId 0 and clientId 0. Match completed orders by `orderRef` or `permId`, never
+  by orderId.
+* The completed order's quantity is 0 on the gateway; `filled` and the executions
+  carry the size. Both the post-order check and the reconciliation now treat a
+  zero quantity as unknown.
+* With the Read-Only switch on, `execute --live` and `--history` end with
+  `REQUEST_TIMEOUT` (exit 3) at `reqCompletedOrders` (321 without a request id),
+  before the whatIf.
+
 ## First resolve run
 
 Four `resolve` runs against the running paper gateway (account `DUQ634065`),

@@ -766,3 +766,26 @@ Folgen:
 - D-13: Die gemessene execId-Form `0000e0d5.6ad60c69.01.01` (vier Segmente, Punkt,
   8+8+2+2 Hex-Zeichen) entspricht dem Platzhalter im Fixture
   `0000e0d5.6710a3c5.01.01`. Das Fixture bleibt unverändert.
+#### Messung 4: Zweiter Lauf am selben Tag und Position (SC4)
+
+Fixes vor dem zweiten Lauf: `28ef33a` (Operator; Prüfung nach der Order ignoriert
+`quantity` 0 der abgeschlossenen Order) und `46c432b` (Reconciliation: `quantity` 0
+gilt weder bei der Twin-Erkennung noch bei der Kollisionsprüfung als andere
+Ordergröße). `pytest -k ibkr`: 1246 passed, `ruff check .` sauber.
+
+`RELEASE` angelegt um 15:59:07 UTC, danach `execute AAPL --live --env-file
+pipeline-test.env`, **Exit 2**:
+
+```text
+execute: AAPL already-attempted (trade_date 2026-10-16, weekend_gap 3d)
+17:59:10,769 WARNING ibkr-state=EXECUTE ticker=AAPL state=already-attempted sha=8453e764... detail='2026-10-16|AAPL: intent of run 3473c4de6e4643e48b10bb4e69be6c3a at 2026-10-19T15:37:11.925690+00:00'
+```
+
+Ledger: `run_start`, `skipped` (`reason` `already_attempted`), `run_end` (Exit 2).
+Kein `ORDER_SENT` und kein `placeOrder` im Log. `RELEASE` um 15:59:11 UTC
+entfernt.
+
+Danach (15:59 UTC): Historie open=0, completed=1, executions=1, also weiterhin
+genau eine Order. Position AAPL 1.0 (`account`). Sie entspricht dem Ziel der
+Leiter (Overweight = 1 Block). Im State-Ordner liegen weder `RELEASE` noch
+`KILL`.
