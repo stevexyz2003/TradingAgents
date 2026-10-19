@@ -60,3 +60,10 @@ One row per ticker run. Written by `scripts/daily_paper_run.py`.
 | 2026-10-16 | AAPL | Hold | ok | 0.2402 | 153632/46505 | runs/2026-10-16/summary.json |
 | 2026-10-16 | MSFT | Hold | ok | 0.2523 | 165709/48847 | runs/2026-10-16/summary.json |
 | 2026-10-16 | NVDA | Hold | ok | 0.2409 | 160081/46584 | runs/2026-10-16/summary.json |
+| 2026-10-16 | AMZN | Hold | ok | 0.2080 | 141615/37871 | runs/2026-10-16/summary.json |
+| 2026-10-16 | GOOGL | Hold | ok | 0.2420 | 142405/48569 | runs/2026-10-16/summary.json |
+| 2026-10-16 | META | Underweight | ok | 0.2365 | 151702/46083 | runs/2026-10-16/summary.json |
+| 2026-10-16 | TSLA | Underweight | ok | 0.2187 | 144912/40656 | runs/2026-10-16/summary.json |
+| 2026-10-16 | AVGO | Hold | ok | 0.2324 | 145859/45995 | runs/2026-10-16/summary.json |
+| 2026-10-16 | AMD | Hold | ok | 0.2151 | 148136/39700 | runs/2026-10-16/summary.json |
+| 2026-10-16 | JPM | Hold | ok | 0.2395 | 163153/44362 | runs/2026-10-16/summary.json |

@@ -563,3 +563,321 @@ DECISION:
 
 <!-- ENTRY_END -->
 
+[2026-10-16 | AMZN | Hold | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold AMZN at standard weight. Don't add or start a full position at about 250. A daily close below 245.96 is a warning. A close below 242.73 (the 200 SMA) means trimming 25–50% below standard weight. A close above 254.60 and then 257.08, with the MACD histogram turning up, allows a starter of no more than a quarter of the intended size. Size the starter on the real stop distance, and re-evaluate at the next earnings release or at a decisive break of either level.
+
+**Investment Thesis**: The evidence is balanced, and the real disagreement is about entry timing. It does not show that the business is impaired.
+
+**Why not Overweight or Buy (the aggressive case):**
+- The aggressive case leans on inferences the data doesn't support. The VWMA reading of "selling on lighter volume" is unproven, because the report has no up-day versus down-day volume breakdown.
+- Treating missing news as a bullish default is the same error as treating it as bearish.
+- The risk math is internally inconsistent. It uses a 254.60 entry for the reward and a roughly 250 entry for the risk. It says to exit if the 200 SMA fails, but the 238.5 stop sits below the 242.73 SMA.
+- The "1 to 1 to the upper Bollinger band" claim fails. The band at 262.80 is about 8 points above 254.60, against 16 points of risk, which is about 0.5 to 1.
+- Short-term trend signals are deteriorating:
+  - Price of 250.00 is below the 10 EMA (254.60) and the falling 50 SMA (257.08).
+  - RSI is about 45.
+  - The MACD histogram has shrunk to 0.13.
+- Free cash flow is negative: about -$8.8B last quarter and about -$34B over five quarters. Capex is about $54B and the financing inflow was $52.8B. Cash fell about $23.6B and the current ratio is about 1.03. Net income of $62.6B is flattered by roughly $35B of non-operating items, likely mark-to-market gains. Social sentiment support is thin (4.8/10, low confidence).
+
+**Why not Underweight or Sell (the conservative case):**
+- Revenue is $200.6B, up about 20%. Operating income is $27.5B and margin is about 13.7%, up from about 13.1%.
+- The 200 SMA is still rising (240.11 to 242.73) and price is above it.
+- The negative free cash flow comes from a capex buildout, which doesn't by itself show impairment. The debt share of the financing inflow can't be verified.
+- Several inputs are missing: AWS growth, company news, FRED macro and rates data, valuation multiples, and verified debt figures. That is too thin a basis to cut exposure beyond the trigger-based trim.
+
+**Execution refinements from the neutral analyst:**
+- Use closing prices for triggers.
+- If starting on a reclaim of 254.60, size on the real stop distance of about 16 points to 238.5. Alternatively, tighten the stop toward about 242 or cut the share count to about two-thirds of the normal-risk formula.
+- Assume a gap through the stop could cost an extra 2–3%.
+- Add the remainder only after a close above 257.08 with the histogram rising.
+- Trim on a close below 242.73. Treat a close below 238.5 as a full exit.
+- Handle the missing macro data by sizing smaller. Don't use it as a reason to stay at zero.
+
+**What would change the call:**
+- Toward Overweight: a reclaim of 254.60 and 257.08, a rising MACD histogram, and free cash flow stabilizing as capex plateaus.
+- Toward Underweight: a close below 242.73.
+
+**Lesson applied:** State an expected range and check the MACD histogram within the first two or three sessions. A reasonable holding-period range is roughly 242–262.
+
+**Price Target**: not provided
+
+**Time Horizon**: Until next earnings release or a decisive break of 242.73 or 257.08 (roughly 1–3 months)
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | GOOGL | Hold | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold GOOGL at your current weight and don't add before the Q3 10-Q, which is expected in late October. If you are flat, take at most a quarter to a third of a standard allocation, and only if price holds above the 200 SMA (about 340.56). Size it so a gap to about 317–320 is tolerable, because a stop at 330.65 won't protect against a gap. Reassess right after the print and add on the confirmation triggers below. Reduce on a close below 336 or on a deterioration in margins or growth.
+
+**Investment Thesis**: **Why Hold wins.** The evidence is balanced, and the one input that would break the tie is missing. That input is valuation, along with news, macro, insider and antitrust data. All of these were unavailable in this run.
+
+**The Aggressive case** has strong business facts:
+- Revenue growth was about 24% in Q2 2026, versus about 22% in Q1 2026 and about 16% in Q3 2025.
+- Operating income rose about 30%.
+- The current ratio is about 2.7x, and liabilities are about 31% of assets.
+
+Its trade structure is weaker, for three reasons:
+- The stop is about 1.1 ATR from entry, with ATR near 8.9, so ordinary noise can reach it.
+- The July low of 317.49 sits well below the "floor" it relies on.
+- The 356.71 upper band target is resistance that hasn't been closed above recently.
+
+The Aggressive analyst also admits the data gaps argue for controlling size, yet recommends adding before the print. That is internally inconsistent.
+
+**The Conservative case** is right about the following:
+- Q2 free cash flow was about -$5.9B, with capex of about $45B above operating cash flow.
+- H1 free cash flow is down about 82%.
+- H1 financing inflows were about $86B.
+- Net income of $112B is far above operating income of $40.8B, so earnings quality is questionable.
+- Sequential operating margin fell from 36.1% to 34.0%, with cost of revenue growing faster than revenue.
+- The chart is weak: price is on the 200 SMA, below a falling 10 EMA, with a fresh MACD bearish cross and RSI at 44.5.
+- A stop can't protect against an earnings gap.
+
+The Conservative analyst overreaches by treating a single close below the 200 SMA as a reduce signal. With price only 0.03 above that level and ATR near 8.9, that would be noise.
+
+**The Neutral analyst** correctly notes two things:
+- Year-over-year operating margin improved from 32.4% to 34.0%, while sequential margin compressed. Only the Q3 print can show which is the trend.
+- Waiting for a price confirmation costs about 2%, which is modest.
+
+**Net view.** Business quality favors the bulls. Cash conversion, earnings quality, unknown valuation and weak near-term technicals favor the bears. Neither side wins decisively. The binary Q3 10-Q catalyst is about two weeks away, and its timing is expected rather than confirmed. The best risk-adjusted action is not to change size before it.
+
+**Lesson applied.** A prior Hold (AAPL) was scored on relative return alone. Here the expected holding-period range is about 317–357, based on the July low and the upper band. Check the MACD histogram within the first two or three sessions.
+
+**What would move me up toward Overweight:**
+- Q3 revenue growth holds at or above about 22–24%, and operating income grows near 30%.
+- Operating margin is stable at or above 34%.
+- Operating cash flow recovers above about $39B with capex flat, so free cash flow turns positive.
+- Valuation is verified and supportable, and the antitrust status is checked.
+- Price closes above the 10 EMA (about 347) for several sessions, with the MACD histogram turning positive.
+
+**What would move me down toward Underweight:**
+- Revenue growth falls below about 20%.
+- Operating margin falls toward 32% or lower while costs still outpace sales.
+- Capex again outgrows operating cash flow.
+- Price closes below 336, or closes twice below the 200 SMA. A break of the 330.65 low would make the July low near 317 the next reference.
+
+If the position is large relative to your book, trim toward a size you could hold through a 10–15% drawdown.
+
+**Price Target**: 347.37
+
+**Time Horizon**: 2-4 weeks, reassess right after the late-October Q3 10-Q
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | META | Underweight | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Underweight
+
+**Executive Summary**: Underweight META. Trim to about 50–66% of a standard allocation, and add no new money before earnings. Sell about a third of the intended cut now, because the breakdown on volume is real. Put the rest on a limit ladder into the $730–736 zone with a firm date deadline, so the trim still happens if the bounce never comes. If META closes below the $703 lower Bollinger band, make the second cut. Reassess toward the 50-day (~$655) if it fails. If META closes back above $730–736 on volume, stop reducing and rebuild. The trader's "Sell" label overstates the plan: the sizing is a partial reduction, not an exit.
+
+**Investment Thesis**: The conservative case is stronger than the aggressive one, though not by enough to justify a full exit.
+
+**What decided it for the bear side**
+- Incremental economics are the main point. Q2 revenue grew about 28%, yet operating income fell about 8% and operating margin dropped from roughly 43% to roughly 31%. The aggressive analyst never answered why profit is shrinking at this growth rate.
+- The "funded from operations" claim doesn't hold up:
+  - H1 capex was $49B, up 67%, against operating cash flow of $64B, up 29%.
+  - Q2 free cash flow was about $1.7B, versus about $13B in Q1.
+  - Financing swung to a net inflow.
+  - Liabilities are up sharply.
+  - The company is borrowing to build.
+- The technicals broke down on the day. The close of 709.33 came on 20.6M shares, near the session low. It was below the 10 EMA and the VWMA. The intraday low of 702.71 pierced the lower band at 703.25. The MACD histogram is the most negative in the window, and highs have been falling (777.59, 762.50, 736.72, 709.33).
+- The aggressive "digestion" story assumes the floor holds. The one session we have says it didn't.
+- A binary event with asymmetric gap risk argues against full size. ATR is about 25 points, and an earnings gap can be a multiple of that. A move to the 50-day is about 7.7% below the close before any gap. The aggressive analyst's "defined loss" at $655 has no order behind it.
+
+**Why not Sell**
+- The medium-term trend is intact. The 50 SMA (654.96) is above the 200 SMA (631.07), and price is about 8% above the 50-day.
+- Revenue growth of 28–33% is exceptional, and the balance sheet is not stressed (current ratio about 2.2x).
+- RSI has reset to about 50.
+- The neutral analyst is right that one bar is not proof of a trend break, since META has not yet closed below $703.
+- Evidence gaps:
+  - No valuation data.
+  - The earnings date and consensus are unconfirmed.
+  - Sentiment is neutral and low-confidence.
+  - Macro data is unverified.
+  - There is no options data.
+
+**Execution notes**
+- The $736.7 level is an invalidation or re-entry trigger, not a stop on a long. The aggressive analyst's critique of the label was fair.
+- The neutral analyst's point about execution risk is valid, so the time-boxed ladder and the partial cut now are adopted. Skip the options hedge unless the premium can be verified as reasonable.
+
+**What would change the view**
+- Upgrade toward Hold, then Overweight, if at least two of these happen:
+  - Operating income grows at least as fast as revenue, with margin stabilizing in the mid-30s or higher.
+  - Free cash flow recovers toward about $13B, or capex growth falls below operating cash flow growth.
+  - Financing returns to outflows, or liabilities stop outgrowing equity.
+  - A close back above $730–736 would add confirmation.
+- Downgrade to Sell or a minimal weight if revenue growth slows toward 20% with capex guidance still rising, or if operating margin falls further below 30%.
+- Valuation that is clearly compressed relative to growth would also move the stance toward Hold.
+
+**Price Target**: 655.0
+
+**Time Horizon**: Through the next earnings report, then reassess (roughly 1–2 months)
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | TSLA | Underweight | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Underweight
+
+**Executive Summary**: Underweight TSLA: trim about 25–35% of a standard position in stages, ideally into bounces toward 359–368, and don't add or average down at 349–355. Treat a daily close below 349.6 as a checkpoint to cut toward 50% of standard, and a daily close below 337 as the trigger to cut to 25% or less. Confirm the Q3 earnings date and be at a size you can hold through the print. Upgrade toward Hold only on a daily close above 359.46 followed by a reclaim of 368–370. Holdings weren't provided, so apply these percentages to your own position.
+
+**Investment Thesis**: The Research Manager's Underweight holds up. The Aggressive analyst's counter-case is the weakest of the three, for four reasons.
+
+1. **Fundamentals.** Q2 2026 revenue grew 25.5% while operating income fell 57%, and operating margin is about 1.4%. Q2 free cash flow was roughly -$1.1B, with capex of about $5.8B against operating cash flow of about $4.7B. Cash is down 17%. The "heavy investment phase" framing is a hypothesis with no evidence yet. The Aggressive analyst conceded these numbers and answered with framing only. Net income of $1.1B against operating income of $398M is unexplained, so it can't support a bullish read either.
+2. **Technicals.** The close of 354.72 is below the 10 EMA (368.18), the 50 SMA (359.46) and the Bollinger middle (370.33). The 200 SMA (387.99) is falling, and MACD has crossed bearish. There were five straight lower closes on about 2.3x average volume, with a close near the lows. The Aggressive analyst's "flush bottom" reading needs a reversal or a close back above lost levels, and neither has appeared. The Neutral analyst correctly noted that the lower band (349.62) was tested intraday and not broken on a close, so I don't call it a breakdown yet.
+3. **Risk/reward.** The Aggressive analyst's 2:1 figure measures to 388, but the first resistance levels (359, 368, 370) are only 5–13 points away. The first leg is therefore poor value, as the Conservative analyst argued. The Aggressive analyst's "bolder" stop below the 298 structure risks about 57 points a share. That contradicts the complaint that an 18-point stop is too tight, and it exposes the position to the fat-tail gap risk shown by the 14.5% one-day drop on July 23. A 10–15% trim does little against that.
+4. **Earnings.** The earnings event argues for sizing down ahead of the print, not for holding full size. Margins and free cash flow are already weak, so the downside from a miss looks larger than the upside from a beat.
+
+I'm not choosing Sell for these reasons:
+- Valuation, insider activity, macro data and the earnings date and consensus are unverified.
+- The balance sheet is sound, with a current ratio of about 1.94 and operating cash flow up 84% in H1.
+- The stock is near the lower band after a roughly 7% pullback, so a bounce is plausible.
+
+I take the Neutral analyst's refinements on execution. Stage the trim into strength. Add a checkpoint at a daily close below 349.6. Use daily closes, not intraday wicks, for the 337 stop. Consider rebuilding a modest slice only after a reclaim of 359.46 with the 10 EMA.
+
+**What would upgrade the call:**
+- Q3 gross margin in the high teens or low 20s, with opex growing slower than revenue.
+- A 10-Q that explains the net income gap.
+- Positive run-rate free cash flow and stabilizing cash.
+- A close above 359.46 followed by 368–370.
+
+**What would move it to Sell:**
+- Gross margin stays near or below 17%.
+- Free cash flow stays negative while cash keeps falling.
+- The net income gap rests on non-recurring items.
+- A close below 337.
+
+Data gaps to close: valuation multiples, insider activity, macro data (the FRED feed was down) and the confirmed earnings date.
+
+**Price Target**: 337.0
+
+**Time Horizon**: 2-6 weeks, reassess after the Q3 earnings print
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | AVGO | Hold | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold existing AVGO exposure at its current weight and add no new capital at the 328.75 close. If the position is above a standard allocation, trim it toward standard. For new money, use a small probe of about 1/4 of the intended add only on a stabilization signal: a close back above the 338–345 zone on above-average volume, with the MACD histogram turning up and RSI back above 40. Add the rest after the late-October hyperscaler capex prints, and add again on a reclaim of 350 and then 365–367. Treat a close below 327 on heavy volume as a tripwire. It should trigger a review and probably a trim. Size any new position from the dollar loss you will accept, so a wider ATR-based stop (~305–310) means a smaller position. Review after the hyperscaler earnings and again at the next 10-Q.
+
+**Investment Thesis**: The fundamentals favor the bull, and every analyst agrees on that. Revenue was up about 85–86% year over year, gross margin held near 69%, and free cash flow was $13.7B in the quarter. The case for adding now rests on an inference, though: that the price has "moved ahead of the data." The Aggressive analyst offers no evidence for it. The filings are for the quarter ended August 2 and are about two and a half months old. The 31% fall from the 479.94 peak to 328.75 is the only current information we have, and we can't tell whether it is an overreaction or a forward-looking signal.
+
+The Conservative analyst's technical points hold up. The close is below the 10 EMA, 50 SMA, 200 SMA and the lower Bollinger Band. RSI is 34.89, so it is not oversold. The MACD histogram is widening negative, and a death cross is forming. The Aggressive claim that heavy-volume spikes mark bottoms fails against the record: the 81M-share spike on June 4 and the 60M spike in early September both marked downside turns. Valuation, debt and customer-concentration data are all missing, so there is no support for sizing up a conviction add. The operating margin gain came from opex, and cash conversion slipped to about 89% of operating income. Neither is explained.
+
+The Aggressive analyst does make some valid points. The 350 reclaim is a high bar, and a 327 stop sitting 1.7 points from the close is inside normal noise. The Neutral analyst adds that the 327 stop is really a tripwire on existing exposure, and that the hyperscaler print is weeks away, not months. Buying before a binary event adds risk we can't see. Waiting costs a bounded amount of upside, while a gap-down on an unseen event is not bounded. A wider stop should come with a smaller position, not a larger one. Both the Aggressive stop proposal (~305–310) and the Conservative critique of it point to this.
+
+Neither side wins decisively. Strong fundamentals are offset by a confirmed trend breakdown and missing valuation data, and a Hold with a defined plan is the right call. This is not passive. It sets an expected range of roughly 327 on the downside and 350 on the upside until the catalyst, and it names the signals that would end the Hold.
+
+What would move us to Overweight or Buy:
+- A volume-confirmed reclaim of 350 and then 365–367.
+- Supportive hyperscaler capex guidance.
+- A 10-Q that explains the opex drop and brings cash conversion back toward 97%.
+- Valuation and debt data that check out.
+
+What would move us to Underweight or Sell:
+- A heavy-volume close below 327.
+- Hyperscaler capex cuts or flattening.
+- A sharp revenue deceleration, or margins falling without explanation.
+- Cash conversion falling further behind operating income.
+- Worse-than-assumed debt or customer concentration disclosures.
+
+Open data gaps: market cap and multiples, debt, customer concentration, insider activity, reliable sentiment and macro data.
+
+**Price Target**: 350.0
+
+**Time Horizon**: 2-6 weeks, with a review after the late-October hyperscaler earnings
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | AMD | Hold | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold the existing position at its standard allocation. Don't add now and don't exit on a momentum unwind alone. Add only on a confirmed trigger: a sustained close above about 537 or a MACD histogram turn. Build in thirds, or use the neutral analyst's small probe of about a quarter of target size if price holds 496–512 while the histogram stops making new lows. Trim in two steps: about a third on a decisive close below 512, and more on a close below 496. Place stops below the 496 zone floor (about 490) rather than at 501.5. Review over the next few sessions and again at the next earnings report.
+
+**Investment Thesis**: The evidence is balanced on direction, so I'm not forcing a call. The business case is strong. Q2 revenue was about $11.5B, up about 50% year over year. Operating income rose from $806M to $1.99B. Operating margin rose from about 10.5% to 17.3%. First-half free cash flow was about $4.1B, up about 68%. The 200 SMA (about 394) is rising and price is still about 34% above it. The aggressive analyst is right that this is not a broken company. Waiting for confirmation also has a real cost.
+
+The case against adding now is stronger on timing. Price closed at 528.75, below the 10 EMA (585), the lower Bollinger band (553) and the 50 SMA (537). The MACD histogram has made four consecutive new lows, the latest at -14.10. RSI at 37.8 is not oversold. The close was near the session low, and volume on the 10-16 drop was not capitulation-like. The aggressive sentiment argument rests on four Reddit posts from one day, which is not usable evidence. The "yields falling" point came from a gold headline. The FRED macro data is missing, so the aggressive plan amounts to a bet on a macro turn we can't measure. The conservative analyst also correctly showed that the 501.5 stop sits inside the 496–512 support zone the plan relies on. It is only about one ATR (27 points) from entry, on a stock moving about 5% a day. The add-on tranches toward 474 would average down into a broken short-term trend.
+
+The conservative analyst partly overreaches. The $5.4B investing outflow likely reflects securities purchases rather than cash burn. Current liabilities grew roughly in line with revenue. The 1.6% versus 5% comparison understates the upside if the trend resumes. Even so, the missing inputs decide it: no valuation (market cap, forward P/E), no guidance, no news, no earnings date, and an unexplained gap between Q2 net income ($2.30B) and operating income ($1.99B). Without these, I can't size an addition. Nothing in the evidence argues for selling a position that is already sized, since the fundamentals and the long-term trend are intact.
+
+I adopt the neutral analyst's refinements. Move the stop below the support floor and scale the size down so the dollar risk stays constant. Split the trim into two levels. Keep any probe small until valuation and guidance are known.
+
+What would move me toward Overweight: the histogram stops making new lows, a sustained close above 537 and then above 585, the non-operating gain confirmed as small or recurring, the Q2 free cash flow dip explained by capex timing, and a reasonable forward multiple against growth. What would move me toward Underweight: a decisive close below 496–512 (the 2-ATR line is near 474), cash conversion weakening further, or more hot inflation prints. The prior AAPL lesson applies here. Check the MACD histogram within two or three sessions rather than judging the call on price alone. My expected range for this hold is roughly 475–585 until a trigger fires.
+
+**Price Target**: 585.0
+
+**Time Horizon**: 2-6 weeks, with a review at the next earnings report
+
+<!-- ENTRY_END -->
+
+[2026-10-16 | JPM | Hold | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold existing JPM exposure at standard allocation. Do not add or trim at about 339.72. For new money, wait for a better entry: a pullback to 334–335 that holds on a reversal close, a close above 344.67 on volume above 8.4M, or a confirmed close above 346.69. Keep any starter to about 25% of the intended size, with a daily-close stop below 329. Size the position so a gap toward 320 still fits your risk budget, for example 0.5–1% of capital at risk on the full position. Review when the Q3 2026 filing is available or when price breaks decisively out of the 329–347 range.
+
+**Investment Thesis**: The long-term trend and earnings favor owning JPM, but the near-term entry and the data gaps argue against adding now. The result is a Hold rather than an Overweight.
+
+**What favors the bull.** Price is above a rising 200 SMA (about 319.46, up from about 311). Quarterly EPS rose from $5.07 to $7.70, and equity is at a record $374.6B. Short-term momentum is repairing: RSI is back to about 52 from about 32, the 10 EMA is reclaimed, and the MACD histogram has been positive for three sessions. Nobody in the debate showed concrete fundamental deterioration, so a Sell or Underweight is not supported.
+
+**Why I did not follow the Aggressive Analyst into a starter at 339–340.**
+- The trade works only if the target is the 360.26 swing high. That requires clearing the upper Bollinger band, the falling 50 SMA at 346.69, and the 350–356 resistance zone.
+- Against the nearer 346.69 level, the reward is about 7 points against a stop about 10.5 points away. That is a reward-to-risk below 1. The Neutral Analyst correctly called the 360 target a hope, not a plan.
+- The 50 SMA is falling. Price has not closed above it since late September, and the MACD line is still below zero.
+- The advance came on 8.4M shares, down from 13.75M on 10/13, so volume does not confirm it.
+- ATR is rising, from 5.64 to 6.52.
+- The Aggressive Analyst's use of the 2024-06 earnings spike backfires. The next quarter fell from $18.1B to $12.9B, which shows spikes can fade.
+
+**Where the Conservative Analyst overreached.**
+- It said the prior quarter's net income was $14.8B. The Neutral Analyst's correction is $16.5B, so the 2026-06 jump is about 28%, not 43%. The jump is still large and still needs verification against the filing.
+- It treated the wait as costless, and it treated gap risk as a reason to stay out when it is really a sizing issue.
+- Missing macro and valuation data argues for smaller size. It does not argue for selling.
+
+**Why Hold rather than a directional call.** The business trend is constructive, but the setup is unfavorable and unverified at this price. The missing data are the Q3 2026 filing, P/E and P/B, and FRED macro. The sentiment sample is thin: 14 StockTwits messages, three of them labeled. I give no weight to that sample in either direction. The Neutral Analyst's tiered plan is the best entry framework. Its first tier is a pullback to 334–335, where the 10 EMA (334.86) and the Bollinger middle (334.73) cluster. That entry gives a stop about 6 points below and a first target of 346.69 about 12 points above, which is about 2:1. This is consistent with the existing Hold. It improves the entry and does not change the rating.
+
+**What would change the call.**
+- *Toward Overweight:*
+  - A close above 346.69 on above-average volume.
+  - A held retest of 329–335.
+  - A Q3 filing showing durable earnings, with no large one-time items and stable capital ratios.
+  - Valuation that is not rich.
+- *Toward Underweight:*
+  - A daily close below 329 on rising volume.
+  - A break of the 200 SMA near 319–320.
+  - Evidence that the Q2 jump was mostly one-time, or that credit costs or capital ratios are deteriorating.
+
+Lesson applied from prior decisions: I am stating an explicit expected range of about 329–347 for the holding period. I will check the MACD histogram within the first two or three sessions, so the call is not scored on relative return alone.
+
+**Price Target**: 346.69
+
+**Time Horizon**: 2-6 weeks, reviewing at the Q3 2026 filing or a decisive break of the 329–347 range
+
+<!-- ENTRY_END -->
+

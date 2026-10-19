@@ -1,41 +1,91 @@
 {
   "schema_version": 1,
-  "started_at": "2026-10-17T06:50:06.584784+00:00",
-  "finished_at": "2026-10-17T06:59:05.713628+00:00",
+  "started_at": "2026-10-19T14:36:37.469655+00:00",
+  "finished_at": "2026-10-19T14:56:48.958393+00:00",
   "trade_date": "2026-10-16",
   "provider": "anthropic",
   "deep_think_llm": "claude-sonnet-5-5",
   "quick_think_llm": "claude-haiku-5-5",
   "max_cost_per_run_usd": 1.5,
-  "max_total_cost_usd": 4.5,
-  "commit": "14e31f1d485d606b912e18a9f2789d38cb6669d9",
+  "max_total_cost_usd": 10.5,
+  "commit": "23b4a4b2f964ad35561fc6b0e006c77d343fcb3a",
   "status": "ok",
   "totals": {
-    "tickers": 3,
-    "cost_usd": 0.73344,
-    "tokens_in": 479422,
-    "tokens_out": 141936,
-    "ok": 3,
+    "tickers": 7,
+    "cost_usd": 1.592212,
+    "tokens_in": 1037782,
+    "tokens_out": 303236,
+    "ok": 7,
     "failed": 0,
     "budget_aborted": 0,
     "skipped": 0
   },
   "runs": [
     {
-      "ticker": "AAPL",
+      "ticker": "AMZN",
       "status": "ok",
       "signal": "Hold",
-      "cost_usd": 0.24016499999999996,
-      "tokens_in": 153632,
-      "tokens_out": 46505,
-      "duration_s": 174.845465841,
-      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AAPL/complete_report.md",
+      "cost_usd": 0.20802199999999998,
+      "tokens_in": 141615,
+      "tokens_out": 37871,
+      "duration_s": 153.634798843,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AMZN/complete_report.md",
       "error": null,
       "jev": {
         "model": "jev-1.13.0",
-        "input_tokens": 4662,
-        "cost_usd": 0.0001958,
-        "latency_ms": 166,
+        "input_tokens": 4673,
+        "cost_usd": 0.00019627,
+        "latency_ms": 213,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "HOLD",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
+            "existing": "Neutral",
+            "jev": "neutral",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          }
+        }
+      },
+      "rating_source": "engine"
+    },
+    {
+      "ticker": "GOOGL",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.242032,
+      "tokens_in": 142405,
+      "tokens_out": 48569,
+      "duration_s": 197.540359129,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/GOOGL/complete_report.md",
+      "error": null,
+      "jev": {
+        "model": "jev-1.13.0",
+        "input_tokens": 4924,
+        "cost_usd": 0.00020681,
+        "latency_ms": 192,
         "attempts": 1,
         "min_confidence": 0.9,
         "questions": {
@@ -72,98 +122,248 @@
       "rating_source": "engine"
     },
     {
-      "ticker": "MSFT",
+      "ticker": "META",
       "status": "ok",
-      "signal": "Hold",
-      "cost_usd": 0.252339,
-      "tokens_in": 165709,
-      "tokens_out": 48847,
-      "duration_s": 190.42981247500006,
-      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/MSFT/complete_report.md",
+      "signal": "Underweight",
+      "cost_usd": 0.23649799999999999,
+      "tokens_in": 151702,
+      "tokens_out": 46083,
+      "duration_s": 178.53382662999996,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/META/complete_report.md",
       "error": null,
       "jev": {
         "model": "jev-1.13.0",
-        "input_tokens": 4315,
-        "cost_usd": 0.00018123,
-        "latency_ms": 167,
+        "input_tokens": 4435,
+        "cost_usd": 0.00018627,
+        "latency_ms": 298,
         "attempts": 1,
         "min_confidence": 0.9,
         "questions": {
           "final_rating": {
-            "existing": "Hold",
-            "jev": "hold",
+            "existing": "Underweight",
+            "jev": "underweight",
             "confidence": 1.0,
             "agree": true,
             "applied": false
           },
           "research_recommendation": {
-            "existing": "Hold",
-            "jev": "hold",
+            "existing": "Underweight",
+            "jev": "underweight",
             "confidence": 1.0,
             "agree": true,
             "applied": false
           },
           "trader_action": {
-            "existing": "HOLD",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "sentiment_band": {
-            "existing": "Mixed",
-            "jev": "mixed",
-            "confidence": 0.93,
-            "agree": true,
-            "applied": false
-          }
-        }
-      },
-      "rating_source": "engine"
-    },
-    {
-      "ticker": "NVDA",
-      "status": "ok",
-      "signal": "Hold",
-      "cost_usd": 0.24093649999999997,
-      "tokens_in": 160081,
-      "tokens_out": 46584,
-      "duration_s": 172.9292165249999,
-      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/NVDA/complete_report.md",
-      "error": null,
-      "jev": {
-        "model": "jev-1.13.0",
-        "input_tokens": 4739,
-        "cost_usd": 0.00019904,
-        "latency_ms": 161,
-        "attempts": 1,
-        "min_confidence": 0.9,
-        "questions": {
-          "final_rating": {
-            "existing": "Hold",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "research_recommendation": {
-            "existing": "Hold",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "trader_action": {
-            "existing": "HOLD",
-            "jev": "hold",
+            "existing": "SELL",
+            "jev": "sell",
             "confidence": 0.99,
             "agree": true,
             "applied": false
           },
           "sentiment_band": {
+            "existing": "Neutral",
+            "jev": "neutral",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          }
+        }
+      },
+      "rating_source": "engine"
+    },
+    {
+      "ticker": "TSLA",
+      "status": "ok",
+      "signal": "Underweight",
+      "cost_usd": 0.218664,
+      "tokens_in": 144912,
+      "tokens_out": 40656,
+      "duration_s": 159.967036828,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/TSLA/complete_report.md",
+      "error": null,
+      "jev": {
+        "model": "jev-1.13.0",
+        "input_tokens": 4403,
+        "cost_usd": 0.00018493,
+        "latency_ms": 166,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Underweight",
+            "jev": "underweight",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Underweight",
+            "jev": "underweight",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "SELL",
+            "jev": "sell",
+            "confidence": 0.99,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
+            "existing": "Neutral",
+            "jev": "neutral",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          }
+        }
+      },
+      "rating_source": "engine"
+    },
+    {
+      "ticker": "AVGO",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.23239200000000002,
+      "tokens_in": 145859,
+      "tokens_out": 45995,
+      "duration_s": 184.094680122,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AVGO/complete_report.md",
+      "error": null,
+      "jev": {
+        "model": "jev-1.13.0",
+        "input_tokens": 4085,
+        "cost_usd": 0.00017157,
+        "latency_ms": 214,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "HOLD",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
+            "existing": "Neutral",
+            "jev": "neutral",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          }
+        }
+      },
+      "rating_source": "engine"
+    },
+    {
+      "ticker": "AMD",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.21506149999999996,
+      "tokens_in": 148136,
+      "tokens_out": 39700,
+      "duration_s": 159.272445725,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AMD/complete_report.md",
+      "error": null,
+      "jev": {
+        "model": "jev-1.13.0",
+        "input_tokens": 4004,
+        "cost_usd": 0.00016817,
+        "latency_ms": 197,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "HOLD",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
             "existing": "Mixed",
             "jev": "mixed",
-            "confidence": 0.78,
+            "confidence": 0.91,
+            "agree": true,
+            "applied": false
+          }
+        }
+      },
+      "rating_source": "engine"
+    },
+    {
+      "ticker": "JPM",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.2395425,
+      "tokens_in": 163153,
+      "tokens_out": 44362,
+      "duration_s": 177.14077668599998,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/JPM/complete_report.md",
+      "error": null,
+      "jev": {
+        "model": "jev-1.13.0",
+        "input_tokens": 4556,
+        "cost_usd": 0.00019135,
+        "latency_ms": 347,
+        "attempts": 1,
+        "min_confidence": 0.9,
+        "questions": {
+          "final_rating": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "research_recommendation": {
+            "existing": "Hold",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "trader_action": {
+            "existing": "HOLD",
+            "jev": "hold",
+            "confidence": 1.0,
+            "agree": true,
+            "applied": false
+          },
+          "sentiment_band": {
+            "existing": "Mixed",
+            "jev": "mixed",
+            "confidence": 1.0,
             "agree": true,
             "applied": false
           }
