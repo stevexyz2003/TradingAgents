@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 
 SKIPPED_HOLD = "skipped-hold"
 RATING_REVIEW_STATE = "rating-review"
+RATING_JEV = "rating-jev"
 RUN_NOT_OK = "run-not-ok"
 SIGNAL_NULL = "signal-null"
 SIGNAL_DIVERGENCE = "signal-divergence"
@@ -71,7 +72,7 @@ INTENT = "intent"
 
 ALL_STATES = frozenset(
     {
-        SKIPPED_HOLD, RATING_REVIEW_STATE, RUN_NOT_OK, SIGNAL_NULL, SIGNAL_DIVERGENCE,
+        SKIPPED_HOLD, RATING_REVIEW_STATE, RATING_JEV, RUN_NOT_OK, SIGNAL_NULL, SIGNAL_DIVERGENCE,
         SUMMARY_MISSING, SUMMARY_SCHEMA, SUMMARY_CONTRACT, NO_DECISION, LOG_MISSING_ENTRY,
         INVALID_TRADE_DATE, LOG_FINDING, PAPER_LOG_UNAVAILABLE, STALE_DECISION,
         FUTURE_DECISION, CALENDAR_CONFLICT, NOT_RESOLVED_YET, FOREIGN_OPEN_ORDER,
@@ -91,8 +92,8 @@ EXIT_BY_STATE: Mapping[str, int] = MappingProxyType(
     {
         **dict.fromkeys(
             (
-                SKIPPED_HOLD, RATING_REVIEW_STATE, RUN_NOT_OK, SIGNAL_NULL, SIGNAL_DIVERGENCE,
-                SUMMARY_MISSING, NO_DECISION, LOG_MISSING_ENTRY, INVALID_TRADE_DATE,
+                SKIPPED_HOLD, RATING_REVIEW_STATE, RATING_JEV, RUN_NOT_OK, SIGNAL_NULL,
+                SIGNAL_DIVERGENCE, SUMMARY_MISSING, NO_DECISION, LOG_MISSING_ENTRY, INVALID_TRADE_DATE,
                 LOG_FINDING, PAPER_LOG_UNAVAILABLE, STALE_DECISION, FUTURE_DECISION,
                 CALENDAR_CONFLICT, NOT_RESOLVED_YET, FOREIGN_OPEN_ORDER, FRACTIONAL_POSITION,
                 SHORT_POSITION,
@@ -132,6 +133,7 @@ SUMMARY_FIELDS: Mapping[str, type | tuple] = MappingProxyType(
 RUN_FIELDS: Mapping[str, type | tuple] = MappingProxyType(
     {"ticker": str, "status": str, "signal": (str, type(None))}
 )
+RATING_SOURCES = frozenset({"engine", "jev"})
 RUN_STATUSES = frozenset({"ok", "failed", "budget_aborted", "skipped"})
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -150,6 +152,8 @@ class RunRecord:
     ticker: str
     status: str
     signal: str | None
+    #: Optional in summary.json: the paper run writes it only when the Jev fallback was active.
+    rating_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -208,7 +212,11 @@ def read_summary(text: str) -> Summary:
         if raw["status"] not in RUN_STATUSES:
             raise SummaryContractError(f"runs[{i}]: unknown status {raw['status']!r}")
         # REQ-IBKR-18: runs[*].report is never read.
-        runs.append(RunRecord(raw["ticker"], raw["status"], raw["signal"]))
+        rating_source = None
+        if "rating_source" in raw:
+            _check_type(raw["rating_source"], str, f"runs[{i}].rating_source")
+            rating_source = raw["rating_source"]
+        runs.append(RunRecord(raw["ticker"], raw["status"], raw["signal"], rating_source))
     return Summary(data["schema_version"], data["trade_date"], data["status"], tuple(runs))
 
 
@@ -232,6 +240,7 @@ class DecisionVerdict:
     detail: str = ""
     rating: str | None = None
     trade_date: date | None = None
+    rating_source: str | None = None
 
 
 def evaluate_decision(entry: Mapping, summary: Summary | None) -> DecisionVerdict:
@@ -240,8 +249,10 @@ def evaluate_decision(entry: Mapping, summary: Summary | None) -> DecisionVerdic
     rating = entry.get("rating")
     trade_date = parse_trade_date(entry.get("date"))
 
+    source: str | None = None
+
     def verdict(state: str, detail: str = "") -> DecisionVerdict:
-        return DecisionVerdict(state, detail, rating, trade_date)
+        return DecisionVerdict(state, detail, rating, trade_date, source)
 
     if trade_date is None:
         return verdict(INVALID_TRADE_DATE, f"entry date {entry.get('date')!r} is not YYYY-MM-DD")
@@ -250,6 +261,9 @@ def evaluate_decision(entry: Mapping, summary: Summary | None) -> DecisionVerdic
     run = next((r for r in summary.runs if r.ticker == ticker), None)
     if run is None:
         return verdict(SUMMARY_MISSING, f"{ticker} is not in the summary")
+    # A missing field means engine (RESEARCH A1): the paper run writes rating_source only
+    # when the Jev fallback was active.
+    source = run.rating_source if run.rating_source is not None else "engine"
     if run.status != "ok":
         return verdict(RUN_NOT_OK, f"run status {run.status}")
     if run.signal is None:
@@ -263,6 +277,16 @@ def evaluate_decision(entry: Mapping, summary: Summary | None) -> DecisionVerdic
         )
     if rating == "Hold":
         return verdict(SKIPPED_HOLD, "skipped: hold")
+    # D-05/D-06: positive proof of an engine rating; Jev or an unknown source fails closed.
+    if source == "jev":
+        return verdict(
+            RATING_JEV,
+            "rating from the Jev fallback (summary.json rating_source=jev); not traded",
+        )
+    if source not in RATING_SOURCES:
+        return verdict(
+            RATING_JEV, f"unknown rating_source {source!r} in summary.json; not traded"
+        )
     return verdict(EXECUTABLE)
 
 

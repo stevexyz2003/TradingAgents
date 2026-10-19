@@ -150,6 +150,72 @@ def test_preconditions_newer_summary_state():
     assert dec.newer_summary_state(dec.parse_trade_date("2026-10-09"), newer, "MSFT") is None
 
 
+# --- rating source (Jev fallback, phase 6 D-05/D-06) ----------------------------------
+
+
+def _src_summary(**extra):
+    run = {"ticker": "AAPL", "status": "ok", "signal": "Buy", **extra}
+    return dec.read_summary(_summary_text(runs=[run]))
+
+
+def test_rating_source_absent_reads_as_none():
+    assert _src_summary().runs[0].rating_source is None
+
+
+def test_rating_source_jev_is_read():
+    assert _src_summary(rating_source="jev").runs[0].rating_source == "jev"
+
+
+def test_rating_source_non_string_is_contract_error():
+    with pytest.raises(dec.SummaryContractError):
+        _src_summary(rating_source=5)
+
+
+def test_rating_source_missing_field_means_engine():
+    v = dec.evaluate_decision(_entry(), _src_summary())
+    assert v.state == dec.EXECUTABLE and v.rating_source == "engine"
+
+
+def test_rating_source_engine_is_executable():
+    v = dec.evaluate_decision(_entry(), _src_summary(rating_source="engine"))
+    assert v.state == dec.EXECUTABLE and v.rating_source == "engine"
+
+
+def test_jev_rating_is_not_traded():
+    v = dec.evaluate_decision(_entry(), _src_summary(rating_source="jev"))
+    assert v.state == dec.RATING_JEV == "rating-jev"
+    assert "jev" in v.detail.lower()
+    assert v.rating_source == "jev"
+
+
+def test_rating_source_unknown_value_fails_closed():
+    v = dec.evaluate_decision(_entry(), _src_summary(rating_source="other"))
+    assert v.state == dec.RATING_JEV
+    assert "other" in v.detail
+
+
+def test_jev_hold_stays_skipped_hold():
+    s = _src_summary(rating_source="jev", signal="Hold")
+    v = dec.evaluate_decision(_entry(rating="Hold"), s)
+    assert v.state == "skipped-hold"
+
+
+def test_jev_exit_code_is_precondition():
+    assert dec.EXIT_BY_STATE[dec.RATING_JEV] == 2
+
+
+def test_jev_missing_summary_is_not_traded():
+    v = dec.evaluate_decision(_entry(), None)
+    assert v.state == "summary-missing" and dec.EXIT_BY_STATE[v.state] == 2
+
+
+def test_jev_broken_summary_is_rejected_not_traded():
+    with pytest.raises(dec.SummarySchemaError):
+        dec.read_summary(_summary_text(schema_version=2))
+    with pytest.raises(dec.SummaryContractError):
+        dec.read_summary(json.dumps({"schema_version": 1, "trade_date": "2026-10-09", "runs": []}))
+
+
 # --- exit table -----------------------------------------------------------------------
 
 
