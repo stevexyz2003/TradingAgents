@@ -271,6 +271,13 @@ class FakeIB:
         whatif_echo_account=None,
         global_cancel_clears=True,
         whatif_echo_order_ref=None,
+        place_outcome="Filled",
+        place_fill_price=250.1,
+        place_perm_id=777,
+        place_order_id=5,
+        place_errors=(),
+        place_executions=(),
+        place_completed=None,
     ):
         self.accounts = list(accounts)
         self.refuse = refuse
@@ -298,6 +305,19 @@ class FakeIB:
         self.whatif_echo_order_ref = whatif_echo_order_ref
         #: whether reqGlobalCancel empties the open orders (False = the cancel has no effect)
         self.global_cancel_clears = global_cancel_clears
+        #: placeOrder outcome: "Filled", "Submitted" (stays open), "ValidationError", "Cancelled"
+        self.place_outcome = place_outcome
+        self.place_fill_price = place_fill_price
+        self.place_perm_id = place_perm_id
+        self.place_order_id = place_order_id
+        #: (code, text) request errors emitted for the order while it is placed
+        self.place_errors = list(place_errors)
+        #: Fills appended to ``executions`` when the order fills
+        self.place_executions = list(place_executions)
+        #: completed Trade appended to ``completed_orders`` when the order fills
+        self.place_completed = place_completed
+        #: copies of the real orders that were sent (placeOrder, not the preview)
+        self.placed_orders: list = []
         self.probe = probe
         #: symbol -> matching FakeContracts (or "hang") for qualifyContractsAsync
         self.qualify = dict(qualify) if isinstance(qualify, dict) else (qualify or {})
@@ -473,6 +493,50 @@ class FakeIB:
             await _forever()
         return list(self.executions)
 
+    def placeOrder(self, contract, order):
+        # Models the library: the named call first, then message 3 on the wire, in the
+        # measured layout (contract expanded to 12 fields), so the real barrier can judge it.
+        order_id = self.place_order_id
+        self.client.placeOrder(order_id, contract, order)
+        parts = [""] * 90
+        parts[0], parts[1] = "3", str(order_id)
+        parts[4] = str(getattr(contract, "secType", ""))
+        parts[16] = str(order.action)
+        parts[17] = str(order.totalQuantity)
+        parts[18] = str(order.orderType)
+        parts[21] = str(order.tif)
+        parts[23] = str(order.account)
+        parts[26] = str(order.orderRef)
+        parts[81] = "0"  # delta neutral contract flag (field-level index 70)
+        parts[84] = "1" if getattr(order, "whatIf", False) else "0"
+        self.client.sendMsg("\0".join(parts))
+        self.placed_orders.append(copy.copy(order))
+        order.orderId = order_id
+        status = SimpleNamespace(
+            status="Submitted",
+            filled=0.0,
+            remaining=float(order.totalQuantity),
+            avgFillPrice=0.0,
+            permId=self.place_perm_id,
+        )
+        trade = SimpleNamespace(
+            contract=contract, order=order, orderStatus=status, fills=[], log=[]
+        )
+        if self.place_outcome == "Filled":
+            status.status = "Filled"
+            status.filled = float(order.totalQuantity)
+            status.remaining = 0.0
+            status.avgFillPrice = self.place_fill_price
+            self.executions = [*self.executions, *self.place_executions]
+            if self.place_completed is not None:
+                self.completed_orders = [*self.completed_orders, self.place_completed]
+        elif self.place_outcome != "Submitted":
+            status.status = self.place_outcome
+        for code, text in self.place_errors:
+            self.errorEvent.emit(order_id, code, text, None)
+        self._emit_during("place")
+        return trade
+
     def reqGlobalCancel(self):
         # Models the library: the named call first, then message 58 on the wire.
         self.client.reqGlobalCancel()
@@ -503,9 +567,6 @@ class FakeIB:
 
     def whatIfOrder(self, *a, **k):
         self._forbidden("whatIfOrder")
-
-    def placeOrder(self, *a, **k):
-        self._forbidden("placeOrder")
 
     def reqMktData(self, *a, **k):
         self._forbidden("reqMktData", " (REQ-IBKR-68: no market data)")

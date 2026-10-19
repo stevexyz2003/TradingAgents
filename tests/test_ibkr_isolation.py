@@ -135,6 +135,7 @@ def test_adapter_has_at_most_ten_public_methods():
         "preview_order",
         "order_history",
         "cancel_all",
+        "place_order",
     }
 
 

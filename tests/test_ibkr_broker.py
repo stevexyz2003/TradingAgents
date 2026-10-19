@@ -80,12 +80,14 @@ def test_forbidden_call_check_sees_an_ib_level_write():
     # Negative control for the FORBIDDEN_CALLS assertions (WR-05): a write on the
     # IB object lands in ``calls`` even though the fake raises.
     fake = FakeIB()
-    for name in ("whatIfOrder", "placeOrder"):
+    for name in ("whatIfOrder", "reqMktData"):
         with pytest.raises(AssertionError):
             getattr(fake, name)()
-    assert [call for call in fake.calls if call in FORBIDDEN_CALLS] == [
+    # placeOrder is a modelled real order since phase 6 (name, then wire); it is no
+    # longer a forbidden IB-level call, the barrier judges it.
+    assert [call for call in fake.calls if call in (*FORBIDDEN_CALLS, "reqMktData")] == [
         "whatIfOrder",
-        "placeOrder",
+        "reqMktData",
     ]
 
 
@@ -1908,3 +1910,136 @@ def test_order_permit_whatif_runs_with_a_closed_permit_and_does_not_count(loop, 
     )
     client.placeOrder(1, contract, _real_order(ib_async, whatIf=True))
     assert len(sent) == 1 and permit.sent == 0 and permit.open is False
+
+
+# --- phase 6: place_order (REQ-IBKR-10) ---------------------------------------------------
+
+PLACE = {
+    "con_id": 265598,
+    "symbol": "AAPL",
+    "sec_type": "STK",
+    "currency": "USD",
+    "primary_exchange": "NASDAQ",
+    "action": "BUY",
+    "quantity": 2,
+    "order_ref": ORDER_REF,
+}
+
+
+def test_place_order_filled_returns_the_result_and_shuts_the_permit(loop):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    result = adapter.place_order(**PLACE, timeout_s=5)
+    assert result.status == "Filled"
+    assert result.filled == 2
+    assert result.avg_fill_price == 250.1
+    assert result.perm_id == 777 and result.order_id == 5
+    assert result.timed_out is False and result.link_event is False
+    assert fake.calls.count("placeOrder") == 1
+    assert adapter._order_permit.open is False and adapter._order_permit.sent == 1
+
+
+def test_place_order_timeout_returns_open_and_cancels_nothing(loop):
+    fake = FakeIB(place_outcome="Submitted")
+    adapter = _connected(fake, loop)
+    started = time.monotonic()
+    result = adapter.place_order(**PLACE, timeout_s=0.3)
+    elapsed = time.monotonic() - started
+    assert result.timed_out is True and result.status == "Submitted"
+    assert 0.25 <= elapsed < 2
+    assert "cancelOrder" not in fake.calls and "reqGlobalCancel" not in fake.calls
+    assert adapter._order_permit.open is False
+
+
+def test_place_order_validation_error_is_an_end_state_not_a_hang(loop):
+    fake = FakeIB(place_outcome="ValidationError", place_errors=[(321, "Error validating request")])
+    adapter = _connected(fake, loop)
+    started = time.monotonic()
+    result = adapter.place_order(**PLACE, timeout_s=5)
+    assert time.monotonic() - started < 2
+    assert result.timed_out is False
+    assert result.status == "ValidationError"
+    assert 321 in result.error_codes
+
+
+def test_place_order_keeps_a_parked_399_in_the_error_codes(loop):
+    fake = FakeIB(
+        place_outcome="ValidationError", place_errors=[(399, "Order message: held until open")]
+    )
+    adapter = _connected(fake, loop)
+    result = adapter.place_order(**PLACE, timeout_s=5)
+    assert 399 in result.error_codes and result.status == "ValidationError"
+
+
+def test_place_order_reports_a_link_event_during_the_wait(loop):
+    fake = FakeIB(emit_during={"place": [(-1, 1100, "Connectivity lost", None)]})
+    adapter = _connected(fake, loop)
+    result = adapter.place_order(**PLACE, timeout_s=5)
+    assert result.link_event is True
+
+
+def test_place_order_with_an_open_link_sends_nothing(loop):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    adapter._on_error(-1, 1100, "Connectivity lost", None)
+    with pytest.raises(broker.GatewayUnavailable):
+        adapter.place_order(**PLACE, timeout_s=5)
+    assert "placeOrder" not in fake.calls
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"action": "HOLD"}, {"quantity": 2.0}, {"quantity": 0}, {"order_ref": ""}, {"timeout_s": 0}],
+    ids=["action", "float-quantity", "zero-quantity", "no-ref", "no-deadline"],
+)
+def test_place_order_refuses_bad_input_before_sending(loop, overrides):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    kwargs = {**PLACE, "timeout_s": 5, **overrides}
+    with pytest.raises(ValueError):
+        adapter.place_order(**kwargs)
+    assert "placeOrder" not in fake.calls and adapter._order_permit.sent == 0
+
+
+def test_place_order_when_not_connected(loop):
+    adapter = broker.IbkrBroker("127.0.0.1", 7497, loop=loop)
+    with pytest.raises(broker.GatewayUnavailable) as info:
+        adapter.place_order(**PLACE, timeout_s=5)
+    assert info.value.state == "NOT_CONNECTED"
+
+
+def test_place_order_sends_the_previewed_order_apart_from_whatif(loop):
+    fake = FakeIB(whatif=_state())
+    adapter = _connected(fake, loop)
+    adapter.preview_order(**PLACE)
+    adapter.place_order(**PLACE, timeout_s=5)
+    preview = fake.whatif_calls[0][1]
+    real = fake.placed_orders[0]
+    for name in ("action", "totalQuantity", "orderType", "tif", "account", "orderRef"):
+        assert getattr(preview, name) == getattr(real, name)
+    assert preview.whatIf is True and real.whatIf is False
+
+
+def test_place_order_fake_model_is_name_then_wire_and_needs_the_permit(loop):
+    fake = FakeIB()
+    adapter = _connected(fake, loop)
+    handles = adapter._handles
+    contract = _build_contract_for_test(handles)
+    order = broker._build_order(handles, action="BUY", quantity=2, order_ref=ORDER_REF)
+    with pytest.raises(broker.ReadOnlyViolation):  # permit shut: the real barrier refuses
+        fake.placeOrder(contract, order)
+    assert fake.calls.count("placeOrder") == 0
+    adapter._order_permit.open = True
+    fake.placeOrder(contract, order)
+    assert fake.calls.count("placeOrder") == 1 and fake.calls.count("sendMsg") == 1
+
+
+def _build_contract_for_test(handles):
+    return broker._build_contract(
+        handles,
+        con_id=265598,
+        symbol="AAPL",
+        sec_type="STK",
+        currency="USD",
+        primary_exchange="NASDAQ",
+    )

@@ -396,6 +396,28 @@ def _unset_to_none(value) -> float | None:
     return None if abs(number) >= 1e300 else number
 
 
+@dataclass(frozen=True)
+class PlaceResult:
+    """What came back for one real market order; broker-neutral (no library object)."""
+
+    order_id: int
+    perm_id: int
+    status: str
+    filled: float
+    remaining: float | None
+    avg_fill_price: float | None
+    timed_out: bool
+    link_event: bool
+    error_codes: tuple[int, ...]
+    error_texts: tuple[str, ...]
+
+
+#: Order states that end the wait of place_order. ``ValidationError`` is no done state
+#: of the library (``OrderStatus.DoneStates``) but must end the wait here: otherwise a
+#: 321/399 rejection hangs until the deadline (06-RESEARCH Pattern 2).
+_FILL_TERMINAL = frozenset({"Filled", "Cancelled", "ApiCancelled", "Inactive", "ValidationError"})
+_FILL_POLL_S = 0.1
+
 #: Execution side as the library reports it -> broker-neutral side.
 _EXECUTION_SIDES = {"BOT": "BUY", "SLD": "SELL"}
 
@@ -461,6 +483,35 @@ def _default_ib_factory() -> IbHandles:
     from ib_async import IB, Contract, Order, StartupFetchNONE  # the only import site in the repo
 
     return IbHandles(IB(), Contract, StartupFetchNONE, Order)
+
+
+def _build_contract(handles, *, con_id, symbol, sec_type, currency, primary_exchange):
+    """The contract of a preview or a real order; one builder for both."""
+    return handles.contract(
+        conId=con_id,
+        symbol=symbol,
+        secType=sec_type,
+        exchange="SMART",
+        currency=currency,
+        primaryExchange=primary_exchange,
+    )
+
+
+def _build_order(handles, *, action, quantity, order_ref):
+    """The market order of a preview or a real order; one builder for both (D-13).
+
+    Market, ``tif`` explicit, paper account; ``orderRef`` only when set. ``whatIf``
+    is left at its default: the preview path sets it, a real order never does.
+    """
+    order_kwargs = {"orderRef": order_ref} if order_ref else {}
+    return handles.order(
+        action=action,
+        totalQuantity=quantity,
+        orderType=_ORDER_TYPE,
+        tif=PREVIEW_TIF,
+        account=EXPECTED_ACCOUNT,
+        **order_kwargs,
+    )
 
 
 def _message_id(field) -> int | None:
@@ -803,7 +854,7 @@ class IbkrBroker:
 
     Public: ``connect``, ``positions``, ``health``, ``search_contract``,
     ``contract_details``, ``open_orders``, ``order_history``, ``preview_order``,
-    ``cancel_all``. Use as a context manager; leaving it disconnects.
+    ``cancel_all``, ``place_order``. Use as a context manager; leaving it disconnects.
     """
 
     def __init__(
@@ -1270,23 +1321,15 @@ class IbkrBroker:
         mark = len(self._link_codes)
         code_mark = len(self._request_error_texts)
         seen_mark = len(self._seen_codes)
-        contract = handles.contract(
-            conId=con_id,
+        contract = _build_contract(
+            handles,
+            con_id=con_id,
             symbol=symbol,
-            secType=sec_type,
-            exchange="SMART",
+            sec_type=sec_type,
             currency=currency,
-            primaryExchange=primary_exchange,
+            primary_exchange=primary_exchange,
         )
-        order_kwargs = {"orderRef": order_ref} if order_ref else {}
-        order = handles.order(
-            action=action,
-            totalQuantity=quantity,
-            orderType="MKT",
-            tif=PREVIEW_TIF,
-            account=EXPECTED_ACCOUNT,
-            **order_kwargs,
-        )
+        order = _build_order(handles, action=action, quantity=quantity, order_ref=order_ref)
         echoed: list[str] = []
         echoed_ref: list[str] = []
         echoed_account: list[str] = []
@@ -1384,6 +1427,115 @@ class IbkrBroker:
             order_ref or "-",
         )
         return result
+
+    def place_order(
+        self,
+        *,
+        con_id: int,
+        symbol: str,
+        sec_type: str,
+        currency: str,
+        primary_exchange: str,
+        action: str,
+        quantity: int,
+        order_ref: str,
+        timeout_s: float,
+    ) -> PlaceResult:
+        """Send ONE real stock market order and wait up to ``timeout_s`` for an end state.
+
+        The only method that lets a real order out. It opens the order permit of the
+        write barrier for this one call and shuts it again in ``finally``; the order is
+        built by the same functions as the whatIf preview. Nothing is cancelled when the
+        deadline passes (D-08): ``timed_out`` says so and the caller reads the state
+        again. ``ValidationError`` counts as an end state, so a 321/399 answer does not
+        hang until the deadline. The caller gives the deadline; there is no default.
+        """
+        if action not in _ORDER_SIDES:
+            raise ValueError(f"action must be BUY or SELL, got {action!r}")
+        if type(quantity) is not int or quantity <= 0:
+            raise ValueError(f"quantity must be a positive whole number, got {quantity!r}")
+        if not isinstance(order_ref, str) or not order_ref:
+            raise ValueError("order_ref must not be empty")
+        if not timeout_s > 0:
+            raise ValueError(f"timeout_s must be positive, got {timeout_s!r}")
+        ib, handles = self._ib, self._handles
+        if ib is None or handles is None:
+            raise GatewayUnavailable("NOT_CONNECTED", 504, "no session; connect() first")
+        if handles.order is None:
+            raise RuntimeError("no order type in IbHandles")
+        opened = self._open_link()
+        if opened is not None:
+            raise GatewayUnavailable(opened[0], None, f"{opened[1]}; no order sent")
+        mark = len(self._link_codes)
+        code_mark = len(self._request_error_texts)
+        contract = _build_contract(
+            handles,
+            con_id=con_id,
+            symbol=symbol,
+            sec_type=sec_type,
+            currency=currency,
+            primary_exchange=primary_exchange,
+        )
+        order = _build_order(handles, action=action, quantity=quantity, order_ref=order_ref)
+        sent_before = self._order_permit.sent
+        trade = None
+        try:
+            self._order_permit.open = True
+            trade = self._call(
+                lambda: self._place_and_wait(contract, order, timeout_s),
+                timeout_s + REQUEST_TIMEOUT_S,
+            )
+        except ConnectionError as exc:
+            raise GatewayUnavailable(
+                "NOT_CONNECTED", 504, f"order not sent ({type(exc).__name__})"
+            ) from exc
+        finally:
+            self._order_permit.open = False
+        if self._order_permit.sent != sent_before + 1:
+            raise GatewayUnavailable(
+                REQUEST_FAILED, None, "order did not reach the wire exactly once"
+            )
+        status = _text(trade.orderStatus, "status")
+        errors = [
+            (code, text)
+            for code, text in self._request_error_texts[code_mark:]
+            if code not in INFO_CODES
+        ]
+        result = PlaceResult(
+            order_id=int(getattr(trade.order, "orderId", 0) or 0),
+            perm_id=int(getattr(trade.orderStatus, "permId", 0) or 0),
+            status=status,
+            filled=_unset_to_none(getattr(trade.orderStatus, "filled", None)) or 0.0,
+            remaining=_unset_to_none(getattr(trade.orderStatus, "remaining", None)),
+            avg_fill_price=_unset_to_none(getattr(trade.orderStatus, "avgFillPrice", None)),
+            timed_out=status not in _FILL_TERMINAL,
+            link_event=self._link_event_since(mark) is not None,
+            error_codes=tuple(code for code, _ in errors),
+            error_texts=tuple(text for _, text in errors),
+        )
+        self._log.info(
+            'ibkr-state=ORDER_SENT key=%s code=- detail="order_id=%s perm_id=%s status=%s '
+            'filled=%s timed_out=%s"',
+            order_ref,
+            result.order_id,
+            result.perm_id,
+            result.status,
+            result.filled,
+            result.timed_out,
+        )
+        return result
+
+    async def _place_and_wait(self, contract, order, timeout_s: float):
+        """Place the order inside the running loop and poll its status; never cancels (D-08)."""
+        trade = self._ib.placeOrder(contract, order)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while _text(trade.orderStatus, "status") not in _FILL_TERMINAL:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(_FILL_POLL_S, remaining))
+        return trade
 
     def cancel_all(self, *, kill_evidence) -> None:
         """Cancel every open order of the account once: ``reqGlobalCancel`` (D-05).
