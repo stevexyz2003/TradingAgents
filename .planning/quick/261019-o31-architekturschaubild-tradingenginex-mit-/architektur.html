@@ -1,0 +1,1072 @@
+<title>TradingEngineX Architektur</title>
+<style>
+:root {
+  --bg: #f6f7f9;
+  --fg: #1b2430;
+  --muted: #566272;
+  --surface: #ffffff;
+  --surface-2: #eef1f5;
+  --border: #d5dbe3;
+  --border-strong: #7d8a9c;
+  --accent: #1f4f8f;
+  --accent-fg: #ffffff;
+  --accent-soft: #dde8f6;
+  --zone: #eef1f5;
+  --zone-line: #c9d1dc;
+  --node-fill: #ffffff;
+  --node-off: #e6eaf0;
+  --edge: #8793a4;
+  --edge-hi: #1f4f8f;
+  --ok-fg: #14532d;
+  --ok-bg: #d8f0df;
+  --warn-fg: #6e4300;
+  --warn-bg: #fbe7bd;
+  --open-fg: #38424f;
+  --open-bg: #e4e8ee;
+  --rej-fg: #46395f;
+  --rej-bg: #e6e0ef;
+  --err-fg: #7f1d1d;
+  --err-bg: #fbdcdc;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161c;
+    --fg: #e4e8ee;
+    --muted: #9aa6b6;
+    --surface: #1a2029;
+    --surface-2: #232b36;
+    --border: #343f4e;
+    --border-strong: #77869b;
+    --accent: #7fb0ec;
+    --accent-fg: #0d1520;
+    --accent-soft: #1f3552;
+    --zone: #181e26;
+    --zone-line: #2e3846;
+    --node-fill: #212934;
+    --node-off: #1a2029;
+    --edge: #66758a;
+    --edge-hi: #7fb0ec;
+    --ok-fg: #8fdca5;
+    --ok-bg: #1b3a28;
+    --warn-fg: #f0c070;
+    --warn-bg: #3d2f12;
+    --open-fg: #b4bfce;
+    --open-bg: #2a3340;
+    --rej-fg: #c5b8e0;
+    --rej-bg: #332c45;
+    --err-fg: #f3b4b4;
+    --err-bg: #4a1f1f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161c;
+  --fg: #e4e8ee;
+  --muted: #9aa6b6;
+  --surface: #1a2029;
+  --surface-2: #232b36;
+  --border: #343f4e;
+  --border-strong: #77869b;
+  --accent: #7fb0ec;
+  --accent-fg: #0d1520;
+  --accent-soft: #1f3552;
+  --zone: #181e26;
+  --zone-line: #2e3846;
+  --node-fill: #212934;
+  --node-off: #1a2029;
+  --edge: #66758a;
+  --edge-hi: #7fb0ec;
+  --ok-fg: #8fdca5;
+  --ok-bg: #1b3a28;
+  --warn-fg: #f0c070;
+  --warn-bg: #3d2f12;
+  --open-fg: #b4bfce;
+  --open-bg: #2a3340;
+  --rej-fg: #c5b8e0;
+  --rej-bg: #332c45;
+  --err-fg: #f3b4b4;
+  --err-bg: #4a1f1f;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+[hidden] { display: none !important; }
+.page {
+  max-width: 1280px;
+  margin-inline: auto;
+  padding-inline: max(16px, 3vw);
+  padding-block: 20px 48px;
+}
+.page > * { min-width: 0; }
+h1 { font-size: 1.55rem; line-height: 1.25; margin: 0 0 6px; }
+h2 { font-size: 1.2rem; margin: 40px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1rem; margin: 22px 0 8px; }
+p { margin: 6px 0; }
+code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace; font-size: 0.86em; }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+.small { font-size: 0.84rem; }
+.tnum, .count { font-variant-numeric: tabular-nums; }
+.top { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; }
+.top > * { min-width: 0; }
+button, select, input { font: inherit; color: var(--fg); }
+button, select, input[type="search"] {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 5px 9px;
+  min-height: 32px;
+}
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 16px 0 10px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.kpi .big { font-size: 1.7rem; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.kpi .lbl { font-weight: 600; }
+.kpi .sub { color: var(--muted); font-size: 0.82rem; }
+.kpi .pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.legend-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 16px; margin: 8px 0; padding: 0; list-style: none; }
+.legend-list li { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-size: 0.86rem; }
+
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; line-height: 1.5; white-space: nowrap; border: 1px solid transparent; font-variant-numeric: tabular-nums; }
+.st-umgesetzt, .st-umgesetzt-override { color: var(--ok-fg); background: var(--ok-bg); border-color: var(--ok-fg); }
+.st-teilweise, .st-teilweise-p6 { color: var(--warn-fg); background: var(--warn-bg); border-color: var(--warn-fg); }
+.st-offen { color: var(--open-fg); background: var(--open-bg); border-color: var(--border-strong); }
+.st-verworfen-override { color: var(--rej-fg); background: var(--rej-bg); border-color: var(--rej-fg); }
+
+.scroll-x { overflow-x: auto; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.diagram { background: var(--surface); }
+.diagram svg.arch { display: block; width: 100%; height: auto; min-width: 1100px; }
+svg.arch { display: block; max-width: none; }
+.zone-rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1; }
+.zone-title { font-size: 12.5px; font-weight: 650; fill: var(--fg); }
+.zone-note { font-size: 11px; fill: var(--muted); }
+.lane-cap { font-size: 10.5px; fill: var(--muted); letter-spacing: 0.02em; }
+.node { cursor: pointer; }
+.node-rect { fill: var(--node-fill); stroke: var(--border-strong); stroke-width: 1; }
+.node-text { font-size: 10.8px; fill: var(--fg); pointer-events: none; }
+.node-badge { font-size: 9.5px; font-style: italic; fill: var(--muted); pointer-events: none; }
+.node-bar { fill: var(--fg); pointer-events: none; }
+.o-strang .node-rect, .o-both .node-rect { stroke: var(--fg); stroke-width: 2.4; }
+.o-both .node-rect { stroke-width: 1.2; }
+.o-both .node-bar { opacity: 0.7; }
+.o-extern .node-rect { stroke-dasharray: 1.5 3; stroke-width: 1.6; }
+.node.inactive .node-rect { stroke-dasharray: 5 3; fill: var(--node-off); }
+.node.inactive .node-text { fill: var(--muted); }
+.node.planned .node-rect { stroke-dasharray: 5 3; fill: var(--node-off); }
+.node:hover .node-rect { stroke: var(--accent); }
+.node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.node.is-selected .node-rect { stroke: var(--accent); stroke-width: 3; fill: var(--accent-soft); }
+.term-rect { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1; }
+.term-text { font-size: 10.5px; font-weight: 650; fill: var(--muted); }
+.edge { fill: none; stroke: var(--edge); stroke-width: 1; opacity: 0.8; }
+.edge.pipe { stroke-width: 1.6; opacity: 1; }
+.edge.opt { stroke-dasharray: 4 3; }
+.edge.manual { stroke-dasharray: 9 3 2 3; }
+.ah { fill: var(--edge); opacity: 0.9; }
+.elabel { font-size: 9.5px; fill: var(--muted); paint-order: stroke; stroke: var(--zone); stroke-width: 3px; stroke-linejoin: round; text-anchor: middle; }
+svg.has-sel .edge:not(.hi), svg.has-sel .ah:not(.hi), svg.has-sel .elabel:not(.hi) { opacity: 0.22; }
+.edge.hi { stroke: var(--edge-hi); stroke-width: 2.4; opacity: 1; }
+.ah.hi { fill: var(--edge-hi); opacity: 1; }
+.elabel.hi { fill: var(--accent); opacity: 1; }
+
+.key { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 10px 0; font-size: 0.84rem; color: var(--muted); }
+.key span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.key svg { flex: none; }
+.key .kr { fill: var(--node-fill); stroke: var(--border-strong); stroke-width: 1; }
+.key .ks { fill: var(--node-fill); stroke: var(--fg); stroke-width: 2.4; }
+.key .kb { fill: var(--node-fill); stroke: var(--fg); stroke-width: 1.2; }
+.key .kx { fill: var(--node-fill); stroke: var(--border-strong); stroke-width: 1.6; stroke-dasharray: 1.5 3; }
+.key .ki { fill: var(--node-off); stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 5 3; }
+.key .kbar { fill: var(--fg); }
+.key .kl { stroke: var(--edge); stroke-width: 1.6; fill: none; }
+.key .kld { stroke: var(--edge); stroke-width: 1.6; fill: none; stroke-dasharray: 4 3; }
+.key .klm { stroke: var(--edge); stroke-width: 1.6; fill: none; stroke-dasharray: 9 3 2 3; }
+.note-box { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 6px; padding: 8px 12px; margin: 10px 0; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin: 10px 0; }
+.filters label { display: flex; flex-direction: column; gap: 2px; font-size: 0.8rem; color: var(--muted); min-width: 0; }
+.filters select, .filters input { max-width: 100%; }
+.filters .grow { flex: 1 1 200px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--fg); border: 1px solid var(--accent); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 0.84rem; }
+.chip button { border: 0; background: transparent; min-height: 22px; padding: 0 7px; border-radius: 999px; font-weight: 700; }
+.sel-detail { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 0.9rem; overflow-wrap: anywhere; }
+.count { font-size: 0.9rem; color: var(--muted); margin: 4px 0; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+th, td { text-align: left; vertical-align: top; padding: 6px 9px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+th { position: sticky; top: 0; background: var(--surface-2); font-weight: 650; white-space: nowrap; z-index: 1; }
+td.idc { font-family: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace; font-size: 0.8rem; white-space: nowrap; overflow-wrap: normal; }
+td.ev { font-size: 0.8rem; color: var(--muted); min-width: 220px; }
+tr.flow-hi td { background: var(--accent-soft); }
+.org { display: inline-block; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 4px; font-size: 0.8rem; background: var(--surface); }
+.org.strang { border-width: 1px 1px 1px 4px; border-color: var(--fg); }
+.org.upstream { border-style: solid; }
+.link-btn { background: transparent; border: 0; padding: 0; min-height: 0; color: var(--accent); text-decoration: underline; text-align: left; }
+.link-btn:hover { background: transparent; }
+.tag { display: inline-block; padding: 0 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; border: 1px solid var(--border-strong); }
+.tag-entscheidet { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.tag-eingabe { background: var(--accent-soft); }
+.tag-nachauswertung { background: var(--open-bg); color: var(--open-fg); }
+.tag-leitplanke { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-fg); }
+.tag-ablauf { background: var(--surface-2); }
+.tag-keiner { background: transparent; color: var(--muted); border-style: dashed; }
+.answer { background: var(--surface); border: 1px solid var(--accent); border-radius: 8px; padding: 12px 16px; margin: 10px 0 16px; }
+.answer h3 { margin-top: 0; }
+.answer ol { margin: 6px 0 0; padding-left: 22px; }
+.answer li { margin: 5px 0; }
+.findings { padding-left: 22px; }
+.findings li { margin: 8px 0; }
+footer { margin-top: 36px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.84rem; }
+.err { background: var(--err-bg); color: var(--err-fg); padding: 10px 12px; border-radius: 6px; }
+
+@media (max-width: 640px) {
+  .cards-sm thead { display: none; }
+  .cards-sm, .cards-sm tbody { display: block; }
+  .cards-sm tr { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .cards-sm td { display: block; border: 0; padding: 1px 0; min-width: 0; }
+  .cards-sm td::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.74rem; font-weight: 600; }
+  .cards-sm td.idc { white-space: normal; }
+  .cards-sm td.ev { min-width: 0; }
+  .cards-sm tr[hidden] { display: none !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+</style>
+<main class="page">
+  <div class="top">
+    <div style="min-width:0; flex:1 1 320px">
+      <h1>TradingEngineX – Architektur und Umsetzungsstand</h1>
+      <p id="stand" class="muted tnum"></p>
+      <p id="phase6" class="small"></p>
+    </div>
+    <button id="theme-toggle" type="button" aria-label="Farbschema wechseln">Farbschema: System</button>
+  </div>
+  <div id="kpis" class="kpis"></div>
+  <ul id="status-legend" class="legend-list"></ul>
+
+  <h2 id="architektur">Architektur</h2>
+  <p class="muted small">Klick (oder Enter/Leertaste) auf einen Knoten filtert die Anforderungsmatrix auf seine Komponente und hebt seine Datenflüsse hervor. Das Diagramm scrollt auf schmalen Bildschirmen seitlich; alle Datenflüsse stehen zusätzlich als Tabelle darunter.</p>
+  <div class="scroll-x diagram" id="diagram-scroll"></div>
+  <div id="diagram-key" class="key"></div>
+  <p id="edge-note" class="note-box small"></p>
+  <h3>Datenflüsse</h3>
+  <div class="scroll-x" id="flows"></div>
+
+  <h2 id="matrix">Anforderungsmatrix</h2>
+  <div class="filters" role="group" aria-label="Filter der Anforderungsmatrix">
+    <label>Quelle
+      <select id="f-source">
+        <option value="">Alle</option><option value="M1">M1 Produktionsreife</option><option value="M2">M2 IBKR Paper Execution</option><option value="Upstream">Upstream</option><option value="Strang">Strang-Zusätze</option>
+      </select>
+    </label>
+    <label>Status
+      <select id="f-status">
+        <option value="">Alle</option><option value="umgesetzt">umgesetzt (inkl. Override)</option><option value="teilweise">teilweise (inkl. Phase 6)</option><option value="p6">nur Phase 6 läuft</option><option value="offen">offen</option><option value="verworfen-override">verworfen-override</option>
+      </select>
+    </label>
+    <label>Komponente
+      <select id="f-comp"><option value="">Alle</option></select>
+    </label>
+    <label>Herkunft
+      <select id="f-origin">
+        <option value="">Alle</option><option value="upstream">Upstream</option><option value="strang">Strang</option>
+      </select>
+    </label>
+    <label class="grow">Suche
+      <input id="f-search" type="search" placeholder="ID, Titel, Herkunft, Phase, Nachweis" autocomplete="off">
+    </label>
+    <button id="f-reset" type="button" class="btn-primary">Filter zurücksetzen</button>
+  </div>
+  <p><span id="comp-chip" class="chip" hidden><span id="comp-chip-text"></span><button id="comp-chip-x" type="button" aria-label="Komponentenfilter und Knotenauswahl entfernen">×</button></span></p>
+  <div id="sel-detail" class="sel-detail"></div>
+  <p id="live" class="count" role="status" aria-live="polite"></p>
+  <p id="match-count" class="count"></p>
+  <div class="scroll-x" id="matrix-wrap"></div>
+
+  <h2 id="methoden">Vorhersagemethoden</h2>
+  <div class="answer" id="answer"><h3>Kurzantwort</h3><ol id="answer-list"></ol></div>
+  <p id="methods-note" class="note-box small"></p>
+  <h3>Stochastisch und statistisch</h3>
+  <div class="scroll-x" id="m-stoch"></div>
+  <h3>Heuristisch</h3>
+  <div class="scroll-x" id="m-heur"></div>
+  <h3>Semantisch und NLP (Ticker-Meldungen)</h3>
+  <div class="scroll-x" id="m-sem"></div>
+
+  <h2 id="auffaelligkeiten">Auffälligkeiten</h2>
+  <ol id="findings" class="findings"></ol>
+
+  <footer>Quelle: 261019-o31 RESEARCH Teil A und B · Momentaufnahme, Phase 6 läuft parallel</footer>
+</main>
+<script>/* Generated from the two RESEARCH files of quick task 261019-o31. Single data source of the page. */
+var TEX_DATA = {
+ "meta": {
+ "date": "2026-10-19",
+ "branch": "main",
+ "head": "b0989aa",
+ "headTime": "2026-10-19 17:21:29 +0200",
+ "upstream": "v0.7.0 e8f5503",
+ "phase6": "8/10 Pläne ausgeführt; 06-09 und 06-10 (erste echte Order) am 2026-10-19 verschoben, alle drei Ticker auf Hold",
+ "edgeNote": "Kein Rückkanal von Fills nach paper-log; paper-fills nicht umgesetzt; Ausführer manuell, keine Kante CI → IBKR.",
+ "methodsNote": "Grep über tradingagents/, scripts/, cli/ nach Monte Carlo, GARCH, Bayes, Embeddings, NLP-Paketen (vader, nltk, spacy, transformers, finbert), sklearn, scipy, statsmodels: keine Treffer außer random.uniform für Retry-Jitter. Die Abhängigkeiten (pandas, stockstats, yfinance, langchain/langgraph) enthalten weder scipy, sklearn, statsmodels noch ein NLP- oder Embedding-Paket.",
+ "statusLegend": [
+  {
+   "value": "umgesetzt",
+   "meaning": "im Code oder in einem Artefakt vorhanden und belegt (VERIFICATION passed, DoD [x], Test vorhanden)"
+  },
+  {
+   "value": "umgesetzt (Override)",
+   "meaning": "erfüllt in einem geänderten Wortlaut, den der Operator per Override abgenommen hat"
+  },
+  {
+   "value": "teilweise",
+   "meaning": "ein Teil ist belegt, ein benannter Rest fehlt"
+  },
+  {
+   "value": "teilweise (Phase 6 läuft)",
+   "meaning": "Code und Tests sind da, der reale Nachweis (06-09/06-10) steht aus"
+  },
+  {
+   "value": "offen",
+   "meaning": "nicht begonnen oder bewusst offen gelassen"
+  },
+  {
+   "value": "verworfen-override",
+   "meaning": "bewusst nicht umgesetzt, durch eine Entscheidung ersetzt"
+  }
+ ]
+},
+ "zones": [
+  {"id":"Z1","label":"GitHub Actions","note":"Cloud, täglich"},
+  {"id":"Z2","label":"Branch paper-log","note":"Git-Speicher, ein Schreiber (CI)"},
+  {"id":"Z5","label":"LangGraph-Pipeline","note":"läuft in Z1 bzw. lokal per CLI"},
+  {"id":"Z6","label":"Speicher und Caches","note":"lokal oder Runner-Temp"},
+  {"id":"Z3","label":"Lokaler Windows-Host","note":"Operator, IBKR"},
+  {"id":"Z4","label":"Externe Daten- und LLM-Anbieter","note":"extern"}
+ ],
+ "components": [
+  {"id":"K01","name":"Analysten","desc":"vier LLM-Analysten (Markt/Technik, Sentiment/Social, News, Fundamentals), laufen parallel","origin":"Upstream","paths":"tradingagents/agents/analysts/, tradingagents/graph/analyst_execution.py, tradingagents/agents/post_screen.py"},
+  {"id":"K02","name":"Debatte","desc":"Bull/Bear-Debatte und Research Manager (structured)","origin":"Upstream","paths":"tradingagents/agents/researchers/, agents/managers/research_manager.py"},
+  {"id":"K03","name":"Trader/Risiko/PM","desc":"Trader (3 Stufen), drei Risiko-Debattierer, Portfolio Manager (5 Stufen), Portfolio-Kontext","origin":"Upstream (+ Strang-Retry)","paths":"agents/trader/, agents/risk_mgmt/, agents/managers/portfolio_manager.py, agents/structured.py, agents/rating.py, tradingagents/portfolio.py"},
+  {"id":"K04","name":"Graph/Orchestrierung","desc":"LangGraph-Aufbau, Routing, Checkpoint-Resume, Reports","origin":"Upstream (+ Strang-Budget-Hooks)","paths":"tradingagents/graph/, reporting.py, report_html.py"},
+  {"id":"K05","name":"Memory/Settlement","desc":"Decision-Log, Settlement (Return, Alpha), Reflexion","origin":"Upstream (+ Strang-Fixes h63)","paths":"tradingagents/memory/log.py, settlement.py, reflection.py"},
+  {"id":"K06","name":"Backtest","desc":"Ticker×Datum-Gitter, Bewertung je Rating","origin":"Upstream (+ Strang-Fix #5)","paths":"tradingagents/backtest.py"},
+  {"id":"K07","name":"Datenquellen","desc":"Vendor-Router: yfinance, Alpha Vantage, SEC EDGAR, FRED, Polymarket, StockTwits, Reddit; Point-in-time-Schutz","origin":"Upstream","paths":"tradingagents/dataflows/, dataflows/vendors/"},
+  {"id":"K08","name":"LLM-Provider","desc":"Provider-Registry (über 18 Einträge), Tier-Provider, Fail-fast-Keys","origin":"Upstream (+ Strang-Fail-fast)","paths":"tradingagents/llm_clients/"},
+  {"id":"K09","name":"CLI","desc":"interaktiv und headless, backtest-Subkommando, Docker","origin":"Upstream (+ Strang-Exit-Pfade)","paths":"cli/, Dockerfile, docker-compose.yml"},
+  {"id":"K10","name":"Jev","desc":"Run-Review mit REVIEW-Fallback und Shadow-Checks (Strang); Social-Post-Screening (Upstream, eigener Key)","origin":"Strang (+ Upstream post_screen)","paths":"tradingagents/jev/, agents/post_screen.py"},
+  {"id":"K11","name":"Patterns","desc":"sechs Muster ohne Look-ahead, Wilson-95-%, MIN_N; nur Nachauswertung","origin":"Strang","paths":"tradingagents/patterns/, scripts/pattern_eval.py"},
+  {"id":"K12","name":"Budget/Kosten","desc":"hartes Kosten-/Token-Limit pro Run, Ratentabelle","origin":"Strang","paths":"tradingagents/budget.py, scripts/paper_run_rates.json"},
+  {"id":"K13","name":"Paper-Lauf (GitHub Actions)","desc":"Cron Di–Sa 06:30 UTC, AAPL/MSFT/NVDA, Cap $1.50/Ticker, schreibt paper-log","origin":"Strang","paths":".github/workflows/daily-paper-run.yml, scripts/daily_paper_run.py, scripts/PAPER_RUN.md, Branch paper-log"},
+  {"id":"K14","name":"CI/Smoke","desc":"pytest py3.11–3.14, strict ruff, Clean-Install-Smoke, Docker-Smoke mit Stub-LLM","origin":"Upstream-CI + Strang-Job","paths":".github/workflows/ci.yml, scripts/smoke/docker_smoke.sh, scripts/smoke/stub_llm.py"},
+  {"id":"K15","name":"State/Ops","desc":"verify/prune/backup, Runbook, Retention","origin":"Strang","paths":"scripts/state_maintenance.py, scripts/STATE_OPERATIONS.md"},
+  {"id":"K16","name":"IBKR-Ausführer","desc":"lokaler Prozess: account/resolve/preview/execute, Prüfkette, Entscheidungsübernahme aus paper-log","origin":"Strang","paths":"scripts/ibkr_executor.py, ibkr_decision.py, ibkr_paperlog.py, scripts/IBKR_EXECUTION.md"},
+  {"id":"K17","name":"IB Gateway/Adapter","desc":"einziger ib_async-Importort, Paper-Guard, Socket-Sperre, Contract-Auflösung, Sitzungen","origin":"Strang","paths":"scripts/ibkr_broker.py, ibkr_contracts.py, ibkr_market_data.py, scripts/smoke/ibkr_order_probe.py"},
+  {"id":"K18","name":"Leitplanken","desc":"RELEASE/KILL fail-closed, Größengrenze, Idempotenz, Ledger, Lock, Reconciliation","origin":"Strang","paths":"scripts/ibkr_guards.py, scripts/ibkr_ledger.py"},
+  {"id":"K19","name":"Rückkanal/Betrieb","desc":"eigener Branch, Soll-Ist-Bericht, Heartbeat, Scheduler (Phasen 7/8)","origin":"Strang (geplant)","paths":"noch kein Code"}
+ ],
+ "nodes": [
+  {"id":"gha_daily","label":"Daily Paper Run (Workflow)","zone":"Z1","origin":"strang","comps":["K13"],"file":".github/workflows/daily-paper-run.yml","desc":"Cron 30 6 * * 2-6 UTC (Di-Sa), Preflight → Lauf → Artefakt → Commit auf paper-log; concurrency: daily-paper-run, kein Cancel.","col":0,"row":0},
+  {"id":"paper_runner","label":"daily_paper_run.py","zone":"Z1","origin":"strang","comps":["K13"],"file":"scripts/daily_paper_run.py","desc":"Tickerliste (Default AAPL,MSFT,NVDA), trade_date = voriger Wochentag, harte Kostenbremse je Ticker (Default 1,50 USD) und je Tag, setzt memory_log_path=<state>/decision-log.md, checkpoint_enabled=False (:264-281). Optional --portfolio mit Frischeprüfung as_of (:137-176).","col":1,"row":0},
+  {"id":"gha_ci","label":"CI","zone":"Z1","origin":"upstream+strang","comps":["K14"],"file":".github/workflows/ci.yml","desc":"Tests/Lint (Extra ci = dev+ibkr, pyproject.toml).","col":5,"row":0},
+  {"id":"gha_artifact","label":"Run-Artefakt paper-run-N","zone":"Z1","origin":"strang","comps":["K13"],"file":"Workflow upload-artifact","desc":"Reports + summary.md, 90 Tage Aufbewahrung.","col":2,"row":0},
+  {"id":"paper_log","label":"Branch paper-log","zone":"Z2","origin":"strang","comps":["K13"],"file":"Workflow :144-211","desc":"Track Record: decision-log.md, index.md (append), runs/<date>/summary.json + <TICKER>.md. Ein Schreiber (CI); reset --hard FETCH_HEAD → git add -A → push ohne Rebase.","col":0,"row":0},
+  {"id":"executor","label":"IBKR-Ausführer (CLI)","zone":"Z3","origin":"strang","comps":["K16"],"file":"scripts/ibkr_executor.py","desc":"Unterbefehle account, resolve, preview, execute [--live]; manuell vom Operator gestartet (kein Task Scheduler eingerichtet). Exit-Codes 0-10, 20.","col":0,"row":0},
+  {"id":"ibkr_paperlog","label":"paper-log-Leser","zone":"Z3","origin":"strang","comps":["K16"],"file":"scripts/ibkr_paperlog.py","desc":"git fetch + git cat-file, ohne Working Tree; liest nur decision-log.md und runs/<date>/summary.json.","col":1,"row":0},
+  {"id":"ibkr_decision","label":"Entscheidungslogik (rein)","zone":"Z3","origin":"strang","comps":["K16"],"file":"scripts/ibkr_decision.py","desc":"Neuester Eintrag je Ticker, Frische (XNYS-Kalender), Soll-Rechnung BLOCKS={Buy:2, Overweight:1, Underweight:0, Sell:0}, Hold → skip, long-only, Toleranzband 1 Block (:323-375), Urteil über whatIf.","col":2,"row":0},
+  {"id":"ibkr_guards","label":"Leitplanken (rein)","zone":"Z3","origin":"strang","comps":["K18"],"file":"scripts/ibkr_guards.py","desc":"RELEASE-/KILL-Datei fail-closed, vor jeder Order geprüft; MAX_QTY_PER_ORDER = 2 (lehnt ab, kürzt nie, :348-358); Idempotenzschlüssel <trade_date> | <TICKER>; Quellenabgleich Konto/Position/„schon ausgeführt\".","col":3,"row":0},
+  {"id":"ibkr_contracts","label":"Kontrakt-Auflösung (rein)","zone":"Z3","origin":"strang","comps":["K17"],"file":"scripts/ibkr_contracts.py","desc":"Ticker → Suchschlüssel, Allow-List, persistierte Identität (contracts.json), Handelbarkeit/Session.","col":3,"row":1},
+  {"id":"ibkr_broker","label":"IBKR-Adapter","zone":"Z3","origin":"strang","comps":["K17"],"file":"scripts/ibkr_broker.py","desc":"Einziger Import von ib_async==2.1.0 (:486); Schreibsperre vor dem Socket, Paper-Guard managedAccounts == [\"DUQ634065\"], asyncio.wait_for um jede Anfrage.","col":5,"row":0},
+  {"id":"ibkr_ledger","label":"Ausführungs-Ledger","zone":"Z3","origin":"strang","comps":["K18"],"file":"scripts/ibkr_ledger.py","desc":"Append-only JSONL, Write-ahead intent (fsync) vor Order, orderRef = Entscheidungsschlüssel, paper-log-SHA als Provenienz; getrennte Dateien dry/live.","col":4,"row":0},
+  {"id":"ibkr_md","label":"Marktdaten-Stream","zone":"Z3","origin":"strang","comps":["K17"],"file":"scripts/ibkr_market_data.py","desc":"Eigene Session/clientId, delayed (reqMarketDataType(3)), bewusst nicht im Orderpfad (REQ-IBKR-26).","col":5,"row":1},
+  {"id":"ib_gateway","label":"IB Gateway / TWS (Paper)","zone":"Z3","origin":"extern","comps":["K17"],"file":".env IBKR_HOST/PORT","desc":"Konto DUQ634065; gemessener Port 7497 (TWS-Paper-Port, nicht 4002; scripts/IBKR_EXECUTION.md:115).","col":6,"row":0},
+  {"id":"ibkr_server","label":"IBKR Paper-Konto (Simulator)","zone":"Z4","origin":"extern","comps":["K17"],"file":"–","desc":"Füllt Market-Orders simuliert.","col":6,"row":0},
+  {"id":"state_maint","label":"state_maintenance.py","zone":"Z3","origin":"strang","comps":["K15"],"file":"scripts/state_maintenance.py","desc":"verify / prune (Dry-Run-Default) / backup für Decision-Log, Checkpoints, Reports; bewusst kein rotate. Vom Ausführer für verify der paper-log-Kopie genutzt.","col":1,"row":1},
+  {"id":"pattern_eval","label":"pattern_eval.py","zone":"Z3","origin":"strang","comps":["K11"],"file":"scripts/pattern_eval.py","desc":"CLI für die Musterauswertung gegen paper-log:decision-log.md.","col":2,"row":1},
+  {"id":"smoke","label":"Smoke-Skripte","zone":"Z3","origin":"strang","comps":["K14","K17"],"file":"scripts/smoke/ibkr_order_probe.py, jev_live_smoke.py, stub_llm.py","desc":"Manuelle Proben: Orderhistorie/whatIf ohne Senden; Jev-Live-Probe; Stub-LLM für kostenlose Läufe.","col":7,"row":1},
+  {"id":"cli","label":"CLI (interaktiv)","zone":"Z3","origin":"upstream","comps":["K09"],"file":"cli/main.py, cli/run.py","desc":"Interaktiver Einzellauf; nutzt dieselbe Pipeline und budget.","col":0,"row":1},
+  {"id":"tag","label":"TradingAgentsGraph","zone":"Z5","origin":"upstream","comps":["K04"],"file":"tradingagents/graph/trading_graph.py","desc":"Baut zwei LLM-Stufen (quick/deep), Memory-Log, Reflector, Graph; _run_graph streamt, danach record_decision (:388-419).","col":0,"row":7},
+  {"id":"llm_factory","label":"LLM-Clients","zone":"Z5","origin":"upstream","comps":["K08"],"file":"tradingagents/llm_clients/factory.py u. a.","desc":"OpenAI, Anthropic, Google, Azure, Bedrock, OpenAI-kompatible; temperature nur weitergereicht wenn gesetzt (Default None). Paper-Lauf: anthropic, deep claude-sonnet-5-5, quick claude-haiku-5-5.","col":1,"row":7},
+  {"id":"budget","label":"Budget/Kostenbremse","zone":"Z5","origin":"strang","comps":["K12"],"file":"tradingagents/budget.py","desc":"SpendTracker als LangChain-Callback; bricht mit BudgetExceededError ab, Teilzustand wird gespeichert. Raten aus scripts/paper_run_rates.json.","col":2,"row":7},
+  {"id":"router","label":"Daten-Router","zone":"Z5","origin":"upstream","comps":["K07"],"file":"tradingagents/dataflows/router.py, agents/tools.py","desc":"Tool → Vendor-Kette; as_of-Kappung gegen Look-ahead; DATA_UNAVAILABLE/NO_DATA_AVAILABLE-Sentinels statt Erfinden.","col":3,"row":7},
+  {"id":"structured","label":"Strukturierte Ausgaben","zone":"Z5","origin":"upstream","comps":["K03"],"file":"agents/schemas.py, agents/structured.py","desc":"SentimentReport, ResearchPlan, TraderProposal, PortfolioDecision (Pydantic), Freitext-Fallback.","col":0,"row":6},
+  {"id":"rating","label":"Rating-Extraktion","zone":"Z5","origin":"upstream","comps":["K03"],"file":"agents/rating.py","desc":"5er-Skala, Regex auf „Rating: X\"; widersprüchlich/fehlend → REVIEW, nie Hold.","col":6,"row":5},
+  {"id":"jev_hooks","label":"Jev-Review","zone":"Z5","origin":"strang","comps":["K10"],"file":"tradingagents/jev/hooks.py, jev/client.py","desc":"Nach dem Lauf, vor dem Log: Fallback nur bei REVIEW und Konfidenz ≥ 0,9; sonst Schattenprüfung. Sidecar jev_review_<date>.json.","col":7,"row":5},
+  {"id":"post_screen","label":"Social-Post-Screening","zone":"Z5","origin":"upstream","comps":["K10","K01"],"file":"agents/post_screen.py","desc":"Nur mit TYPESAFE_API_KEY; im Paper-Lauf bewusst aus (Workflow-Kommentar). Im Paper-Lauf aus: Workflow setzt keinen TYPESAFE_API_KEY.","col":4,"row":6,"inactive":true},
+  {"id":"memory_log","label":"Memory-Log + Settlement","zone":"Z5","origin":"upstream","comps":["K05"],"file":"memory/log.py, memory/settlement.py, memory/reflection.py","desc":"Speichert Entscheidung pending, rechnet nach 5 Handelstagen raw/alpha vs. Benchmark ab, LLM-Reflexion, liefert past_context.","col":8,"row":5},
+  {"id":"patterns","label":"Musterauswertung","zone":"Z5","origin":"strang","comps":["K11"],"file":"tradingagents/patterns/signals.py, evaluate.py","desc":"6 kursbasierte Muster, Wilson-95-%, MIN_N=20; nur Nachauswertung, nirgends im Graph importiert.","col":4,"row":7},
+  {"id":"backtest","label":"Backtest/Summarize","zone":"Z5","origin":"upstream","comps":["K06"],"file":"tradingagents/backtest.py","desc":"Trefferquote/mittleres Alpha über Ticker×Datum-Gitter.","col":3,"row":6},
+  {"id":"portfolio","label":"PortfolioContext","zone":"Z5","origin":"upstream","comps":["K03"],"file":"tradingagents/portfolio.py","desc":"Eingangs-Bestand (was gehalten wird) für Trader/Risiko/PM.","col":1,"row":6},
+  {"id":"reporting","label":"Reports MD/HTML","zone":"Z5","origin":"upstream","comps":["K04"],"file":"reporting.py, report_html.py","desc":"Speichert Berichte je Lauf.","col":2,"row":6},
+  {"id":"a_market","label":"Market Analyst","zone":"Z5","origin":"upstream","comps":["K01"],"file":"agents/analysts/market_analyst.py","desc":"LLM-Stufe quick. Liest: Tools get_stock_data, get_indicators, get_verified_market_snapshot. Schreibt: market_report.","col":1,"row":0},
+  {"id":"a_social","label":"Sentiment Analyst","zone":"Z5","origin":"upstream","comps":["K01"],"file":"agents/analysts/sentiment_analyst.py","desc":"LLM-Stufe quick. Liest: keine Tools, vorab geholt: Yahoo-News, StockTwits (30), Reddit-RSS. Schreibt: sentiment_report (SentimentReport).","col":1,"row":1},
+  {"id":"a_news","label":"News Analyst","zone":"Z5","origin":"upstream","comps":["K01"],"file":"agents/analysts/news_analyst.py","desc":"LLM-Stufe quick. Liest: Tools get_news, get_global_news, get_macro_indicators, get_prediction_markets. Schreibt: news_report.","col":1,"row":2},
+  {"id":"a_fund","label":"Fundamentals Analyst","zone":"Z5","origin":"upstream","comps":["K01"],"file":"agents/analysts/fundamentals_analyst.py","desc":"LLM-Stufe quick. Liest: Tools get_fundamentals, get_balance_sheet, get_cashflow, get_income_statement, get_insider_transactions. Schreibt: fundamentals_report.","col":1,"row":3},
+  {"id":"mem_node","label":"Memory Log (Knoten)","zone":"Z5","origin":"upstream","comps":["K05"],"file":"trading_graph.py:333-365","desc":"LLM-Stufe quick (Reflector). Liest: Decision-Log; Kurse yfinance. Schreibt: past_context, memory_note.","col":1,"row":4},
+  {"id":"bull","label":"Bull Researcher","zone":"Z5","origin":"upstream","comps":["K02"],"file":"researchers/bull_researcher.py","desc":"LLM-Stufe quick. Liest: 4 Reports + Debattenverlauf. Schreibt: investment_debate_state.","col":2,"row":1},
+  {"id":"bear","label":"Bear Researcher","zone":"Z5","origin":"upstream","comps":["K02"],"file":"researchers/bear_researcher.py","desc":"LLM-Stufe quick. Liest: dito. Schreibt: dito.","col":2,"row":3},
+  {"id":"rm","label":"Research Manager","zone":"Z5","origin":"upstream","comps":["K02"],"file":"managers/research_manager.py","desc":"LLM-Stufe deep. Liest: nur Debattenverlauf (nicht die Rohreports). Schreibt: investment_plan (ResearchPlan, 5er-Rating).","col":3,"row":2},
+  {"id":"trader","label":"Trader","zone":"Z5","origin":"upstream","comps":["K03"],"file":"trader/trader.py","desc":"LLM-Stufe quick. Liest: investment_plan, market_report, Portfolio. Schreibt: trader_investment_plan (TraderProposal: Aktion, Entry, Stop, Sizing).","col":4,"row":2},
+  {"id":"r_aggr","label":"Aggressive Analyst","zone":"Z5","origin":"upstream","comps":["K03"],"file":"risk_mgmt/aggressive_debator.py","desc":"LLM-Stufe quick. Liest: 4 Reports, Trader-Plan, Portfolio, Verlauf. Schreibt: risk_debate_state.","col":5,"row":1},
+  {"id":"r_cons","label":"Conservative Analyst","zone":"Z5","origin":"upstream","comps":["K03"],"file":"risk_mgmt/conservative_debator.py","desc":"LLM-Stufe quick. Liest: dito. Schreibt: dito.","col":5,"row":2},
+  {"id":"r_neut","label":"Neutral Analyst","zone":"Z5","origin":"upstream","comps":["K03"],"file":"risk_mgmt/neutral_debator.py","desc":"LLM-Stufe quick. Liest: dito. Schreibt: dito.","col":5,"row":3},
+  {"id":"pm","label":"Portfolio Manager","zone":"Z5","origin":"upstream","comps":["K03"],"file":"managers/portfolio_manager.py","desc":"LLM-Stufe deep. Liest: Risikodebatte, investment_plan, Trader-Plan, past_context, Portfolio. Schreibt: final_trade_decision (PortfolioDecision: Rating, Kursziel, Horizont).","col":6,"row":2},
+  {"id":"s_declog","label":"decision-log.md","zone":"Z2","origin":"upstream+strang","comps":["K05"],"file":"paper-log; lokal ~/.tradingagents/memory/trading_memory.md","desc":"Tag [date | TICKER | Rating | pending] bzw. [… | raw | alpha | 5d | resolved:…], <!-- ENTRY_END -->; Idempotenz je (date,ticker). Unbegrenzt (keine Rotation).","col":8,"row":0},
+  {"id":"s_summary","label":"runs/<date>/summary.json, index.md","zone":"Z2","origin":"strang","comps":["K13"],"file":"paper-log","desc":"Maschinenlesbarer Tageslauf (schema_version 1), Eingabe des Ausführers.","col":2,"row":0},
+  {"id":"s_cache","label":"OHLCV-Cache","zone":"Z6","origin":"upstream","comps":["K07"],"file":"~/.tradingagents/cache (data_cache_dir)","desc":"5 Jahre je Symbol als CSV, auf as_of gekappt.","col":3,"row":0},
+  {"id":"s_ckpt","label":"Checkpoints (SQLite)","zone":"Z6","origin":"upstream","comps":["K04"],"file":"<cache>/checkpoints/<TICKER>.db (graph/checkpointer.py)","desc":"Resume nach Absturz; im Paper-Lauf aus. Im Paper-Lauf aus (checkpoint_enabled=False).","col":1,"row":0,"inactive":true},
+  {"id":"s_results","label":"State-Logs/Reports","zone":"Z6","origin":"upstream","comps":["K04"],"file":"results_dir (~/.tradingagents/logs bzw. $OUT_DIR/logs)","desc":"Volle Zustände, Jev-Sidecar.","col":0,"row":0},
+  {"id":"s_ibkr","label":"IBKR-State","zone":"Z3","origin":"strang","comps":["K18"],"file":"%LOCALAPPDATA%\\TradingEngineX\\ibkr\\","desc":"ledger.jsonl, ledger-dryrun.jsonl, contracts.json, preview.json, RELEASE, KILL, paper-log/decision-log.md (Kopie), logs/ibkr_executor.log. Außerhalb jedes Git-Trees erzwungen.","col":4,"row":1},
+  {"id":"s_rates","label":"Preistabelle","zone":"Z1","origin":"strang","comps":["K12"],"file":"scripts/paper_run_rates.json","desc":"USD/1M Tokens je Modell für die Kostenbremse.","col":3,"row":0},
+  {"id":"x_yf","label":"Yahoo Finance (yfinance)","zone":"Z4","origin":"extern","comps":["K07"],"file":"","desc":"Genutzt von: OHLCV, Indikatoren, News (yf.Search), Fundamentals-Übersicht, Insider, Settlement-Kurse. Im Paper-Lauf aktiv: ja (Default aller Kernkategorien).","col":0,"row":0},
+  {"id":"x_sec","label":"SEC EDGAR (XBRL companyfacts)","zone":"Z4","origin":"extern","comps":["K07"],"file":"","desc":"Genutzt von: Bilanz/Cashflow/GuV. Im Paper-Lauf aktiv: ja (fundamental_data: \"sec_edgar,yfinance\").","col":1,"row":0},
+  {"id":"x_av","label":"Alpha Vantage","zone":"Z4","origin":"extern","comps":["K07"],"file":"","desc":"Genutzt von: alternative Vendor-Kette. Im Paper-Lauf aktiv: nein: data_vendors ist nicht per Env überschreibbar, Default yfinance. Im Paper-Lauf aus: data_vendors nicht per Env schaltbar, Default yfinance.","col":2,"row":0,"inactive":true},
+  {"id":"x_fred","label":"FRED","zone":"Z4","origin":"extern","comps":["K07"],"file":"","desc":"Genutzt von: get_macro_indicators. Im Paper-Lauf aktiv: nur mit FRED_API_KEY (optional, degradiert zu Sentinel). Im Paper-Lauf optional: nur mit FRED_API_KEY, sonst Sentinel.","col":3,"row":0,"inactive":true},
+  {"id":"x_poly","label":"Polymarket (keyless)","zone":"Z4","origin":"extern","comps":["K07"],"file":"","desc":"Genutzt von: get_prediction_markets. Im Paper-Lauf aktiv: ja (optional-Kategorie).","col":4,"row":0},
+  {"id":"x_st","label":"StockTwits API","zone":"Z4","origin":"extern","comps":["K07"],"file":"","desc":"Genutzt von: Sentiment Analyst. Im Paper-Lauf aktiv: ja.","col":0,"row":1},
+  {"id":"x_reddit","label":"Reddit RSS (wallstreetbets, stocks, investing)","zone":"Z4","origin":"extern","comps":["K07"],"file":"","desc":"Genutzt von: Sentiment Analyst. Im Paper-Lauf aktiv: ja.","col":1,"row":1},
+  {"id":"x_llm","label":"LLM-Anbieter (Anthropic im Paper-Lauf)","zone":"Z4","origin":"extern","comps":["K08"],"file":"","desc":"Genutzt von: alle LLM-Knoten, Reflector. Im Paper-Lauf aktiv: ja.","col":2,"row":1},
+  {"id":"x_jev","label":"Jev/TypeSafe (über OpenRouter oder api.typesafe.ai)","zone":"Z4","origin":"extern","comps":["K10"],"file":"","desc":"Genutzt von: jev_hooks (JEV_API_KEY), post_screen (TYPESAFE_API_KEY). Im Paper-Lauf aktiv: Review: nur wenn Secret gesetzt; Screening: aus. Optional: Review nur wenn Secret gesetzt, Screening im Paper-Lauf aus.","col":3,"row":1,"inactive":true},
+  {"id":"k19_backchannel","label":"Rückkanal/Betrieb (Phasen 7/8, geplant)","zone":"Z3","origin":"strang","comps":["K19"],"file":"","desc":"Eigener Branch, Soll-Ist-Bericht, Heartbeat, Scheduler (Phasen 7/8): noch kein Code.","planned":true,"col":8,"row":1},
+  {"id":"start","label":"START","zone":"Z5","origin":"upstream","comps":[],"file":"","desc":"","terminal":true,"col":0,"row":2},
+  {"id":"end","label":"END","zone":"Z5","origin":"upstream","comps":[],"file":"","desc":"","terminal":true,"col":7,"row":2}
+ ],
+ "edges": [
+  {"from":"start","to":"a_market","label":"parallel: Ticker, trade_date, Portfolio","src":"2a"},
+  {"from":"start","to":"a_social","label":"parallel: Ticker, trade_date, Portfolio","src":"2a"},
+  {"from":"start","to":"a_news","label":"parallel: Ticker, trade_date, Portfolio","src":"2a"},
+  {"from":"start","to":"a_fund","label":"parallel: Ticker, trade_date, Portfolio","src":"2a"},
+  {"from":"start","to":"mem_node","label":"parallel: Ticker, trade_date, Portfolio","src":"2a"},
+  {"from":"a_market","to":"bull","label":"Join: alle Berichte + past_context","src":"2a"},
+  {"from":"a_social","to":"bull","label":"Join: alle Berichte + past_context","src":"2a"},
+  {"from":"a_news","to":"bull","label":"Join: alle Berichte + past_context","src":"2a"},
+  {"from":"a_fund","to":"bull","label":"Join: alle Berichte + past_context","src":"2a"},
+  {"from":"mem_node","to":"bull","label":"Join: alle Berichte + past_context","src":"2a"},
+  {"from":"bull","to":"bear","label":"Argument","src":"2a"},
+  {"from":"bear","to":"bull","label":"nächste Runde, falls max_debate_rounds > 1","src":"2a"},
+  {"from":"bear","to":"rm","label":"nach 2 × max_debate_rounds; Paper-Lauf: Bull, Bear, RM","src":"2a"},
+  {"from":"rm","to":"trader","label":"investment_plan, 5er-Rating","src":"2a"},
+  {"from":"trader","to":"r_aggr","label":"trader_investment_plan: Aktion, Entry, Stop, Sizing","src":"2a"},
+  {"from":"r_aggr","to":"r_cons","label":"feste Reihenfolge","src":"2a"},
+  {"from":"r_cons","to":"r_neut","label":"feste Reihenfolge","src":"2a"},
+  {"from":"r_neut","to":"r_aggr","label":"weitere Runde, falls max_risk_discuss_rounds > 1","src":"2a"},
+  {"from":"r_neut","to":"pm","label":"nach 3 Beiträgen","src":"2a"},
+  {"from":"mem_node","to":"pm","label":"past_context (nur PM liest es)","src":"2a"},
+  {"from":"pm","to":"end","label":"final_trade_decision: Rating, Kursziel, Horizont","src":"2a"},
+  {"from":"pm","to":"jev_hooks","label":"Entscheidung, Plan, Trader-Vorschlag, Sentiment-Text; bei REVIEW ggf. Rating-Fallback","src":"2b"},
+  {"from":"jev_hooks","to":"rating","label":"run_rating (strukturiert vor Regex)","src":"2b"},
+  {"from":"jev_hooks","to":"memory_log","label":"store_decision pending mit Settlement-Bedingungen (5d, Benchmark, next_close)","src":"2b"},
+  {"from":"mem_node","to":"x_yf","label":"Schlusskurse Ticker + Benchmark für raw/alpha","src":"2b"},
+  {"from":"mem_node","to":"x_llm","label":"Reflexion 2-4 Sätze je abgerechneter Entscheidung","src":"2b"},
+  {"from":"paper_runner","to":"tag","label":"je Ticker propagate() mit Budget-Callback","src":"2b"},
+  {"from":"budget","to":"x_llm","label":"Token-/Kostenzählung, Abbruch bei Überschreitung","src":"2b"},
+  {"from":"gha_daily","to":"paper_log","label":"decision-log.md, index.md, runs/<date>/ via git push (ein Schreiber)","src":"2b"},
+  {"from":"paper_log","to":"gha_daily","label":"Zustand des Vortags via git fetch --depth=1 + reset --hard","src":"2b"},
+  {"from":"gha_daily","to":"gha_artifact","label":"Reports, summary.md","src":"2b"},
+  {"from":"paper_log","to":"ibkr_paperlog","label":"decision-log.md + summary.json via git fetch/cat-file (nur lesend)","src":"2b"},
+  {"from":"ibkr_paperlog","to":"state_maint","label":"verify der Kopie","src":"2b"},
+  {"from":"ibkr_paperlog","to":"ibkr_decision","label":"neueste Entscheidung je Ticker, paper-log-SHA","src":"2b"},
+  {"from":"ibkr_decision","to":"ibkr_guards","label":"Plan (Seite, Menge, Ziel)","src":"2b"},
+  {"from":"ibkr_guards","to":"ibkr_ledger","label":"intent write-ahead, Schlüssel date|TICKER","src":"2b"},
+  {"from":"ibkr_ledger","to":"ibkr_broker","label":"Market-Order (nur execute --live), orderRef","src":"2b"},
+  {"from":"ibkr_broker","to":"ib_gateway","label":"Order/whatIf/Positionen via ib_async (Socket, Port 7497)","src":"2b"},
+  {"from":"ib_gateway","to":"ibkr_server","label":"Order an Paper-Simulator; Fills zurück","src":"2b"},
+  {"from":"ibkr_broker","to":"ibkr_ledger","label":"Fills, Nachkontrolle (Abweichung → Exit 10)","src":"2b"},
+  {"from":"executor","to":"paper_runner","label":"portfolio.json mit as_of, manueller Übergang, nicht in CI","src":"2b","manual":true},
+  {"from":"ibkr_md","to":"ib_gateway","label":"eigene Session, delayed; keine Kante zum Orderpfad","src":"2b"},
+  {"from":"pattern_eval","to":"paper_log","label":"Decision-Log + Kurse → Musterbericht (kein LLM)","src":"2b"},
+  {"from":"pattern_eval","to":"x_yf","label":"Kurse für die Musterauswertung","src":"2b"},
+  {"from":"a_market","to":"router","label":"Tools get_stock_data, get_indicators, Snapshot","src":"abgeleitet","ref":"§1c"},
+  {"from":"a_news","to":"router","label":"Tools get_news, get_global_news, Makro, Prognosemärkte","src":"abgeleitet","ref":"§1c"},
+  {"from":"a_fund","to":"router","label":"Tools get_fundamentals, Bilanz, Cashflow, GuV, Insider","src":"abgeleitet","ref":"§1c"},
+  {"from":"router","to":"x_yf","label":"OHLCV, Indikatoren, News, Fundamentals-Übersicht, Insider","src":"abgeleitet","ref":"§1e"},
+  {"from":"router","to":"x_sec","label":"Bilanz/Cashflow/GuV (XBRL)","src":"abgeleitet","ref":"§1e"},
+  {"from":"router","to":"x_av","label":"alternative Vendor-Kette, im Paper-Lauf aus","src":"abgeleitet","ref":"§1e","optional":true},
+  {"from":"router","to":"x_fred","label":"Makro-Indikatoren, nur mit FRED_API_KEY","src":"abgeleitet","ref":"§1e","optional":true},
+  {"from":"router","to":"x_poly","label":"Prognosemärkte (outcomePrices)","src":"abgeleitet","ref":"§1e"},
+  {"from":"a_social","to":"x_st","label":"30 Posts","src":"abgeleitet","ref":"§1c/§1e"},
+  {"from":"a_social","to":"x_reddit","label":"RSS","src":"abgeleitet","ref":"§1c/§1e"},
+  {"from":"a_social","to":"x_yf","label":"Yahoo-News vorab","src":"abgeleitet","ref":"§1c"},
+  {"from":"llm_factory","to":"x_llm","label":"LLM-Aufrufe (quick/deep)","src":"abgeleitet","ref":"§1b/§1e"},
+  {"from":"jev_hooks","to":"x_jev","label":"Run-Review, nur mit JEV_API_KEY","src":"abgeleitet","ref":"§1e","optional":true},
+  {"from":"post_screen","to":"x_jev","label":"Post-Screening, TYPESAFE_API_KEY, im Paper-Lauf aus","src":"abgeleitet","ref":"§1e","optional":true},
+  {"from":"router","to":"s_cache","label":"OHLCV-Cache (5 Jahre je Symbol)","src":"abgeleitet","ref":"§1d"},
+  {"from":"memory_log","to":"s_declog","label":"Entscheidung pending / abgerechnet","src":"abgeleitet","ref":"§1d"},
+  {"from":"paper_runner","to":"s_summary","label":"summary.json, schema_version 1","src":"abgeleitet","ref":"§1d"},
+  {"from":"ibkr_ledger","to":"s_ibkr","label":"ledger.jsonl","src":"abgeleitet","ref":"§1d"},
+  {"from":"tag","to":"s_results","label":"volle Zustände, Reports, Jev-Sidecar","src":"abgeleitet","ref":"§1d"},
+  {"from":"s_rates","to":"budget","label":"USD/1M Tokens","src":"abgeleitet","ref":"§1d"},
+  {"from":"tag","to":"s_ckpt","label":"Checkpoint-Resume, im Paper-Lauf aus","src":"abgeleitet","ref":"§1d","optional":true},
+  {"from":"cli","to":"tag","label":"interaktiver Einzellauf","src":"abgeleitet","ref":"§1a"},
+  {"from":"executor","to":"ibkr_paperlog","label":"preview/execute startet Kette","src":"abgeleitet","ref":"§1a"},
+  {"from":"ibkr_contracts","to":"s_ibkr","label":"contracts.json","src":"abgeleitet","ref":"§1d"},
+  {"from":"tag","to":"reporting","label":"Berichte je Lauf","src":"abgeleitet","ref":"§1b"},
+  {"from":"portfolio","to":"trader","label":"Eingangs-Bestand","src":"abgeleitet","ref":"§1b/§1c"},
+  {"from":"portfolio","to":"pm","label":"Eingangs-Bestand","src":"abgeleitet","ref":"§1b/§1c"}
+ ],
+ "requirements": [
+  {"id":"M1-P1-1","title":"Release v0.2.5 schnüren","source":"M1","origin":"Strang","originKind":"strang","status":"verworfen-override","phase":"260814-k1j","comp":"K14","evidence":"DoD: „obsolet durch Rebase-Strategie“; Tag v0.2.5-tex existiert (letzter eigener Tag), Release-Commit cf351de beim Rebase 2026-08-18 gedroppt, #618 in Upstreams v0.2.5"},
+  {"id":"M1-P1-2","title":"CI-Paket: Tests, Lint, Security-Scan","source":"M1","origin":"Strang","originKind":"strang","status":"teilweise","phase":"260814-k1j","comp":"K14","evidence":"ci.yml: py3.11–3.14, strict ruff, smoke-install, [dev]-Extra. Kein Dependency-/Security-Scan: pip-audit aus 6bce117 (vor Rebase) beim Rebase 2026-08-18 gedroppt, kein Dependabot in .github/"},
+  {"id":"M1-P1-3","title":"Kosten-Budget pro Run erzwingen","source":"M1","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"260814-k1j, Rebase-Ports","comp":"K12","evidence":"tradingagents/budget.py (max_cost_per_run), tests/test_budget.py; Reflexions-Calls zählen seit v0.5.0-Rebase mit"},
+  {"id":"M1-P1-4","title":"Schema-Fehler nicht abbrechen (#583)","source":"M1","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"260814-k1j","comp":"K03","evidence":"agents/structured.py invoke_structured (Retry mit Fehlerkontext, dann Prosa), 92481f0, tests/test_structured_agents.py"},
+  {"id":"M1-P1-5","title":"Secrets-Doku und Fail-fast-Keys","source":"M1","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"260814-k1j","comp":"K08","evidence":"llm_clients/factory.py _validate_credentials, e92e6c1, README „Secrets & configuration for production“, tests/test_api_key_failfast.py"},
+  {"id":"M1-P2-6","title":"Observability/Alerting für Dauerbetrieb","source":"M1","origin":"Strang","originKind":"strang","status":"offen","phase":"— (M2 Ph. 8 teilweise geplant)","comp":"K13","evidence":"MILESTONE „Bewusst offen (Operator 2026-10-11)“; Ausführungsseite soll mit REQ-IBKR-53/54 kommen (offen), Analyseseite bleibt ohne Metriken"},
+  {"id":"M1-P2-7","title":"State-Betrieb: Retention/Backup/Locking","source":"M1","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"261011-k4s","comp":"K15","evidence":"scripts/state_maintenance.py (verify/prune/backup), scripts/STATE_OPERATIONS.md, tests/test_state_maintenance.py; 28f4a75/e32c6a4 (vor Rebase), HEAD-Stand 14fd390"},
+  {"id":"M1-P2-8","title":"Provider-Ausfall-/Quota-Policy technisch","source":"M1","origin":"Strang","originKind":"strang","status":"offen","phase":"—","comp":"K08","evidence":"MILESTONE „bewusst offen“; nur Upstream-Bausteine vorhanden (llm_max_retries, tests/test_llm_max_retries.py), keine Degradationsstrategie"},
+  {"id":"M1-P2-9","title":"Release-Reproduzierbarkeit / Lockfile","source":"M1","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Rebase 2026-08-18","comp":"K14","evidence":"DoD [x]: Upstream hat uv.lock entfernt (0b61eff), CI installiert per pip; keine eigene Publish-Prozedur nötig, weil keine eigenen Tags mehr"},
+  {"id":"M1-P2-10","title":"Docker-/CLI-E2E-Smoke mit Stub","source":"M1","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"261011-k4s","comp":"K14","evidence":"scripts/smoke/docker_smoke.sh, stub_llm.py, CI-Job docker-smoke (ci.yml:57); 12ed32d (vor Rebase), HEAD 952a5e6"},
+  {"id":"M1-P2-11","title":"Betriebs-Runbook (Rest: Vendor-Quota)","source":"M1","origin":"Strang","originKind":"strang","status":"teilweise","phase":"261011-k4s","comp":"K15","evidence":"Checkpoint-Hygiene, Memory-Log-Pflege, Recovery in STATE_OPERATIONS.md; Vendor-Quota-Verhalten offen, hängt an #8"},
+  {"id":"M1-P3-12","title":"Repo-Hygiene lokaler Tool-Artefakte","source":"M1","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"—","comp":"K15","evidence":"4c1769b (vor Rebase); CLAUDE.md, AGENTS.md, scripts/graphify.sh committet; git status am HEAD nur .planning/debug/ untracked","subsource":"M1-Zusatz"},
+  {"id":"M1-Z","title":"Täglicher Paper-Lauf trägt sich","source":"M1","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Heartbeat 2026-08-21","comp":"K13","evidence":"daily-paper-run.yml (Cron 30 6 * * 2-6), seit 2026-10-11 Entscheidungen; erster Lauf AAPL Hold $0.18, paper-log:runs/2026-10-09/summary.json","subsource":"M1-Zusatz"},
+  {"id":"REQ-IBKR-01","title":"Konto-Messung: fünf Fragen schriftlich","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 1","comp":"K17","evidence":".planning/ibkr-konto-befund.md §1–5 mit Rohausgabe; Gate G1 (8f4b6ea)"},
+  {"id":"REQ-IBKR-02","title":"2FA-Ausgang bestimmt Betriebsform","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 1","comp":"K17","evidence":"ibkr-konto-befund.md §1: „Zweitfaktor? NEIN“"},
+  {"id":"REQ-IBKR-03","title":"Gateway Paper, Paper-User, read-only","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K17","evidence":"02-VERIFICATION Z. 133 SATISFIED"},
+  {"id":"REQ-IBKR-04","title":"Paper-Guard: genau {DUQ634065}","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K17","evidence":"02-VERIFICATION K2 (Exit 8, kein Platzierungsaufruf)"},
+  {"id":"REQ-IBKR-05","title":"Credentials nur lokal, CI frei","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K17","evidence":"02-VERIFICATION K8; tests/test_ibkr_isolation.py::test_ci_workflows_reference_no_ibkr_secret"},
+  {"id":"REQ-IBKR-06","title":"ib_async==2.1.0 + tzdata-Pin","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K17","evidence":"test_ibkr_isolation.py::test_ibkr_extra_pins_the_client_library_exactly, ::test_tzdata_cap_carries_its_reason"},
+  {"id":"REQ-IBKR-07","title":"Ein Adapter, ≤ 10 Methoden","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K17","evidence":"test_ibkr_isolation.py::test_only_the_adapter_imports_the_client_library, ::test_adapter_has_at_most_ten_public_methods"},
+  {"id":"REQ-IBKR-08","title":"Fester clientId, Order-IDs ab nextValidId","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise-p6","phase":"Phase 2","comp":"K17","evidence":"clientId 20001 belegt (02-VERIFICATION Z. 138); „nextValidId erst mit Orders (Phase 6)“"},
+  {"id":"REQ-IBKR-09","title":"Benannte Betriebszustände, Probe-Liveness","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K17","evidence":"02-VERIFICATION Z. 139 (STATE_BY_CODE); Lücke 2107 → UNKNOWN (Info)"},
+  {"id":"REQ-IBKR-10","title":"Schreibrecht als dokumentierte Einmalhandlung","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise-p6","phase":"Phase 6","comp":"K17","evidence":"321-Beleg am 2026-10-19 (Sonde, READ_ONLY_API, 035af86); Freischaltung und Handbuchvermerk in 06-10 offen; Code 06-03/-05/-06/-08"},
+  {"id":"REQ-IBKR-11","title":"Kontolesen füllt PortfolioContext","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K16","evidence":"02-VERIFICATION K1/K7 (real 2026-10-12); CI-Verdrahtung ist ROADMAP Phase 7 SC6 (offen)"},
+  {"id":"REQ-IBKR-12","title":"Ist-Position je Lauf frisch","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K17","evidence":"02-VERIFICATION Z. 141"},
+  {"id":"REQ-IBKR-13","title":"Lesequelle nur decision-log.md","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION; test_only_log_and_summary_paths_are_read"},
+  {"id":"REQ-IBKR-14","title":"schema_version == 1 + Vertragstest","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION; tests/test_paper_summary_contract.py"},
+  {"id":"REQ-IBKR-15","title":"state_maintenance verify als Vorbedingung","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION (log-finding, Exit 2)"},
+  {"id":"REQ-IBKR-16","title":"Nur status ok + fünf Stufen","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION (null/REVIEW/status je eigener Zustand)"},
+  {"id":"REQ-IBKR-17","title":"Querprobe Log-Rating vs. Summary","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION SC3 (Divergenz, Exit 2)"},
+  {"id":"REQ-IBKR-18","title":"Kein Zugriff auf runs[*].report","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION"},
+  {"id":"REQ-IBKR-19","title":"Aktualität in Sitzungen","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION SC4 (XNYS-Kalender, stale-decision)"},
+  {"id":"REQ-IBKR-20","title":"Fr→Mo als weekend_gap","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION; Ledger-Feld ab Phase 5"},
+  {"id":"REQ-IBKR-21","title":"Zielpositions-Leiter, Hold nie Order","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION SC1 (real AAPL Hold → skipped: hold)"},
+  {"id":"REQ-IBKR-22","title":"Block = feste Stückzahl","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION (block_qty in CONTRACT_TABLE)"},
+  {"id":"REQ-IBKR-23","title":"Ziel − Ist − offen, Toleranzband","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION SC6"},
+  {"id":"REQ-IBKR-24","title":"Long-only, Sell ohne Bestand = Nulloperation","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION SC8 (long-only-noop)"},
+  {"id":"REQ-IBKR-25","title":"Markt-Order im Sitzungsfenster, Limit nur DAY","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4+5","comp":"K18","evidence":"04-VERIFICATION (MKT/DAY) + 05-VERIFICATION Z. 47 (Fenster, outside-session)"},
+  {"id":"REQ-IBKR-26","title":"Marktdaten außerhalb Order-Pfad","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 3","comp":"K17","evidence":"03-VERIFICATION SC8 (reqMarketDataType(3))"},
+  {"id":"REQ-IBKR-27","title":"Auflösung vom Roh-Ticker","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 3","comp":"K17","evidence":"03-VERIFICATION SC5"},
+  {"id":"REQ-IBKR-28","title":"Allow-List {STK}","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 3","comp":"K17","evidence":"03-VERIFICATION SC2, real bestätigt"},
+  {"id":"REQ-IBKR-29","title":"Genau ein Contract-Treffer","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 3","comp":"K17","evidence":"03-VERIFICATION SC3"},
+  {"id":"REQ-IBKR-30","title":"conId persistiert + Identitätsprüfung","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 3","comp":"K17","evidence":"03-VERIFICATION SC1/SC4 (contracts.json)"},
+  {"id":"REQ-IBKR-31","title":"Handelbarkeit abgefragt","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt-override","phase":"Phase 3","comp":"K17","evidence":"Override D-19 (2026-10-18): ineligibilityReasonList fehlt in ib_async 2.1.0, Ersatz validExchanges/orderTypes"},
+  {"id":"REQ-IBKR-32","title":"[L1] Harte Obergrenze je Order","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC4; ibkr_guards.py"},
+  {"id":"REQ-IBKR-33","title":"[L2] Kill-Switch fail-closed (RELEASE+KILL)","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC1 (Exit 4)"},
+  {"id":"REQ-IBKR-34","title":"[L2] Prüfung vor jeder Order","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC2"},
+  {"id":"REQ-IBKR-35","title":"[L2] reqGlobalCancel bei Kill","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC3; real 2026-10-17 (ibkr-konto-befund.md „Kill-Storno“)"},
+  {"id":"REQ-IBKR-36","title":"[L2] Schalterzustand je Lauf protokolliert","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION (run_start/run_end)"},
+  {"id":"REQ-IBKR-37","title":"[L3] Sitzung aus ContractDetails, Halt","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt-override","phase":"Phase 3 (+4)","comp":"K17","evidence":"03-VERIFICATION SC6/SC7; Halt-Teil per Override D-20 an whatIf/154 (Phase 4)"},
+  {"id":"REQ-IBKR-38","title":"whatIf vor jeder Order","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION (Phase-4-Teil); scharfer Pfad im Code (06-05), realer Lauf mit 06-10"},
+  {"id":"REQ-IBKR-39","title":"[L4] decision_key ohne SHA","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION; orderRef mit Pipe-Zeichen live bestätigt"},
+  {"id":"REQ-IBKR-40","title":"[L4] Ein Versuch je Schlüssel","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC8 (Ledger.attempt_of)"},
+  {"id":"REQ-IBKR-41","title":"[L4] orderRef = Schlüssel, SHA = Provenienz","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC8"},
+  {"id":"REQ-IBKR-42","title":"[L4] Write-Ahead, skipped mit Grund","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION (REASON_BY_STATE)"},
+  {"id":"REQ-IBKR-43","title":"[L4] Startup-Reconciliation, drei Quellen","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC6 (Exit 6)"},
+  {"id":"REQ-IBKR-44","title":"[L4] Nicht-blockierender Lauf-Lock","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC7 (Exit 7)"},
+  {"id":"REQ-IBKR-45","title":"Prüfkette an einer Stelle, Reihenfolge getestet","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise-p6","phase":"Phase 6","comp":"K16","evidence":"06-02/-04/-08 SUMMARY; tests/test_ibkr_call_order.py; keine Phase-6-VERIFICATION"},
+  {"id":"REQ-IBKR-46","title":"Ledger JSONL außerhalb Git","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC5; scripts/ibkr_ledger.py"},
+  {"id":"REQ-IBKR-47","title":"execId-Dedup mit Korrekturregel","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise-p6","phase":"Phase 6","comp":"K18","evidence":"06-01/-05 SUMMARY (2e8ab05); gegen Fixture, echte Fills fehlen"},
+  {"id":"REQ-IBKR-48","title":"Executions tagesgleich persistiert","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise-p6","phase":"Phase 6","comp":"K18","evidence":"06-05/-06/-07 SUMMARY; realer Handelstag fehlt"},
+  {"id":"REQ-IBKR-49","title":"Soll-Ist-Join beim Lesen","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 7","comp":"K19","evidence":"ROADMAP Phase 7 „Plans: TBD“"},
+  {"id":"REQ-IBKR-50","title":"Ausführungs- vs. Entscheidungsmetriken getrennt","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 7","comp":"K19","evidence":"ROADMAP Phase 7 TBD"},
+  {"id":"REQ-IBKR-51","title":"Backup-Allow-Liste + Ledger/Contract-Cache","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 7","comp":"K15","evidence":"state_maintenance.py nennt weder Ledger noch contracts.json (grep leer)"},
+  {"id":"REQ-IBKR-52","title":"Eigener Branch, ein Schreiber je Branch","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 7","comp":"K19","evidence":"ROADMAP Phase 7 TBD"},
+  {"id":"REQ-IBKR-53","title":"Heartbeat bei jedem Lauf","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 8","comp":"K19","evidence":"ROADMAP Phase 8 TBD; kein Push im Ausführer"},
+  {"id":"REQ-IBKR-54","title":"CI-Cron prüft Heartbeat-Alter","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 8","comp":"K19","evidence":"kein solcher Workflow in .github/workflows/"},
+  {"id":"REQ-IBKR-55","title":"Disjunkte Exit-Codes + UTF-8-Log","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K16","evidence":"02-VERIFICATION; test_ibkr_isolation.py::test_handbook_exit_table_matches_executor"},
+  {"id":"REQ-IBKR-56","title":"Task-Scheduler-Einstellungen","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 8","comp":"K19","evidence":"IBKR_EXECUTION.md enthält kein Scheduler-Kapitel (grep leer)"},
+  {"id":"REQ-IBKR-57","title":"Vorbedingungen selbst prüfen","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise","phase":"Phase 8","comp":"K16","evidence":"Aktualität (REQ-19) und Sitzung (REQ-25/37) prüft der Ausführer schon selbst; Scheduler-Kontext fehlt"},
+  {"id":"REQ-IBKR-58","title":"Task-History aktiviert, dokumentiert","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 8","comp":"K19","evidence":"kein Handbuchabschnitt"},
+  {"id":"REQ-IBKR-59","title":"Gateway-Dauerbetrieb + Wochenlogin","source":"M2","origin":"Strang","originKind":"strang","status":"offen","phase":"Phase 8","comp":"K17","evidence":"Handbuch ohne Auto-Restart/ClosedownAt/Wochenlogin (grep leer)"},
+  {"id":"REQ-IBKR-60","title":"Betriebshandbuch IBKR_EXECUTION.md","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise","phase":"Phase 8","comp":"K16","evidence":"Datei existiert (1011 Zeilen: Exit-Codes, RELEASE/KILL, Ledger); Scheduler, Wochenlogin, Soll-Ist-Bericht fehlen"},
+  {"id":"REQ-IBKR-61","title":"Leeres whatIf = Ablehnung","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION (preview-empty, Exit 5)"},
+  {"id":"REQ-IBKR-62","title":"Timeout auf jedem API-Aufruf","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 2","comp":"K17","evidence":"02-VERIFICATION Z. 143"},
+  {"id":"REQ-IBKR-63","title":"Zwei Quellen je kritischem Fakt","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION (05-07)"},
+  {"id":"REQ-IBKR-64","title":"Kill-Switch fail-closed vor jeder Order","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION SC1/SC2"},
+  {"id":"REQ-IBKR-65","title":"Nach der Order gegen IBKR verifizieren","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise-p6","phase":"Phase 6","comp":"K16","evidence":"06-04/-05/-06 SUMMARY (Post-Order-Kontrolle, alarm); keine reale Order"},
+  {"id":"REQ-IBKR-66","title":"Negativ-Kontrolle je Schutzmaßnahme","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 5","comp":"K18","evidence":"05-VERIFICATION (29 Tests); für --live zusätzlich 06-08"},
+  {"id":"REQ-IBKR-67","title":"Fehlercodes real gemessen","source":"M2","origin":"Strang","originKind":"strang","status":"teilweise","phase":"Phase 2","comp":"K17","evidence":"Override 2026-10-12: 321/2104/2158/2107 gemessen; 1100/1101/1102/1300/2110 erst mit Phase 8 K6"},
+  {"id":"REQ-IBKR-68","title":"Keine geschätzte Größe ohne Kurs","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-VERIFICATION; test_no_market_data_in_execution_path"},
+  {"id":"REQ-IBKR-69","title":"tif explizit setzen und zurücklesen","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K17","evidence":"04-05/04-08 SUMMARY requirements-completed (nur SUMMARY-Frontmatter, nicht in 04-VERIFICATION)"},
+  {"id":"REQ-IBKR-70","title":"Budget über initMarginChange","source":"M2","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"Phase 4","comp":"K16","evidence":"04-05/04-08 SUMMARY (nur SUMMARY-Frontmatter, nicht in 04-VERIFICATION)"},
+  {"id":"U-01","title":"Markt-/Technik-Analyst (Indikatoren)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K01","evidence":"analysts/market_analyst.py; im Paper-Lauf"},
+  {"id":"U-02","title":"Sentiment-Analyst (News, StockTwits, Reddit)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K01","evidence":"analysts/sentiment_analyst.py, vendors/stocktwits.py, reddit.py; test_social_lookahead.py; im Paper-Lauf"},
+  {"id":"U-03","title":"News-Analyst (Firma + Makro)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K01","evidence":"analysts/news_analyst.py, test_news_analyst_prompt.py; im Paper-Lauf"},
+  {"id":"U-04","title":"Fundamentals-Analyst (Bilanzen, Insider)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K01","evidence":"analysts/fundamentals_analyst.py, test_fundamentals_lookahead.py; im Paper-Lauf"},
+  {"id":"U-05","title":"Parallele Analysten","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K01","evidence":"graph/analyst_execution.py, test_analyst_execution.py (v0.5.2)"},
+  {"id":"U-06","title":"Social-Post-Screening via Jev","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K10","evidence":"agents/post_screen.py (TYPESAFE_API_KEY), test_post_screen.py; im Paper-Lauf inaktiv (Workflow setzt keinen TYPESAFE_API_KEY)"},
+  {"id":"U-07","title":"Bull/Bear-Debatte","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K02","evidence":"researchers/bull_researcher.py, bear_researcher.py; max_debate_rounds=1; test_debate_opening.py"},
+  {"id":"U-08","title":"Research Manager (structured, 5 Stufen)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K02","evidence":"managers/research_manager.py, test_structured_agents.py"},
+  {"id":"U-09","title":"Trader (3 Stufen, Preisbezug)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K03","evidence":"trader/trader.py"},
+  {"id":"U-10","title":"Risiko-Debatte (3 Debattierer)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K03","evidence":"risk_mgmt/ (aggressive, conservative, neutral); max_risk_discuss_rounds=1; test_risk_router_path_map.py"},
+  {"id":"U-11","title":"Portfolio Manager (5 Stufen)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K03","evidence":"managers/portfolio_manager.py"},
+  {"id":"U-12","title":"Structured Output Entscheider-Trio","source":"Upstream","origin":"Upstream (+ Strang-Retry)","originKind":"upstream","status":"umgesetzt","phase":"260814-k1j (Retry)","comp":"K03","evidence":"agents/structured.py, schemas.py; test_structured_agents.py"},
+  {"id":"U-13","title":"Rating-Extraktion deterministisch","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K03","evidence":"agents/rating.py (extract_rating, parse_rating, run_rating); test_rating_integrity.py, test_signal_processing.py"},
+  {"id":"U-14","title":"Portfolio-Kontext (Bestand)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"M2 Ph. 2 (Befüllung)","comp":"K03","evidence":"tradingagents/portfolio.py, test_portfolio_context.py; im CI-Paper-Lauf nicht übergeben (Phase 7)"},
+  {"id":"U-15","title":"Decision-Log (Memory)","source":"Upstream","origin":"Upstream (+ Strang h63)","originKind":"upstream","status":"umgesetzt","phase":"261019-h63","comp":"K05","evidence":"memory/log.py, test_memory_log.py; paper-log:decision-log.md"},
+  {"id":"U-16","title":"Settlement: Return + Alpha, Haltefenster","source":"Upstream","origin":"Upstream (+ Strang h63)","originKind":"upstream","status":"umgesetzt","phase":"261019-h63","comp":"K05","evidence":"memory/settlement.py (holding_period_days=5), d90408e, test_memory_pointintime.py"},
+  {"id":"U-17","title":"Reflexion (Lessons an PM)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K05","evidence":"memory/reflection.py; _memory_step in trading_graph.py"},
+  {"id":"U-18","title":"Backtest über Ticker×Datum-Gitter","source":"Upstream","origin":"Upstream (+ Strang-Fix)","originKind":"upstream","status":"umgesetzt","phase":"261018-kof (#5)","comp":"K06","evidence":"backtest.py, test_backtest.py; Strang-Patch 33767b3"},
+  {"id":"U-19","title":"Checkpoint-Resume (SQLite je Ticker)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K04","evidence":"graph/checkpointer.py, test_checkpoint_resume.py; im Paper-Lauf aus (daily_paper_run.py:280)"},
+  {"id":"U-20","title":"LangGraph-Aufbau und Routing","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K04","evidence":"graph/setup.py, conditional_logic.py, propagation.py; test_graph_end_to_end.py"},
+  {"id":"U-21","title":"Reports (Markdown + HTML-Seite)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K04","evidence":"reporting.py, report_html.py, test_report_html.py"},
+  {"id":"U-22","title":"CLI interaktiv + headless","source":"Upstream","origin":"Upstream (+ Strang-Exits)","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K09","evidence":"cli/main.py, cli/run.py; test_cli_headless.py"},
+  {"id":"U-23","title":"CLI backtest-Subkommando","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K09","evidence":"README „Evaluating decisions over time“, test_cli_commands.py (1 Test unter Windows rot, STATE)"},
+  {"id":"U-24","title":"Update-Hinweis beim Start","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K09","evidence":"cli/updates.py; test_cli_updates.py 2× rot unter Windows (STATE Blockers)"},
+  {"id":"U-25","title":"Docker-Image","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K09","evidence":"Dockerfile, docker-compose.yml; per Strang-Smoke geprüft"},
+  {"id":"U-26","title":"Provider-Registry (über 18 Provider)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K08","evidence":"llm_clients/api_key_env.py, model_catalog.py; test_provider_registry.py; Paper-Lauf: anthropic"},
+  {"id":"U-27","title":"Provider je Tier (quick/deep)","source":"Upstream","origin":"Upstream (+ Strang-Fail-fast)","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K08","evidence":"default_config.py *_think_provider, test_tier_providers.py"},
+  {"id":"U-28","title":"ChatGPT-Plan-Anmeldung","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K08","evidence":"llm_clients/chatgpt_auth.py; test_chatgpt_auth.py 2× rot unter Windows (0o600)"},
+  {"id":"U-29","title":"Vendor-Router mit Fallback","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K07","evidence":"dataflows/router.py, test_vendor_routing.py; Defaults yfinance, Alpha Vantage optional"},
+  {"id":"U-30","title":"SEC EDGAR „as filed“","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K07","evidence":"vendors/sec_edgar.py, test_sec_edgar.py"},
+  {"id":"U-31","title":"FRED-Makrodaten","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K07","evidence":"vendors/fred.py, test_fred.py; braucht FRED_API_KEY (Workflow reicht Secret durch, ob gesetzt: unklar)"},
+  {"id":"U-32","title":"Polymarket-Prognosemärkte","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K07","evidence":"vendors/polymarket.py, test_polymarket.py"},
+  {"id":"U-33","title":"Point-in-time / Look-ahead-Schutz","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K07","evidence":"dataflows/date_window.py; test_news_lookahead.py, test_tool_date_enforcement.py"},
+  {"id":"U-34","title":"Ticker-Validierung, Symbol-Normalisierung","source":"Upstream","origin":"Upstream (+ Strang-CLI)","originKind":"upstream","status":"umgesetzt","phase":"—","comp":"K07","evidence":"dataflows/symbols.py; test_safe_ticker_component.py, test_symbols.py"},
+  {"id":"U-35","title":"Order an simulierte Börse (README)","source":"Upstream","origin":"Upstream","originKind":"upstream","status":"offen","phase":"— (Ersatz: M2)","comp":"K16","evidence":"README „order will be sent to the simulated exchange“; im Code keine Ausführung (backtest.py:9 „not a portfolio simulator“). Der Strang ersetzt das durch den IBKR-Ausführer"},
+  {"id":"S-01","title":"Jev-Run-Review: REVIEW-Fallback + Shadow-Checks","source":"Strang","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"261012-t8w","comp":"K10","evidence":"tradingagents/jev/hooks.py, client.py; test_jev_hooks.py, test_jev_client.py; HEAD a7af62d"},
+  {"id":"S-02","title":"Jev im täglichen Paper-Lauf","source":"Strang","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"261012-uth","comp":"K13","evidence":"daily-paper-run.yml:88,102 (TRADINGAGENTS_JEV_ENABLED, JEV_API_KEY); Live-Lauf 38301659963"},
+  {"id":"S-03","title":"Jev-Fallback-Rating in IBKR-Kette erkennen","source":"Strang","origin":"Strang","originKind":"strang","status":"teilweise-p6","phase":"06-02, Todo 2026-10-16","comp":"K16","evidence":"06-02 SUMMARY (State rating-jev über summary.json); Todo noch in todos/pending/"},
+  {"id":"S-04","title":"Muster-Auswertung (6 Muster, Wilson, MIN_N)","source":"Strang","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"261018-kof","comp":"K11","evidence":"tradingagents/patterns/, scripts/pattern_eval.py, test_patterns_*.py; Ergebnis: alle Zellen insufficient (1 von 16 abgerechnet); nur Nachauswertung"},
+  {"id":"S-05","title":"Settlement-Folgefixes (Exit-Bar, Ties, SETTLEMENT:)","source":"Strang","origin":"Strang (Upstream-Kandidat)","originKind":"strang","status":"umgesetzt","phase":"261019-h63","comp":"K05","evidence":"ea055f5, b1fa2a4, d90408e"},
+  {"id":"S-06","title":"Backtest: unlesbares Alpha nicht als pending","source":"Strang","origin":"Strang (Upstream-Kandidat)","originKind":"strang","status":"umgesetzt","phase":"261018-kof","comp":"K06","evidence":"33767b3, test_backtest.py"},
+  {"id":"S-07","title":"Rebase-Kadenz auf Upstream-Releases","source":"Strang","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"260922-iz5, 261010-raj, 261017-r7x","comp":"K14","evidence":"Basis v0.7.0 e8f5503, Backup-Branch backup/pre-rebase-v0.7.0"},
+  {"id":"S-08","title":"Fail-closed-Prinzip (S-01..S-08 → REQ-61..68)","source":"Strang","origin":"Strang","originKind":"strang","status":"umgesetzt","phase":"261012-ap2","comp":"K18","evidence":"in REQUIREMENTS §7 übernommen; Status je ID siehe Tabelle 2"}
+ ],
+ "methods": [
+  {"group":"stochastisch","method":"Wahrscheinlichkeitsmodell, Monte Carlo, GARCH, Bayes, Random Walk","category":"stochastisch","where":"–","does":"existiert nicht","influence":"keiner","influenceKind":"keiner","gap":"Kein Modell erzeugt eine Prognoseverteilung, Trefferwahrscheinlichkeit oder Volatilitätsprognose."},
+  {"group":"stochastisch","method":"LLM-Sampling","category":"stochastisch","where":"default_config.py:119 (temperature: None), llm_clients/factory.py:177-180","does":"Provider-Default-Temperatur; jeder Lauf ist zufallsbehaftet","influence":"indirekt entscheidend (alle Urteile sind LLM-Ausgaben)","influenceKind":"entscheidet","gap":"Einziges stochastisches Element im Entscheidungspfad; nicht gesteuert, nicht gemessen (keine Mehrfachläufe/Streuung je Ticker)."},
+  {"group":"stochastisch","method":"Polymarket-Wahrscheinlichkeiten","category":"statistisch (extern, marktimpliziert)","where":"dataflows/vendors/polymarket.py, Tool get_prediction_markets","does":"Holt outcomePrices offener Märkte zu einem vom LLM gewählten Stichwort","influence":"Eingabe für LLM (News Analyst, optional)","influenceKind":"eingabe","gap":"Keine Verrechnung; nur Text im Prompt; Themenwahl durch das LLM."},
+  {"group":"stochastisch","method":"Bollinger (2σ), ATR","category":"statistisch-deskriptiv","where":"stockstats über dataflows/vendors/yahoo/market.py, snapshot.py","does":"Streuungs- bzw. Range-Maße der Vergangenheit","influence":"Eingabe für LLM","influenceKind":"eingabe","gap":"Einzige „Volatilitäts\"-Größen; keine Prognose, kein Sizing aus ATR (Sizing im Ausführer ist eine feste Leiter)."},
+  {"group":"stochastisch","method":"Settlement raw/alpha","category":"statistisch (Messung)","where":"memory/settlement.py:68-125","does":"Rendite 5 Handelstage ab erstem Schluss nach trade_date, Alpha = raw − Benchmark (ohne Beta)","influence":"Nachauswertung; über Reflexion → past_context → Eingabe für PM","influenceKind":"nachauswertung","gap":"Kein Beta, gerundet auf 0,1 pp im Log, überlappende Fenster."},
+  {"group":"stochastisch","method":"Backtest-Summary (Trefferquote, mittleres Alpha)","category":"statistisch (Messung)","where":"backtest.py summarize","does":"Anteil alpha × Richtung > 0 je Rating","influence":"Nachauswertung","influenceKind":"nachauswertung","gap":"Ties zählen als Fehltreffer, keine Konfidenzintervalle."},
+  {"group":"stochastisch","method":"Wilson-95-%-Intervall, MIN_N=20, Unabhängigkeitsfilter","category":"statistisch (Inferenz)","where":"patterns/evaluate.py:50-75, 221-225","does":"Intervall für Trefferquoten je Muster; unter 20 unabhängigen Fällen insufficient","influence":"Nachauswertung (kein Import im Graph)","influenceKind":"nachauswertung","gap":"Datenlage: Stand 2026-10-17 1 abgerechneter Eintrag → alles insufficient."},
+  {"group":"stochastisch","method":"Jev-Konfidenzen","category":"probabilistisch (extern, kalibriertes Modell)","where":"jev/hooks.py, agents/post_screen.py","does":"Typisierte Fragen mit Konfidenz/Wahrscheinlichkeiten","influence":"Leitplanke: Fallback-Rating nur bei REVIEW und ≥ 0,9; sonst Schatten. Screening (Off-Topic < 0,3 raus, Stance ab 0,5) im Paper-Lauf aus","influenceKind":"leitplanke","gap":"Keine eigene Kalibrierung geprüft; Schattenergebnisse nicht ausgewertet."},
+  {"group":"heuristisch","method":"Technische Indikatoren (Auswahl durch LLM)","category":"heuristisch","where":"Prompt market_analyst.py:20-46; Allow-List yahoo/market.py:77-150","does":"LLM wählt bis zu 8 aus 12: close_50_sma, close_200_sma, close_10_ema, macd, macds, macdh, rsi, boll, boll_ub, boll_lb, atr, vwma (Allow-List zusätzlich mfi) und liest die Zahlen","influence":"Eingabe für LLM","influenceKind":"eingabe","gap":"Keine feste Regel, kein Schwellen-Signal; Interpretation (z. B. RSI 70/30) nur als Prompttext. Prompt nennt stochrsi, das nicht unterstützt ist."},
+  {"group":"heuristisch","method":"Verified Market Snapshot","category":"heuristisch (deterministisch)","where":"yahoo/snapshot.py:23-26, Tool get_verified_market_snapshot","does":"Fester Satz von 11 Indikatoren + letzter OHLCV-Row + Schlusskurse als „Source of Truth\"","influence":"Eingabe für LLM (Faktenanker gegen Halluzination)","influenceKind":"eingabe","gap":"Keine Bewertung, nur Zahlen."},
+  {"group":"heuristisch","method":"Musterschicht patterns","category":"heuristisch","where":"patterns/signals.py","does":"6 Muster (+1/−1/0/None): rsi_extreme (Wilder 14, 30/70, konträr), macd_cross (12/26/9, 3 Sitzungen), breakout_20 (Donchian auf Closes), trend_sma200, sma50_200, bollinger_out (20, 2σ); look-ahead-frei","influence":"Nachauswertung","influenceKind":"nachauswertung","gap":"Bewusst kein Veto/keine Entscheidung (Schritt 2 erst bei belegter Wirkung)."},
+  {"group":"heuristisch","method":"StockTwits-Zählung","category":"heuristisch","where":"dataflows/vendors/stocktwits.py:131-160","does":"Zählt nutzergesetzte Labels Bullish/Bearish/ohne → Prozentkopf","influence":"Eingabe für LLM","influenceKind":"eingabe","gap":"Kein eigenes Klassifizieren der ~70 % unlabelten Posts (Anteil nicht gemessen)."},
+  {"group":"heuristisch","method":"post_screen","category":"heuristisch + probabilistisch","where":"agents/post_screen.py","does":"Jev-Fragen je Post; Off-Topic raus, Stance-Zählung","influence":"Eingabe für LLM, im Paper-Lauf aus","influenceKind":"eingabe","gap":"Wirkung im Track Record nicht vorhanden."},
+  {"group":"heuristisch","method":"Rating-Extraktion","category":"heuristisch (Regex)","where":"agents/rating.py:55-110","does":"Strukturiertes rating zuerst, sonst Label-Regex; widersprüchlich → REVIEW","influence":"entscheidet über das gespeicherte Signal","influenceKind":"entscheidet","gap":"Freitext-Pfad bleibt Regex-abhängig."},
+  {"group":"heuristisch","method":"Jev-Review","category":"heuristisch-Leitplanke","where":"jev/hooks.py","does":"s. o.","influence":"Leitplanke (nur REVIEW-Fallback)","influenceKind":"leitplanke","gap":"Schatten-Agreement nicht aggregiert."},
+  {"group":"heuristisch","method":"Debattenrunden","category":"heuristisch (Ablauf)","where":"conditional_logic.py, Config 1/1","does":"Feste Rundenzahl, kein Konvergenz- oder Uneinigkeitsmaß","influence":"Ablaufsteuerung","influenceKind":"ablauf","gap":"Keine Messung von Uneinigkeit als Unsicherheitssignal."},
+  {"group":"heuristisch","method":"Kosten-/Token-Budget","category":"Leitplanke","where":"budget.py","does":"Abbruch bei Überschreitung","influence":"Leitplanke (Lauf, nicht Richtung)","influenceKind":"leitplanke","gap":"–"},
+  {"group":"heuristisch","method":"Soll-Leiter","category":"heuristisch (Regel)","where":"scripts/ibkr_decision.py:323-375","does":"Buy=2, Overweight=1, Underweight/Sell=0 Blöcke; Hold → skip; long-only; Toleranz 1 Block","influence":"entscheidet über die Order","influenceKind":"entscheidet","gap":"Größe unabhängig von Konfidenz, Volatilität, Kursziel, Stop-Loss des Traders."},
+  {"group":"heuristisch","method":"Größenlimit, Kill/Release, Sessionprüfung, Frische","category":"Leitplanke","where":"scripts/ibkr_guards.py, ibkr_decision.py:540-610","does":"MAX_QTY_PER_ORDER=2, KILL/RELEASE fail-closed vor jeder Order, XNYS-Kalender, veraltete Entscheidung → stop","influence":"Leitplanke","influenceKind":"leitplanke","gap":"Kein Stop-Loss/Take-Profit aus TraderProposal wird an IBKR gegeben."},
+  {"group":"semantisch","method":"Ticker-News","category":"LLM-Urteil","where":"yahoo/news.py (yf.Search, Titel+Summary+Publisher), Tool get_news; max. 20 Artikel","does":"Rohtext in den Prompt von News- und Sentiment-Analyst","influence":"Eingabe für LLM","influenceKind":"eingabe","gap":"Kein Sentiment-Score, keine Deduplizierung nach Inhalt, keine Relevanzgewichtung."},
+  {"group":"semantisch","method":"Globale News","category":"LLM-Urteil","where":"get_global_news, 5 feste Suchanfragen (default_config.py global_news_queries), 7 Tage, 10 Artikel","does":"Rohtext","influence":"Eingabe für LLM","influenceKind":"eingabe","gap":"wie oben."},
+  {"group":"semantisch","method":"Alpha-Vantage NEWS_SENTIMENT","category":"semantisch (extern)","where":"alpha_vantage/news.py:9-70","does":"Würde die JSON-Antwort inkl. Sentiment-Arrays ungefiltert in den Prompt geben","influence":"keiner im Paper-Lauf (Vendor yfinance, data_vendors nicht per Env schaltbar)","influenceKind":"keiner","gap":"Selbst wenn aktiv: Scores werden nicht ausgewertet, nur als Text gelesen."},
+  {"group":"semantisch","method":"Social (StockTwits, Reddit)","category":"LLM-Urteil","where":"sentiment_analyst.py:57-125, reddit.py (RSS, HTML gestrippt)","does":"Vorab geholt, in Prompt-Blöcke; LLM schreibt SentimentReport mit overall_band (6 Stufen), overall_score 0-10, confidence","influence":"Eingabe für Researcher/Risiko","influenceKind":"eingabe","gap":"Der „Score\" ist vom LLM erzeugt, nicht gerechnet; nicht point-in-time (Feeds nicht archiviert)."},
+  {"group":"semantisch","method":"Insider-Transaktionen","category":"LLM-Urteil","where":"get_insider_transactions (yfinance), date_window.withhold_undisclosed_trades","does":"Tabelle im Prompt des Fundamentals Analyst","influence":"Eingabe für LLM","influenceKind":"eingabe","gap":"Keine Aggregation (Netto-Käufe, Cluster)."},
+  {"group":"semantisch","method":"Fundamentals","category":"LLM-Urteil","where":"SEC EDGAR XBRL, yfinance","does":"Tabellen im Prompt","influence":"Eingabe für LLM","influenceKind":"eingabe","gap":"Keine Kennzahlen-Scores/Faktormodelle."},
+  {"group":"semantisch","method":"Memory-Retrieval","category":"heuristisch (nicht semantisch)","where":"memory/log.py:106-143","does":"Neueste 5 abgerechnete Einträge desselben Tickers + 3 fremde, rein nach Zeit, gefiltert auf resolved <= as_of","influence":"Eingabe für PM","influenceKind":"eingabe","gap":"Keine Embeddings, keine Ähnlichkeitssuche."},
+  {"group":"semantisch","method":"Debatte/Urteil","category":"LLM-Urteil","where":"Bull/Bear/RM/Trader/Risiko/PM","does":"Freitext-Argumentation, strukturierte Endausgabe","influence":"entscheidet (PM-Rating)","influenceKind":"entscheidet","gap":"Keine Begründungs- oder Konsistenzprüfung außer Jev-Schatten."}
+ ],
+ "answer": [
+  "Stochastische Vorhersagemodelle (Wahrscheinlichkeitsmodell, Monte Carlo, GARCH, Bayes) gibt es in TradingEngineX nicht; das einzige Zufallselement im Entscheidungspfad ist das ungesteuerte LLM-Sampling.",
+  "Statistik steckt nur in der Nachauswertung: Settlement (5-Tage-Rendite und Alpha gegen SPY), Backtest-Trefferquote und im Strang Wilson-Intervalle mit Mindest-N; nichts davon wirkt auf die nächste Entscheidung außer über LLM-Reflexionstexte.",
+  "Heuristiken sind technische Indikatoren (12 stockstats-Werte), die das LLM auswählt und liest, die Musterschicht als reine Nachauswertung und feste Regeln im Ausführer (Rating-Leiter 2/1/0 Blöcke, Größenlimit, Kill-Switch, Handelszeiten).",
+  "Ticker-News, Social und Insider werden ausschließlich vom LLM als Rohtext gelesen; es gibt kein eigenes NLP, keine Embeddings, keine gerechneten Sentiment-Scores (der „Score\" 0-10 schreibt das LLM selbst, Alpha-Vantage-Scores sind im Paper-Lauf nicht aktiv).",
+  "Die Entscheidung ist damit im Kern ein LLM-Urteil über Text und Zahlen; die Code-Logik sichert Fakten (Snapshot, Look-ahead-Kappung), Ausführung und Kosten ab, sagt aber selbst nichts vorher."
+ ],
+ "findings": [
+  {"title":"Security-Scan verloren","text":"M1-P1-2 ist nur teilweise: pip-audit aus 6bce117 wurde beim Rebase am 2026-08-18 gedroppt, es gibt kein Dependabot in .github/.","ref":"Research A, Tabelle 1 (M1-P1-2)"},
+  {"title":"ROADMAP-Pflegefehler","text":"Kopf von REQUIREMENTS/ROADMAP sagt 68 statt 70 IDs; die Statustabelle (Z. 48) führt Phase 5 als offen, obwohl sie am 2026-10-17 abgenommen wurde.","ref":"Research A, Zählung"},
+  {"title":"Schwächerer Beleg für REQ-IBKR-69/-70","text":"Beide stehen nur in SUMMARY-Frontmattern, nicht in der Anforderungstabelle von 04-VERIFICATION.","ref":"Research A, Hinweis zu REQ-69/-70"},
+  {"title":"README verspricht mehr als der Code","text":"Die README sagt „order will be sent to the simulated exchange“; im Code gibt es keine Ausführung (backtest.py: „not a portfolio simulator“). Der Strang ersetzt das durch den IBKR-Ausführer.","ref":"U-35"},
+  {"title":"Post-Screening im Paper-Lauf aus","text":"post_screen läuft nur mit TYPESAFE_API_KEY; der Workflow setzt keinen, die Funktion hat im Track Record keine Wirkung.","ref":"U-06, Research B §1b"},
+  {"title":"Alpha-Vantage-Sentiment ungenutzt","text":"NEWS_SENTIMENT wird nicht ausgewertet, data_vendors ist nicht per Env schaltbar; selbst aktiv würden die Scores nur als Text gelesen.","ref":"Research B §1e, §3c"},
+  {"title":"graphify-out veraltet","text":"graphify-out stammt vom 2026-10-12 (vor Phase 4 bis 6 und vor patterns/); diese Seite nutzt es nicht als Quelle.","ref":"Research B, Project Constraints"}
+ ]
+};
+</script>
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+  try {
+    var D = TEX_DATA;
+    var SVGNS = "http://www.w3.org/2000/svg";
+
+    function h(tag, attrs, kids) {
+      var e = document.createElement(tag), k;
+      if (attrs) for (k in attrs) {
+        if (k === "text") e.textContent = attrs[k];
+        else if (k === "cls") e.className = attrs[k];
+        else e.setAttribute(k, attrs[k]);
+      }
+      (kids || []).forEach(function (c) { e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+      return e;
+    }
+    function sv(tag, attrs, kids) {
+      var e = document.createElementNS(SVGNS, tag), k;
+      if (attrs) for (k in attrs) {
+        if (k === "text") e.textContent = attrs[k];
+        else if (k === "cls") e.setAttribute("class", attrs[k]);
+        else e.setAttribute(k, String(attrs[k]));
+      }
+      (kids || []).forEach(function (c) { e.appendChild(c); });
+      return e;
+    }
+    function $(id) { return document.getElementById(id); }
+
+    var STATUS_TEXT = {
+      "umgesetzt": "umgesetzt", "umgesetzt-override": "umgesetzt (Override)", "teilweise": "teilweise",
+      "teilweise-p6": "teilweise · Phase 6 läuft", "offen": "offen", "verworfen-override": "verworfen (Override)"
+    };
+    var compById = {}; D.components.forEach(function (c) { compById[c.id] = c; });
+    var nodeById = {}; D.nodes.forEach(function (n) { nodeById[n.id] = n; });
+    function pill(status) { return h("span", { cls: "pill st-" + status, text: STATUS_TEXT[status] }); }
+    function compLabel(id) { return id + " " + compById[id].name; }
+
+    /* ---------- Kopf ---------- */
+    $("stand").textContent = "Stand " + D.meta.date + " · " + D.meta.branch + " @ " + D.meta.head + " (" + D.meta.headTime + ") · Upstream-Basis " + D.meta.upstream.replace(" ", " (") + ") · Phase 6 läuft (8/10 Pläne)";
+    $("phase6").textContent = "Phase 6: " + D.meta.phase6 + ".";
+
+    var SOURCES = [["M1", "M1 Produktionsreife"], ["M2", "M2 IBKR Paper Execution"], ["Upstream", "Upstream TradingAgents"], ["Strang", "Strang-Zusätze"]];
+    var kpis = $("kpis");
+    SOURCES.forEach(function (s) {
+      var rs = D.requirements.filter(function (r) { return r.source === s[0]; });
+      var c = { u: 0, t: 0, p6: 0, o: 0, v: 0 };
+      rs.forEach(function (r) {
+        if (r.status === "umgesetzt" || r.status === "umgesetzt-override") c.u++;
+        else if (r.status === "teilweise" || r.status === "teilweise-p6") { c.t++; if (r.status === "teilweise-p6") c.p6++; }
+        else if (r.status === "offen") c.o++;
+        else c.v++;
+      });
+      var pills = h("div", { cls: "pills" });
+      pills.appendChild(h("span", { cls: "pill st-umgesetzt", text: "umgesetzt " + c.u }));
+      if (c.t) pills.appendChild(h("span", { cls: "pill st-teilweise", text: "teilweise " + c.t + (c.p6 ? " (davon " + c.p6 + " Phase 6)" : "") }));
+      if (c.o) pills.appendChild(h("span", { cls: "pill st-offen", text: "offen " + c.o }));
+      if (c.v) pills.appendChild(h("span", { cls: "pill st-verworfen-override", text: "verworfen " + c.v }));
+      var sub = s[0] === "M1" ? "davon 2 Zusatzpunkte (P3 #12, Betriebszweck)" : s[0] === "M2" ? "davon " + rs.filter(function (r) { return r.status === "umgesetzt-override"; }).length + " mit Override" : s[0] === "Upstream" ? "Stand v0.7.0" : "außerhalb M1/M2";
+      kpis.appendChild(h("div", { cls: "kpi" }, [h("div", { cls: "lbl", text: s[1] }), h("div", { cls: "big", text: String(rs.length) }), h("div", { cls: "sub", text: sub }), pills]));
+    });
+    var leg = $("status-legend");
+    D.meta.statusLegend.forEach(function (l) {
+      var key = l.value === "umgesetzt (Override)" ? "umgesetzt-override" : l.value === "teilweise (Phase 6 läuft)" ? "teilweise-p6" : l.value;
+      leg.appendChild(h("li", null, [pill(key), h("span", { text: l.meaning })]));
+    });
+
+    /* ---------- Tabellenbauer ---------- */
+    function makeTable(cls, heads, rows) {
+      var thead = h("thead", null, [h("tr", null, heads.map(function (x) { return h("th", { scope: "col", text: x }); }))]);
+      var tbody = h("tbody");
+      var trs = rows.map(function (r) {
+        var tr = h("tr", r.attrs || null);
+        r.cells.forEach(function (c, i) {
+          var td = h("td", { "data-label": heads[i], cls: (r.cls && r.cls[i]) || "" });
+          if (typeof c === "string") td.textContent = c; else td.appendChild(c);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+        return tr;
+      });
+      return { table: h("table", { cls: cls + " cards-sm" }, [thead, tbody]), trs: trs, tbody: tbody };
+    }
+
+    /* ---------- Diagramm ---------- */
+    var NW = 116, NH = 50, PX = 168, PY = 66, X0 = 30, LANE = 18, ZPAD = 34, W = 1520;
+    var LANES = {
+      Z5: [{ row: 0, label: "Pipeline (verifizierte Reihenfolge, Paper-Lauf: je Ticker ein Durchlauf)" }, { row: 5, label: "Nach dem Graph" }, { row: 6, label: "Querschnitt" }],
+      Z3: [{ row: 0, label: "Ausführerkette (links nach rechts)" }, { row: 1, label: "Betrieb, Hilfen, Zustand" }]
+    };
+    var geo = {}, zoneGeo = {}, ycur = 8;
+    function laneCount(z, row) { return (LANES[z] || []).filter(function (l) { return l.row <= row; }).length; }
+    D.zones.forEach(function (z) {
+      var ns = D.nodes.filter(function (n) { return n.zone === z.id; });
+      var maxRow = Math.max.apply(null, ns.map(function (n) { return n.row; }));
+      var top = ycur;
+      ns.forEach(function (n) {
+        var y = top + ZPAD + n.row * PY + laneCount(z.id, n.row) * LANE;
+        var x = X0 + n.col * PX;
+        if (n.terminal) geo[n.id] = { x: x + 20, y: y + 12, w: NW - 40, h: NH - 24 };
+        else geo[n.id] = { x: x, y: y, w: NW, h: NH };
+      });
+      var bottom = top + ZPAD + maxRow * PY + laneCount(z.id, maxRow) * LANE + NH + 14;
+      zoneGeo[z.id] = { y: top, h: bottom - top };
+      ycur = bottom + 10;
+    });
+    var H = ycur;
+    Object.keys(geo).forEach(function (id) { var g = geo[id]; g.cx = g.x + g.w / 2; g.cy = g.y + g.h / 2; });
+
+    var svg = sv("svg", { cls: "arch", width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "group", "aria-label": "Architekturdiagramm von TradingEngineX" });
+    D.zones.forEach(function (z) {
+      var g = zoneGeo[z.id];
+      svg.appendChild(sv("rect", { cls: "zone-rect", x: 8, y: g.y, width: W - 16, height: g.h, rx: 8 }));
+      var t = sv("text", { cls: "zone-title", x: 18, y: g.y + 20 }); t.textContent = z.label;
+      var tn = sv("tspan", { cls: "zone-note", dx: 8 }); tn.textContent = z.note; t.appendChild(tn);
+      svg.appendChild(t);
+      (LANES[z.id] || []).forEach(function (l) {
+        var ln = D.nodes.filter(function (n) { return n.zone === z.id && n.row === l.row; })[0];
+        var y = geo[ln.id].y - 6;
+        var c = sv("text", { cls: "lane-cap", x: 18, y: y }); c.textContent = l.label; svg.appendChild(c);
+      });
+    });
+
+    var edgeSet = {}; D.edges.forEach(function (e) { edgeSet[e.from + ">" + e.to] = true; });
+    var SHORT = {
+      "executor>ibkr_paperlog": "Start", "ibkr_paperlog>ibkr_decision": "Eintrag", "ibkr_decision>ibkr_guards": "Plan", "ibkr_guards>ibkr_ledger": "intent",
+      "ibkr_ledger>ibkr_broker": "Order", "ibkr_broker>ib_gateway": "Socket", "rm>trader": "Plan", "trader>r_aggr": "Trader-Plan", "bull>bear": "Argument",
+      "mem_node>pm": "past_context", "gha_daily>paper_log": "git push", "paper_log>ibkr_paperlog": "git fetch", "pm>jev_hooks": "Entscheidung",
+      "r_neut>pm": "3 Beiträge", "ib_gateway>ibkr_server": "Order"
+    };
+    function inBetween(a, b) {
+      return D.nodes.some(function (n) { return !n.terminal && n.id !== a.id && n.id !== b.id && n.zone === a.zone && n.col === a.col && n.row > Math.min(a.row, b.row) && n.row < Math.max(a.row, b.row); });
+    }
+    function bez(p0, p1, p2, p3, t) {
+      var u = 1 - t;
+      return [u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0], u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]];
+    }
+    function route(e) {
+      var a = nodeById[e.from], b = nodeById[e.to], A = geo[e.from], B = geo[e.to];
+      var rev = edgeSet[e.to + ">" + e.from], off = rev ? (e.from < e.to ? 6 : -6) : 0;
+      var res = { d: "", ex: 0, ey: 0, dx: 0, dy: 0, mx: 0, my: 0, ang: 0 }, p0, p1, p2, p3;
+      var pipeA = a.zone === "Z5" && a.row <= 4, pipeB = b.zone === "Z5" && b.row <= 4;
+      if (e.from === "mem_node" && e.to === "pm") {
+        var px = B.cx + 30;
+        res.d = "M" + (A.x + A.w) + " " + (A.cy + 8) + " H" + px + " V" + (B.y + B.h);
+        res.ex = px; res.ey = B.y + B.h; res.dx = 0; res.dy = -1; res.mx = (A.x + A.w + px) / 2 + 40; res.my = A.cy + 8; return res;
+      }
+      if (a.zone === b.zone && a.col === b.col && inBetween(a, b)) {
+        p0 = [A.x + A.w, A.cy]; p3 = [B.x + B.w, B.cy]; p1 = [p0[0] + 34, p0[1]]; p2 = [p3[0] + 34, p3[1]];
+        res.d = "M" + p0 + " C" + p1 + " " + p2 + " " + p3; res.ex = p3[0]; res.ey = p3[1]; res.dx = -1; res.dy = 0;
+        var m0 = bez(p0, p1, p2, p3, 0.5); res.mx = m0[0]; res.my = m0[1]; return res;
+      }
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      var horiz = (pipeA && pipeB && dx !== 0) || (a.zone === b.zone && Math.abs(dy) <= 70 && dx !== 0) || (Math.abs(dx) >= Math.abs(dy) && a.zone === b.zone && dx !== 0);
+      if (horiz) {
+        var sx = dx > 0 ? A.x + A.w : A.x, ex = dx > 0 ? B.x : B.x + B.w, sy = A.cy + off, ey = B.cy + off, mx = (sx + ex) / 2;
+        p0 = [sx, sy]; p1 = [mx, sy]; p2 = [mx, ey]; p3 = [ex, ey];
+        res.d = "M" + p0 + " C" + p1 + " " + p2 + " " + p3; res.ex = ex; res.ey = ey; res.dx = dx > 0 ? 1 : -1; res.dy = 0;
+      } else {
+        var sy2 = dy > 0 ? A.y + A.h : A.y, ey2 = dy > 0 ? B.y : B.y + B.h, sx2 = A.cx + off, ex2 = B.cx + off, my = (sy2 + ey2) / 2;
+        p0 = [sx2, sy2]; p1 = [sx2, my]; p2 = [ex2, my]; p3 = [ex2, ey2];
+        res.d = "M" + p0 + " C" + p1 + " " + p2 + " " + p3; res.ex = ex2; res.ey = ey2; res.dx = 0; res.dy = dy > 0 ? 1 : -1;
+      }
+      var m = bez(p0, p1, p2, p3, 0.5); res.mx = m[0]; res.my = m[1];
+      return res;
+    }
+    var edgeEls = [];
+    var edgeLayer = sv("g");
+    svg.appendChild(edgeLayer);
+    D.edges.forEach(function (e, i) {
+      var r = route(e);
+      var cls = "edge" + (e.src === "2a" ? " pipe" : "") + (e.optional || (nodeById[e.to] && nodeById[e.to].inactive && e.src === "abgeleitet" && /optional|aus/.test(e.label)) ? " opt" : "") + (e.manual ? " manual" : "");
+      var path = sv("path", { cls: cls, d: r.d, "data-edge": i });
+      var ah = sv("polygon", { cls: "ah", "data-edge": i, points: [[r.ex, r.ey], [r.ex - r.dx * 9 - r.dy * 4, r.ey - r.dy * 9 + r.dx * 4], [r.ex - r.dx * 9 + r.dy * 4, r.ey - r.dy * 9 - r.dx * 4]].join(" ") });
+      edgeLayer.appendChild(path); edgeLayer.appendChild(ah);
+      var lab = null, key = e.from + ">" + e.to;
+      if (SHORT[key]) { lab = sv("text", { cls: "elabel", x: r.mx, y: r.my - 4, "data-edge": i }); lab.textContent = SHORT[key]; edgeLayer.appendChild(lab); }
+      edgeEls.push({ e: e, els: [path, ah].concat(lab ? [lab] : []) });
+    });
+
+    function wrap(label, maxc, maxl) {
+      var toks = label.split(/(?<=[\s\/_-])/), lines = [], cur = "";
+      toks.forEach(function (t) {
+        if ((cur + t).trim().length > maxc && cur) { lines.push(cur.trim()); cur = t; } else cur += t;
+      });
+      if (cur.trim()) lines.push(cur.trim());
+      if (lines.length > maxl) { lines = lines.slice(0, maxl); lines[maxl - 1] = lines[maxl - 1].replace(/.{0,2}$/, "") + "…"; }
+      return lines;
+    }
+    var nodeEls = {};
+    D.nodes.forEach(function (n) {
+      var g = geo[n.id];
+      if (n.terminal) {
+        var tg = sv("g", { "aria-hidden": "true" }, [sv("rect", { cls: "term-rect", x: g.x, y: g.y, width: g.w, height: g.h, rx: g.h / 2 })]);
+        var tt = sv("text", { cls: "term-text", x: g.cx, y: g.cy + 4, "text-anchor": "middle" }); tt.textContent = n.label; tg.appendChild(tt);
+        svg.appendChild(tg); return;
+      }
+      var oc = n.origin === "upstream" ? "o-upstream" : n.origin === "strang" ? "o-strang" : n.origin === "extern" ? "o-extern" : "o-both";
+      var badge = n.planned ? "geplant" : n.inactive ? "aus" : "";
+      var ge = sv("g", {
+        cls: "node " + oc + (n.inactive ? " inactive" : "") + (n.planned ? " planned" : ""), "data-node": n.id, tabindex: 0, role: "button",
+        "aria-label": n.label + " – Komponente " + n.comps.join(" + ") + (badge ? " (" + badge + ")" : ""), "aria-pressed": "false"
+      });
+      ge.appendChild(sv("rect", { cls: "node-rect", x: g.x, y: g.y, width: g.w, height: g.h, rx: 7 }));
+      if (n.origin === "strang" || n.origin === "upstream+strang") ge.appendChild(sv("rect", { cls: "node-bar", x: g.x + 1, y: g.y + 7, width: 4, height: g.h - 14, rx: 2 }));
+      var lines = wrap(n.label, 19, badge ? 2 : 3);
+      var lh = 12.4, y0 = g.cy - ((lines.length - 1) * lh) / 2 + 4 - (badge ? 3 : 0);
+      var tx = sv("text", { cls: "node-text", "text-anchor": "middle" });
+      lines.forEach(function (ln, i) { var ts = sv("tspan", { x: g.cx + 2, y: y0 + i * lh }); ts.textContent = ln; tx.appendChild(ts); });
+      ge.appendChild(tx);
+      if (badge) { var bd = sv("text", { cls: "node-badge", x: g.x + g.w - 6, y: g.y + g.h - 5, "text-anchor": "end" }); bd.textContent = badge; ge.appendChild(bd); }
+      var ti = sv("title"); ti.textContent = n.label + (n.file ? " · " + n.file : ""); ge.appendChild(ti);
+      svg.appendChild(ge); nodeEls[n.id] = ge;
+    });
+    $("diagram-scroll").appendChild(svg);
+
+    /* Legende Diagramm */
+    (function () {
+      function sw(cls, extra) { var s = sv("svg", { width: 30, height: 18, viewBox: "0 0 30 18", "aria-hidden": "true" }); s.appendChild(sv("rect", { cls: cls, x: 2, y: 2, width: 26, height: 14, rx: 4 })); if (extra) s.appendChild(sv("rect", { cls: "kbar", x: 3, y: 5, width: 3, height: 8, rx: 1 })); return s; }
+      function ln(cls) { var s = sv("svg", { width: 34, height: 12, viewBox: "0 0 34 12", "aria-hidden": "true" }); s.appendChild(sv("path", { cls: cls, d: "M1 6 H33" })); return s; }
+      var k = $("diagram-key");
+      [[sw("kr"), "Upstream (dünne Linie)"], [sw("ks", true), "Strang (dicke Linie plus Balken links)"], [sw("kb", true), "Upstream und Strang (dünne Linie plus Balken)"],
+       [sw("kx"), "extern (gepunktet)"], [sw("ki"), "im Paper-Lauf aus oder geplant (gestrichelt, Vermerk im Knoten)"],
+       [ln("kl"), "Datenfluss"], [ln("kld"), "optional oder im Paper-Lauf aus"], [ln("klm"), "manueller Übergang"]
+      ].forEach(function (p) { k.appendChild(h("span", null, [p[0], p[1]])); });
+    })();
+    $("edge-note").textContent = D.meta.edgeNote + " Kantenquellen: 2a Pipeline (verifiziert), 2b Betrieb, „abgeleitet“ aus den Knotentabellen der Research.";
+
+    /* Datenflüsse */
+    var flowRows = D.edges.map(function (e, i) {
+      return { attrs: { "data-flow": i }, cells: [nodeById[e.from].label, nodeById[e.to].label, e.label + (e.optional ? " (optional)" : "") + (e.manual ? " (manuell)" : ""), e.src + (e.ref ? " " + e.ref : "")] };
+    });
+    var flowT = makeTable("flow-table", ["Von", "Nach", "Was fließt", "Quelle"], flowRows);
+    $("flows").appendChild(flowT.table);
+
+    /* ---------- Matrix ---------- */
+    var compSel = $("f-comp");
+    D.components.forEach(function (c) { compSel.appendChild(h("option", { value: c.id, text: compLabel(c.id) })); });
+    var state = { node: null, set: null };
+    var matrixRows = D.requirements.map(function (r) {
+      var cb = h("button", { type: "button", cls: "link-btn", text: compLabel(r.comp), "aria-label": "Nach Komponente " + compLabel(r.comp) + " filtern" });
+      cb.addEventListener("click", function () { clearNode(); setComp(r.comp); applyFilters(); });
+      return {
+        attrs: { "data-req": r.id }, cls: ["idc", "", "", "", "", "", "ev"],
+        cells: [r.id, r.title, pill(r.status), h("span", { cls: "org " + r.originKind, text: r.origin }), r.phase, cb, r.evidence]
+      };
+    });
+    var mt = makeTable("mx", ["ID", "Titel", "Status", "Herkunft", "Phase/Quick", "Komponente", "Nachweis"], matrixRows);
+    var emptyTr = h("tr", { cls: "empty-row", hidden: "" }, [h("td", { colspan: "7", text: "Keine Einträge für diese Filter." })]);
+    mt.tbody.appendChild(emptyTr);
+    $("matrix-wrap").appendChild(mt.table);
+    var reqLookup = mt.trs.map(function (tr, i) {
+      var r = D.requirements[i];
+      return { tr: tr, r: r, text: [r.id, r.title, r.origin, r.phase, r.evidence].join(" ").toLowerCase() };
+    });
+
+    function setComp(id) {
+      var tmp = compSel.querySelector("option[data-tmp]"); if (tmp) compSel.removeChild(tmp);
+      state.set = null; compSel.value = id || "";
+    }
+    function applyFilters() {
+      var src = $("f-source").value, stv = $("f-status").value, org = $("f-origin").value, q = $("f-search").value.trim().toLowerCase(), cv = compSel.value, n = 0;
+      reqLookup.forEach(function (o) {
+        var r = o.r, ok = true;
+        if (src && r.source !== src) ok = false;
+        if (ok && stv) {
+          if (stv === "umgesetzt") ok = r.status === "umgesetzt" || r.status === "umgesetzt-override";
+          else if (stv === "teilweise") ok = r.status === "teilweise" || r.status === "teilweise-p6";
+          else if (stv === "p6") ok = r.status === "teilweise-p6";
+          else ok = r.status === stv;
+        }
+        if (ok && org && r.originKind !== org) ok = false;
+        if (ok && state.set) ok = state.set.indexOf(r.comp) >= 0;
+        else if (ok && cv && cv !== "__set") ok = r.comp === cv;
+        if (ok && q && o.text.indexOf(q) < 0) ok = false;
+        o.tr.hidden = !ok; if (ok) n++;
+      });
+      emptyTr.hidden = n > 0;
+      $("match-count").textContent = n + " von " + D.requirements.length + " Einträgen";
+      return n;
+    }
+
+    /* ---------- Knotenauswahl ---------- */
+    function clearNode() {
+      if (state.node && nodeEls[state.node]) { nodeEls[state.node].classList.remove("is-selected"); nodeEls[state.node].setAttribute("aria-pressed", "false"); }
+      state.node = null; state.set = null;
+      var tmp = compSel.querySelector("option[data-tmp]"); if (tmp) { compSel.removeChild(tmp); compSel.value = ""; }
+      svg.classList.remove("has-sel");
+      edgeEls.forEach(function (o) { o.els.forEach(function (el) { el.classList.remove("hi"); }); });
+      flowT.trs.forEach(function (tr) { tr.classList.remove("flow-hi"); });
+      $("comp-chip").hidden = true;
+      $("sel-detail").textContent = "Kein Knoten gewählt. Klick auf einen Knoten im Diagramm filtert die Matrix auf dessen Komponente.";
+      $("live").textContent = "";
+    }
+    function selectNode(id) {
+      if (state.node === id) { clearNode(); setComp(""); applyFilters(); return; }
+      clearNode();
+      var n = nodeById[id]; state.node = id;
+      nodeEls[id].classList.add("is-selected"); nodeEls[id].setAttribute("aria-pressed", "true");
+      svg.classList.add("has-sel");
+      edgeEls.forEach(function (o, i) {
+        var on = o.e.from === id || o.e.to === id;
+        o.els.forEach(function (el) { el.classList.toggle("hi", on); });
+        flowT.trs[i].classList.toggle("flow-hi", on);
+      });
+      if (n.comps.length === 1) { setComp(n.comps[0]); }
+      else {
+        state.set = n.comps.slice();
+        var o = h("option", { value: "__set", "data-tmp": "1", text: "— Knoten-Auswahl —" });
+        compSel.insertBefore(o, compSel.firstChild.nextSibling); compSel.value = "__set";
+      }
+      var names = n.comps.map(compLabel).join(" + ");
+      $("comp-chip-text").textContent = "Komponente: " + n.comps.join(" + ");
+      $("comp-chip").hidden = false;
+      var det = $("sel-detail"); det.textContent = "";
+      det.appendChild(h("strong", { text: n.label }));
+      det.appendChild(document.createTextNode(" · Komponente: " + names + " · Herkunft: " + n.origin + (n.file ? " · Datei: " : "")));
+      if (n.file) det.appendChild(h("code", { text: n.file }));
+      det.appendChild(h("div", { cls: "small muted", text: n.desc }));
+      var cnt = applyFilters();
+      $("live").textContent = "Gefiltert auf Komponente " + n.comps.join(" + ") + ": " + cnt + " Einträge.";
+    }
+    Object.keys(nodeEls).forEach(function (id) {
+      var el = nodeEls[id];
+      el.addEventListener("click", function () { selectNode(id); });
+      el.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") { ev.preventDefault(); selectNode(id); } });
+    });
+    ["f-source", "f-status", "f-origin"].forEach(function (id) { $(id).addEventListener("change", applyFilters); });
+    compSel.addEventListener("change", function () { if (compSel.value !== "__set") { clearNode(); setComp(compSel.value); } applyFilters(); });
+    $("f-search").addEventListener("input", applyFilters);
+    function resetAll() {
+      clearNode(); setComp("");
+      $("f-source").value = ""; $("f-status").value = ""; $("f-origin").value = ""; $("f-search").value = "";
+      applyFilters();
+    }
+    $("f-reset").addEventListener("click", resetAll);
+    $("comp-chip-x").addEventListener("click", function () { clearNode(); setComp(""); applyFilters(); });
+    clearNode(); applyFilters();
+
+    /* ---------- Methoden ---------- */
+    D.answer.forEach(function (t) { $("answer-list").appendChild(h("li", { text: t })); });
+    $("methods-note").textContent = D.meta.methodsNote;
+    var INFL_TEXT = { entscheidet: "entscheidet", eingabe: "Eingabe", nachauswertung: "Nachauswertung", leitplanke: "Leitplanke", ablauf: "Ablaufsteuerung", keiner: "keiner" };
+    [["stochastisch", "m-stoch"], ["heuristisch", "m-heur"], ["semantisch", "m-sem"]].forEach(function (g) {
+      var rows = D.methods.filter(function (m) { return m.group === g[0]; }).map(function (m) {
+        return { attrs: { "data-method": m.method }, cls: ["", "", "idc", "", "", ""], cells: [m.method, m.category, m.where, m.does, h("span", null, [h("span", { cls: "tag tag-" + m.influenceKind, text: INFL_TEXT[m.influenceKind] }), h("div", { cls: "small muted", text: m.influence })]), m.gap] };
+      });
+      var t = makeTable("mt", ["Methode", "Kategorie", "Wo", "Was sie tatsächlich tut", "Einfluss", "Lücke"], rows);
+      t.trs.forEach(function (tr) { tr.querySelector("td.idc").style.whiteSpace = "normal"; });
+      $(g[1]).appendChild(t.table);
+    });
+
+    /* ---------- Befunde ---------- */
+    D.findings.forEach(function (f) {
+      $("findings").appendChild(h("li", null, [h("strong", { text: f.title + ". " }), document.createTextNode(f.text + " "), h("span", { cls: "small muted", text: "(" + f.ref + ")" })]));
+    });
+
+    /* ---------- Theme ---------- */
+    var THEMES = ["", "light", "dark"], TNAME = { "": "System", light: "Hell", dark: "Dunkel" }, tb = $("theme-toggle");
+    function showTheme() { var t = root.getAttribute("data-theme") || ""; tb.textContent = "Farbschema: " + TNAME[t]; }
+    try { var saved = localStorage.getItem("tex-theme"); if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved); } catch (e1) { /* ignore */ }
+    showTheme();
+    tb.addEventListener("click", function () {
+      var cur = root.getAttribute("data-theme") || "", nxt = THEMES[(THEMES.indexOf(cur) + 1) % 3];
+      if (nxt) root.setAttribute("data-theme", nxt); else root.removeAttribute("data-theme");
+      try { if (nxt) localStorage.setItem("tex-theme", nxt); else localStorage.removeItem("tex-theme"); } catch (e2) { /* ignore */ }
+      showTheme();
+    });
+  } catch (err) {
+    root.setAttribute("data-render-error", String(err && err.message ? err.message : err));
+    var box = document.createElement("div"); box.className = "err"; box.textContent = "Render-Fehler: " + (err && err.message ? err.message : err);
+    var m = document.querySelector("main.page"); if (m) m.insertBefore(box, m.firstChild);
+  }
+})();
+</script>

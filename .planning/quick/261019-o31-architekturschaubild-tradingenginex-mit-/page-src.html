@@ -1,0 +1,692 @@
+<title>TradingEngineX Architektur</title>
+<style>
+:root {
+  --bg: #f6f7f9;
+  --fg: #1b2430;
+  --muted: #566272;
+  --surface: #ffffff;
+  --surface-2: #eef1f5;
+  --border: #d5dbe3;
+  --border-strong: #7d8a9c;
+  --accent: #1f4f8f;
+  --accent-fg: #ffffff;
+  --accent-soft: #dde8f6;
+  --zone: #eef1f5;
+  --zone-line: #c9d1dc;
+  --node-fill: #ffffff;
+  --node-off: #e6eaf0;
+  --edge: #8793a4;
+  --edge-hi: #1f4f8f;
+  --ok-fg: #14532d;
+  --ok-bg: #d8f0df;
+  --warn-fg: #6e4300;
+  --warn-bg: #fbe7bd;
+  --open-fg: #38424f;
+  --open-bg: #e4e8ee;
+  --rej-fg: #46395f;
+  --rej-bg: #e6e0ef;
+  --err-fg: #7f1d1d;
+  --err-bg: #fbdcdc;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161c;
+    --fg: #e4e8ee;
+    --muted: #9aa6b6;
+    --surface: #1a2029;
+    --surface-2: #232b36;
+    --border: #343f4e;
+    --border-strong: #77869b;
+    --accent: #7fb0ec;
+    --accent-fg: #0d1520;
+    --accent-soft: #1f3552;
+    --zone: #181e26;
+    --zone-line: #2e3846;
+    --node-fill: #212934;
+    --node-off: #1a2029;
+    --edge: #66758a;
+    --edge-hi: #7fb0ec;
+    --ok-fg: #8fdca5;
+    --ok-bg: #1b3a28;
+    --warn-fg: #f0c070;
+    --warn-bg: #3d2f12;
+    --open-fg: #b4bfce;
+    --open-bg: #2a3340;
+    --rej-fg: #c5b8e0;
+    --rej-bg: #332c45;
+    --err-fg: #f3b4b4;
+    --err-bg: #4a1f1f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161c;
+  --fg: #e4e8ee;
+  --muted: #9aa6b6;
+  --surface: #1a2029;
+  --surface-2: #232b36;
+  --border: #343f4e;
+  --border-strong: #77869b;
+  --accent: #7fb0ec;
+  --accent-fg: #0d1520;
+  --accent-soft: #1f3552;
+  --zone: #181e26;
+  --zone-line: #2e3846;
+  --node-fill: #212934;
+  --node-off: #1a2029;
+  --edge: #66758a;
+  --edge-hi: #7fb0ec;
+  --ok-fg: #8fdca5;
+  --ok-bg: #1b3a28;
+  --warn-fg: #f0c070;
+  --warn-bg: #3d2f12;
+  --open-fg: #b4bfce;
+  --open-bg: #2a3340;
+  --rej-fg: #c5b8e0;
+  --rej-bg: #332c45;
+  --err-fg: #f3b4b4;
+  --err-bg: #4a1f1f;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+[hidden] { display: none !important; }
+.page {
+  max-width: 1280px;
+  margin-inline: auto;
+  padding-inline: max(16px, 3vw);
+  padding-block: 20px 48px;
+}
+.page > * { min-width: 0; }
+h1 { font-size: 1.55rem; line-height: 1.25; margin: 0 0 6px; }
+h2 { font-size: 1.2rem; margin: 40px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1rem; margin: 22px 0 8px; }
+p { margin: 6px 0; }
+code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace; font-size: 0.86em; }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+.small { font-size: 0.84rem; }
+.tnum, .count { font-variant-numeric: tabular-nums; }
+.top { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; }
+.top > * { min-width: 0; }
+button, select, input { font: inherit; color: var(--fg); }
+button, select, input[type="search"] {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 5px 9px;
+  min-height: 32px;
+}
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 16px 0 10px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.kpi .big { font-size: 1.7rem; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.kpi .lbl { font-weight: 600; }
+.kpi .sub { color: var(--muted); font-size: 0.82rem; }
+.kpi .pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.legend-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 16px; margin: 8px 0; padding: 0; list-style: none; }
+.legend-list li { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-size: 0.86rem; }
+
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; line-height: 1.5; white-space: nowrap; border: 1px solid transparent; font-variant-numeric: tabular-nums; }
+.st-umgesetzt, .st-umgesetzt-override { color: var(--ok-fg); background: var(--ok-bg); border-color: var(--ok-fg); }
+.st-teilweise, .st-teilweise-p6 { color: var(--warn-fg); background: var(--warn-bg); border-color: var(--warn-fg); }
+.st-offen { color: var(--open-fg); background: var(--open-bg); border-color: var(--border-strong); }
+.st-verworfen-override { color: var(--rej-fg); background: var(--rej-bg); border-color: var(--rej-fg); }
+
+.scroll-x { overflow-x: auto; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.diagram { background: var(--surface); }
+.diagram svg.arch { display: block; width: 100%; height: auto; min-width: 1100px; }
+svg.arch { display: block; max-width: none; }
+.zone-rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1; }
+.zone-title { font-size: 12.5px; font-weight: 650; fill: var(--fg); }
+.zone-note { font-size: 11px; fill: var(--muted); }
+.lane-cap { font-size: 10.5px; fill: var(--muted); letter-spacing: 0.02em; }
+.node { cursor: pointer; }
+.node-rect { fill: var(--node-fill); stroke: var(--border-strong); stroke-width: 1; }
+.node-text { font-size: 10.8px; fill: var(--fg); pointer-events: none; }
+.node-badge { font-size: 9.5px; font-style: italic; fill: var(--muted); pointer-events: none; }
+.node-bar { fill: var(--fg); pointer-events: none; }
+.o-strang .node-rect, .o-both .node-rect { stroke: var(--fg); stroke-width: 2.4; }
+.o-both .node-rect { stroke-width: 1.2; }
+.o-both .node-bar { opacity: 0.7; }
+.o-extern .node-rect { stroke-dasharray: 1.5 3; stroke-width: 1.6; }
+.node.inactive .node-rect { stroke-dasharray: 5 3; fill: var(--node-off); }
+.node.inactive .node-text { fill: var(--muted); }
+.node.planned .node-rect { stroke-dasharray: 5 3; fill: var(--node-off); }
+.node:hover .node-rect { stroke: var(--accent); }
+.node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.node.is-selected .node-rect { stroke: var(--accent); stroke-width: 3; fill: var(--accent-soft); }
+.term-rect { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1; }
+.term-text { font-size: 10.5px; font-weight: 650; fill: var(--muted); }
+.edge { fill: none; stroke: var(--edge); stroke-width: 1; opacity: 0.8; }
+.edge.pipe { stroke-width: 1.6; opacity: 1; }
+.edge.opt { stroke-dasharray: 4 3; }
+.edge.manual { stroke-dasharray: 9 3 2 3; }
+.ah { fill: var(--edge); opacity: 0.9; }
+.elabel { font-size: 9.5px; fill: var(--muted); paint-order: stroke; stroke: var(--zone); stroke-width: 3px; stroke-linejoin: round; text-anchor: middle; }
+svg.has-sel .edge:not(.hi), svg.has-sel .ah:not(.hi), svg.has-sel .elabel:not(.hi) { opacity: 0.22; }
+.edge.hi { stroke: var(--edge-hi); stroke-width: 2.4; opacity: 1; }
+.ah.hi { fill: var(--edge-hi); opacity: 1; }
+.elabel.hi { fill: var(--accent); opacity: 1; }
+
+.key { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 10px 0; font-size: 0.84rem; color: var(--muted); }
+.key span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.key svg { flex: none; }
+.key .kr { fill: var(--node-fill); stroke: var(--border-strong); stroke-width: 1; }
+.key .ks { fill: var(--node-fill); stroke: var(--fg); stroke-width: 2.4; }
+.key .kb { fill: var(--node-fill); stroke: var(--fg); stroke-width: 1.2; }
+.key .kx { fill: var(--node-fill); stroke: var(--border-strong); stroke-width: 1.6; stroke-dasharray: 1.5 3; }
+.key .ki { fill: var(--node-off); stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 5 3; }
+.key .kbar { fill: var(--fg); }
+.key .kl { stroke: var(--edge); stroke-width: 1.6; fill: none; }
+.key .kld { stroke: var(--edge); stroke-width: 1.6; fill: none; stroke-dasharray: 4 3; }
+.key .klm { stroke: var(--edge); stroke-width: 1.6; fill: none; stroke-dasharray: 9 3 2 3; }
+.note-box { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 6px; padding: 8px 12px; margin: 10px 0; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin: 10px 0; }
+.filters label { display: flex; flex-direction: column; gap: 2px; font-size: 0.8rem; color: var(--muted); min-width: 0; }
+.filters select, .filters input { max-width: 100%; }
+.filters .grow { flex: 1 1 200px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--fg); border: 1px solid var(--accent); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 0.84rem; }
+.chip button { border: 0; background: transparent; min-height: 22px; padding: 0 7px; border-radius: 999px; font-weight: 700; }
+.sel-detail { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 0.9rem; overflow-wrap: anywhere; }
+.count { font-size: 0.9rem; color: var(--muted); margin: 4px 0; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+th, td { text-align: left; vertical-align: top; padding: 6px 9px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+th { position: sticky; top: 0; background: var(--surface-2); font-weight: 650; white-space: nowrap; z-index: 1; }
+td.idc { font-family: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace; font-size: 0.8rem; white-space: nowrap; overflow-wrap: normal; }
+td.ev { font-size: 0.8rem; color: var(--muted); min-width: 220px; }
+tr.flow-hi td { background: var(--accent-soft); }
+.org { display: inline-block; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 4px; font-size: 0.8rem; background: var(--surface); }
+.org.strang { border-width: 1px 1px 1px 4px; border-color: var(--fg); }
+.org.upstream { border-style: solid; }
+.link-btn { background: transparent; border: 0; padding: 0; min-height: 0; color: var(--accent); text-decoration: underline; text-align: left; }
+.link-btn:hover { background: transparent; }
+.tag { display: inline-block; padding: 0 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; border: 1px solid var(--border-strong); }
+.tag-entscheidet { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.tag-eingabe { background: var(--accent-soft); }
+.tag-nachauswertung { background: var(--open-bg); color: var(--open-fg); }
+.tag-leitplanke { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-fg); }
+.tag-ablauf { background: var(--surface-2); }
+.tag-keiner { background: transparent; color: var(--muted); border-style: dashed; }
+.answer { background: var(--surface); border: 1px solid var(--accent); border-radius: 8px; padding: 12px 16px; margin: 10px 0 16px; }
+.answer h3 { margin-top: 0; }
+.answer ol { margin: 6px 0 0; padding-left: 22px; }
+.answer li { margin: 5px 0; }
+.findings { padding-left: 22px; }
+.findings li { margin: 8px 0; }
+footer { margin-top: 36px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.84rem; }
+.err { background: var(--err-bg); color: var(--err-fg); padding: 10px 12px; border-radius: 6px; }
+
+@media (max-width: 640px) {
+  .cards-sm thead { display: none; }
+  .cards-sm, .cards-sm tbody { display: block; }
+  .cards-sm tr { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .cards-sm td { display: block; border: 0; padding: 1px 0; min-width: 0; }
+  .cards-sm td::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.74rem; font-weight: 600; }
+  .cards-sm td.idc { white-space: normal; }
+  .cards-sm td.ev { min-width: 0; }
+  .cards-sm tr[hidden] { display: none !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+</style>
+<main class="page">
+  <div class="top">
+    <div style="min-width:0; flex:1 1 320px">
+      <h1>TradingEngineX – Architektur und Umsetzungsstand</h1>
+      <p id="stand" class="muted tnum"></p>
+      <p id="phase6" class="small"></p>
+    </div>
+    <button id="theme-toggle" type="button" aria-label="Farbschema wechseln">Farbschema: System</button>
+  </div>
+  <div id="kpis" class="kpis"></div>
+  <ul id="status-legend" class="legend-list"></ul>
+
+  <h2 id="architektur">Architektur</h2>
+  <p class="muted small">Klick (oder Enter/Leertaste) auf einen Knoten filtert die Anforderungsmatrix auf seine Komponente und hebt seine Datenflüsse hervor. Das Diagramm scrollt auf schmalen Bildschirmen seitlich; alle Datenflüsse stehen zusätzlich als Tabelle darunter.</p>
+  <div class="scroll-x diagram" id="diagram-scroll"></div>
+  <div id="diagram-key" class="key"></div>
+  <p id="edge-note" class="note-box small"></p>
+  <h3>Datenflüsse</h3>
+  <div class="scroll-x" id="flows"></div>
+
+  <h2 id="matrix">Anforderungsmatrix</h2>
+  <div class="filters" role="group" aria-label="Filter der Anforderungsmatrix">
+    <label>Quelle
+      <select id="f-source">
+        <option value="">Alle</option><option value="M1">M1 Produktionsreife</option><option value="M2">M2 IBKR Paper Execution</option><option value="Upstream">Upstream</option><option value="Strang">Strang-Zusätze</option>
+      </select>
+    </label>
+    <label>Status
+      <select id="f-status">
+        <option value="">Alle</option><option value="umgesetzt">umgesetzt (inkl. Override)</option><option value="teilweise">teilweise (inkl. Phase 6)</option><option value="p6">nur Phase 6 läuft</option><option value="offen">offen</option><option value="verworfen-override">verworfen-override</option>
+      </select>
+    </label>
+    <label>Komponente
+      <select id="f-comp"><option value="">Alle</option></select>
+    </label>
+    <label>Herkunft
+      <select id="f-origin">
+        <option value="">Alle</option><option value="upstream">Upstream</option><option value="strang">Strang</option>
+      </select>
+    </label>
+    <label class="grow">Suche
+      <input id="f-search" type="search" placeholder="ID, Titel, Herkunft, Phase, Nachweis" autocomplete="off">
+    </label>
+    <button id="f-reset" type="button" class="btn-primary">Filter zurücksetzen</button>
+  </div>
+  <p><span id="comp-chip" class="chip" hidden><span id="comp-chip-text"></span><button id="comp-chip-x" type="button" aria-label="Komponentenfilter und Knotenauswahl entfernen">×</button></span></p>
+  <div id="sel-detail" class="sel-detail"></div>
+  <p id="live" class="count" role="status" aria-live="polite"></p>
+  <p id="match-count" class="count"></p>
+  <div class="scroll-x" id="matrix-wrap"></div>
+
+  <h2 id="methoden">Vorhersagemethoden</h2>
+  <div class="answer" id="answer"><h3>Kurzantwort</h3><ol id="answer-list"></ol></div>
+  <p id="methods-note" class="note-box small"></p>
+  <h3>Stochastisch und statistisch</h3>
+  <div class="scroll-x" id="m-stoch"></div>
+  <h3>Heuristisch</h3>
+  <div class="scroll-x" id="m-heur"></div>
+  <h3>Semantisch und NLP (Ticker-Meldungen)</h3>
+  <div class="scroll-x" id="m-sem"></div>
+
+  <h2 id="auffaelligkeiten">Auffälligkeiten</h2>
+  <ol id="findings" class="findings"></ol>
+
+  <footer>Quelle: 261019-o31 RESEARCH Teil A und B · Momentaufnahme, Phase 6 läuft parallel</footer>
+</main>
+<script>/*@@TEX_DATA@@*/</script>
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+  try {
+    var D = TEX_DATA;
+    var SVGNS = "http://www.w3.org/2000/svg";
+
+    function h(tag, attrs, kids) {
+      var e = document.createElement(tag), k;
+      if (attrs) for (k in attrs) {
+        if (k === "text") e.textContent = attrs[k];
+        else if (k === "cls") e.className = attrs[k];
+        else e.setAttribute(k, attrs[k]);
+      }
+      (kids || []).forEach(function (c) { e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+      return e;
+    }
+    function sv(tag, attrs, kids) {
+      var e = document.createElementNS(SVGNS, tag), k;
+      if (attrs) for (k in attrs) {
+        if (k === "text") e.textContent = attrs[k];
+        else if (k === "cls") e.setAttribute("class", attrs[k]);
+        else e.setAttribute(k, String(attrs[k]));
+      }
+      (kids || []).forEach(function (c) { e.appendChild(c); });
+      return e;
+    }
+    function $(id) { return document.getElementById(id); }
+
+    var STATUS_TEXT = {
+      "umgesetzt": "umgesetzt", "umgesetzt-override": "umgesetzt (Override)", "teilweise": "teilweise",
+      "teilweise-p6": "teilweise · Phase 6 läuft", "offen": "offen", "verworfen-override": "verworfen (Override)"
+    };
+    var compById = {}; D.components.forEach(function (c) { compById[c.id] = c; });
+    var nodeById = {}; D.nodes.forEach(function (n) { nodeById[n.id] = n; });
+    function pill(status) { return h("span", { cls: "pill st-" + status, text: STATUS_TEXT[status] }); }
+    function compLabel(id) { return id + " " + compById[id].name; }
+
+    /* ---------- Kopf ---------- */
+    $("stand").textContent = "Stand " + D.meta.date + " · " + D.meta.branch + " @ " + D.meta.head + " (" + D.meta.headTime + ") · Upstream-Basis " + D.meta.upstream.replace(" ", " (") + ") · Phase 6 läuft (8/10 Pläne)";
+    $("phase6").textContent = "Phase 6: " + D.meta.phase6 + ".";
+
+    var SOURCES = [["M1", "M1 Produktionsreife"], ["M2", "M2 IBKR Paper Execution"], ["Upstream", "Upstream TradingAgents"], ["Strang", "Strang-Zusätze"]];
+    var kpis = $("kpis");
+    SOURCES.forEach(function (s) {
+      var rs = D.requirements.filter(function (r) { return r.source === s[0]; });
+      var c = { u: 0, t: 0, p6: 0, o: 0, v: 0 };
+      rs.forEach(function (r) {
+        if (r.status === "umgesetzt" || r.status === "umgesetzt-override") c.u++;
+        else if (r.status === "teilweise" || r.status === "teilweise-p6") { c.t++; if (r.status === "teilweise-p6") c.p6++; }
+        else if (r.status === "offen") c.o++;
+        else c.v++;
+      });
+      var pills = h("div", { cls: "pills" });
+      pills.appendChild(h("span", { cls: "pill st-umgesetzt", text: "umgesetzt " + c.u }));
+      if (c.t) pills.appendChild(h("span", { cls: "pill st-teilweise", text: "teilweise " + c.t + (c.p6 ? " (davon " + c.p6 + " Phase 6)" : "") }));
+      if (c.o) pills.appendChild(h("span", { cls: "pill st-offen", text: "offen " + c.o }));
+      if (c.v) pills.appendChild(h("span", { cls: "pill st-verworfen-override", text: "verworfen " + c.v }));
+      var sub = s[0] === "M1" ? "davon 2 Zusatzpunkte (P3 #12, Betriebszweck)" : s[0] === "M2" ? "davon " + rs.filter(function (r) { return r.status === "umgesetzt-override"; }).length + " mit Override" : s[0] === "Upstream" ? "Stand v0.7.0" : "außerhalb M1/M2";
+      kpis.appendChild(h("div", { cls: "kpi" }, [h("div", { cls: "lbl", text: s[1] }), h("div", { cls: "big", text: String(rs.length) }), h("div", { cls: "sub", text: sub }), pills]));
+    });
+    var leg = $("status-legend");
+    D.meta.statusLegend.forEach(function (l) {
+      var key = l.value === "umgesetzt (Override)" ? "umgesetzt-override" : l.value === "teilweise (Phase 6 läuft)" ? "teilweise-p6" : l.value;
+      leg.appendChild(h("li", null, [pill(key), h("span", { text: l.meaning })]));
+    });
+
+    /* ---------- Tabellenbauer ---------- */
+    function makeTable(cls, heads, rows) {
+      var thead = h("thead", null, [h("tr", null, heads.map(function (x) { return h("th", { scope: "col", text: x }); }))]);
+      var tbody = h("tbody");
+      var trs = rows.map(function (r) {
+        var tr = h("tr", r.attrs || null);
+        r.cells.forEach(function (c, i) {
+          var td = h("td", { "data-label": heads[i], cls: (r.cls && r.cls[i]) || "" });
+          if (typeof c === "string") td.textContent = c; else td.appendChild(c);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+        return tr;
+      });
+      return { table: h("table", { cls: cls + " cards-sm" }, [thead, tbody]), trs: trs, tbody: tbody };
+    }
+
+    /* ---------- Diagramm ---------- */
+    var NW = 116, NH = 50, PX = 168, PY = 66, X0 = 30, LANE = 18, ZPAD = 34, W = 1520;
+    var LANES = {
+      Z5: [{ row: 0, label: "Pipeline (verifizierte Reihenfolge, Paper-Lauf: je Ticker ein Durchlauf)" }, { row: 5, label: "Nach dem Graph" }, { row: 6, label: "Querschnitt" }],
+      Z3: [{ row: 0, label: "Ausführerkette (links nach rechts)" }, { row: 1, label: "Betrieb, Hilfen, Zustand" }]
+    };
+    var geo = {}, zoneGeo = {}, ycur = 8;
+    function laneCount(z, row) { return (LANES[z] || []).filter(function (l) { return l.row <= row; }).length; }
+    D.zones.forEach(function (z) {
+      var ns = D.nodes.filter(function (n) { return n.zone === z.id; });
+      var maxRow = Math.max.apply(null, ns.map(function (n) { return n.row; }));
+      var top = ycur;
+      ns.forEach(function (n) {
+        var y = top + ZPAD + n.row * PY + laneCount(z.id, n.row) * LANE;
+        var x = X0 + n.col * PX;
+        if (n.terminal) geo[n.id] = { x: x + 20, y: y + 12, w: NW - 40, h: NH - 24 };
+        else geo[n.id] = { x: x, y: y, w: NW, h: NH };
+      });
+      var bottom = top + ZPAD + maxRow * PY + laneCount(z.id, maxRow) * LANE + NH + 14;
+      zoneGeo[z.id] = { y: top, h: bottom - top };
+      ycur = bottom + 10;
+    });
+    var H = ycur;
+    Object.keys(geo).forEach(function (id) { var g = geo[id]; g.cx = g.x + g.w / 2; g.cy = g.y + g.h / 2; });
+
+    var svg = sv("svg", { cls: "arch", width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "group", "aria-label": "Architekturdiagramm von TradingEngineX" });
+    D.zones.forEach(function (z) {
+      var g = zoneGeo[z.id];
+      svg.appendChild(sv("rect", { cls: "zone-rect", x: 8, y: g.y, width: W - 16, height: g.h, rx: 8 }));
+      var t = sv("text", { cls: "zone-title", x: 18, y: g.y + 20 }); t.textContent = z.label;
+      var tn = sv("tspan", { cls: "zone-note", dx: 8 }); tn.textContent = z.note; t.appendChild(tn);
+      svg.appendChild(t);
+      (LANES[z.id] || []).forEach(function (l) {
+        var ln = D.nodes.filter(function (n) { return n.zone === z.id && n.row === l.row; })[0];
+        var y = geo[ln.id].y - 6;
+        var c = sv("text", { cls: "lane-cap", x: 18, y: y }); c.textContent = l.label; svg.appendChild(c);
+      });
+    });
+
+    var edgeSet = {}; D.edges.forEach(function (e) { edgeSet[e.from + ">" + e.to] = true; });
+    var SHORT = {
+      "executor>ibkr_paperlog": "Start", "ibkr_paperlog>ibkr_decision": "Eintrag", "ibkr_decision>ibkr_guards": "Plan", "ibkr_guards>ibkr_ledger": "intent",
+      "ibkr_ledger>ibkr_broker": "Order", "ibkr_broker>ib_gateway": "Socket", "rm>trader": "Plan", "trader>r_aggr": "Trader-Plan", "bull>bear": "Argument",
+      "mem_node>pm": "past_context", "gha_daily>paper_log": "git push", "paper_log>ibkr_paperlog": "git fetch", "pm>jev_hooks": "Entscheidung",
+      "r_neut>pm": "3 Beiträge", "ib_gateway>ibkr_server": "Order"
+    };
+    function inBetween(a, b) {
+      return D.nodes.some(function (n) { return !n.terminal && n.id !== a.id && n.id !== b.id && n.zone === a.zone && n.col === a.col && n.row > Math.min(a.row, b.row) && n.row < Math.max(a.row, b.row); });
+    }
+    function bez(p0, p1, p2, p3, t) {
+      var u = 1 - t;
+      return [u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0], u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]];
+    }
+    function route(e) {
+      var a = nodeById[e.from], b = nodeById[e.to], A = geo[e.from], B = geo[e.to];
+      var rev = edgeSet[e.to + ">" + e.from], off = rev ? (e.from < e.to ? 6 : -6) : 0;
+      var res = { d: "", ex: 0, ey: 0, dx: 0, dy: 0, mx: 0, my: 0, ang: 0 }, p0, p1, p2, p3;
+      var pipeA = a.zone === "Z5" && a.row <= 4, pipeB = b.zone === "Z5" && b.row <= 4;
+      if (e.from === "mem_node" && e.to === "pm") {
+        var px = B.cx + 30;
+        res.d = "M" + (A.x + A.w) + " " + (A.cy + 8) + " H" + px + " V" + (B.y + B.h);
+        res.ex = px; res.ey = B.y + B.h; res.dx = 0; res.dy = -1; res.mx = (A.x + A.w + px) / 2 + 40; res.my = A.cy + 8; return res;
+      }
+      if (a.zone === b.zone && a.col === b.col && inBetween(a, b)) {
+        p0 = [A.x + A.w, A.cy]; p3 = [B.x + B.w, B.cy]; p1 = [p0[0] + 34, p0[1]]; p2 = [p3[0] + 34, p3[1]];
+        res.d = "M" + p0 + " C" + p1 + " " + p2 + " " + p3; res.ex = p3[0]; res.ey = p3[1]; res.dx = -1; res.dy = 0;
+        var m0 = bez(p0, p1, p2, p3, 0.5); res.mx = m0[0]; res.my = m0[1]; return res;
+      }
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      var horiz = (pipeA && pipeB && dx !== 0) || (a.zone === b.zone && Math.abs(dy) <= 70 && dx !== 0) || (Math.abs(dx) >= Math.abs(dy) && a.zone === b.zone && dx !== 0);
+      if (horiz) {
+        var sx = dx > 0 ? A.x + A.w : A.x, ex = dx > 0 ? B.x : B.x + B.w, sy = A.cy + off, ey = B.cy + off, mx = (sx + ex) / 2;
+        p0 = [sx, sy]; p1 = [mx, sy]; p2 = [mx, ey]; p3 = [ex, ey];
+        res.d = "M" + p0 + " C" + p1 + " " + p2 + " " + p3; res.ex = ex; res.ey = ey; res.dx = dx > 0 ? 1 : -1; res.dy = 0;
+      } else {
+        var sy2 = dy > 0 ? A.y + A.h : A.y, ey2 = dy > 0 ? B.y : B.y + B.h, sx2 = A.cx + off, ex2 = B.cx + off, my = (sy2 + ey2) / 2;
+        p0 = [sx2, sy2]; p1 = [sx2, my]; p2 = [ex2, my]; p3 = [ex2, ey2];
+        res.d = "M" + p0 + " C" + p1 + " " + p2 + " " + p3; res.ex = ex2; res.ey = ey2; res.dx = 0; res.dy = dy > 0 ? 1 : -1;
+      }
+      var m = bez(p0, p1, p2, p3, 0.5); res.mx = m[0]; res.my = m[1];
+      return res;
+    }
+    var edgeEls = [];
+    var edgeLayer = sv("g");
+    svg.appendChild(edgeLayer);
+    D.edges.forEach(function (e, i) {
+      var r = route(e);
+      var cls = "edge" + (e.src === "2a" ? " pipe" : "") + (e.optional || (nodeById[e.to] && nodeById[e.to].inactive && e.src === "abgeleitet" && /optional|aus/.test(e.label)) ? " opt" : "") + (e.manual ? " manual" : "");
+      var path = sv("path", { cls: cls, d: r.d, "data-edge": i });
+      var ah = sv("polygon", { cls: "ah", "data-edge": i, points: [[r.ex, r.ey], [r.ex - r.dx * 9 - r.dy * 4, r.ey - r.dy * 9 + r.dx * 4], [r.ex - r.dx * 9 + r.dy * 4, r.ey - r.dy * 9 - r.dx * 4]].join(" ") });
+      edgeLayer.appendChild(path); edgeLayer.appendChild(ah);
+      var lab = null, key = e.from + ">" + e.to;
+      if (SHORT[key]) { lab = sv("text", { cls: "elabel", x: r.mx, y: r.my - 4, "data-edge": i }); lab.textContent = SHORT[key]; edgeLayer.appendChild(lab); }
+      edgeEls.push({ e: e, els: [path, ah].concat(lab ? [lab] : []) });
+    });
+
+    function wrap(label, maxc, maxl) {
+      var toks = label.split(/(?<=[\s\/_-])/), lines = [], cur = "";
+      toks.forEach(function (t) {
+        if ((cur + t).trim().length > maxc && cur) { lines.push(cur.trim()); cur = t; } else cur += t;
+      });
+      if (cur.trim()) lines.push(cur.trim());
+      if (lines.length > maxl) { lines = lines.slice(0, maxl); lines[maxl - 1] = lines[maxl - 1].replace(/.{0,2}$/, "") + "…"; }
+      return lines;
+    }
+    var nodeEls = {};
+    D.nodes.forEach(function (n) {
+      var g = geo[n.id];
+      if (n.terminal) {
+        var tg = sv("g", { "aria-hidden": "true" }, [sv("rect", { cls: "term-rect", x: g.x, y: g.y, width: g.w, height: g.h, rx: g.h / 2 })]);
+        var tt = sv("text", { cls: "term-text", x: g.cx, y: g.cy + 4, "text-anchor": "middle" }); tt.textContent = n.label; tg.appendChild(tt);
+        svg.appendChild(tg); return;
+      }
+      var oc = n.origin === "upstream" ? "o-upstream" : n.origin === "strang" ? "o-strang" : n.origin === "extern" ? "o-extern" : "o-both";
+      var badge = n.planned ? "geplant" : n.inactive ? "aus" : "";
+      var ge = sv("g", {
+        cls: "node " + oc + (n.inactive ? " inactive" : "") + (n.planned ? " planned" : ""), "data-node": n.id, tabindex: 0, role: "button",
+        "aria-label": n.label + " – Komponente " + n.comps.join(" + ") + (badge ? " (" + badge + ")" : ""), "aria-pressed": "false"
+      });
+      ge.appendChild(sv("rect", { cls: "node-rect", x: g.x, y: g.y, width: g.w, height: g.h, rx: 7 }));
+      if (n.origin === "strang" || n.origin === "upstream+strang") ge.appendChild(sv("rect", { cls: "node-bar", x: g.x + 1, y: g.y + 7, width: 4, height: g.h - 14, rx: 2 }));
+      var lines = wrap(n.label, 19, badge ? 2 : 3);
+      var lh = 12.4, y0 = g.cy - ((lines.length - 1) * lh) / 2 + 4 - (badge ? 3 : 0);
+      var tx = sv("text", { cls: "node-text", "text-anchor": "middle" });
+      lines.forEach(function (ln, i) { var ts = sv("tspan", { x: g.cx + 2, y: y0 + i * lh }); ts.textContent = ln; tx.appendChild(ts); });
+      ge.appendChild(tx);
+      if (badge) { var bd = sv("text", { cls: "node-badge", x: g.x + g.w - 6, y: g.y + g.h - 5, "text-anchor": "end" }); bd.textContent = badge; ge.appendChild(bd); }
+      var ti = sv("title"); ti.textContent = n.label + (n.file ? " · " + n.file : ""); ge.appendChild(ti);
+      svg.appendChild(ge); nodeEls[n.id] = ge;
+    });
+    $("diagram-scroll").appendChild(svg);
+
+    /* Legende Diagramm */
+    (function () {
+      function sw(cls, extra) { var s = sv("svg", { width: 30, height: 18, viewBox: "0 0 30 18", "aria-hidden": "true" }); s.appendChild(sv("rect", { cls: cls, x: 2, y: 2, width: 26, height: 14, rx: 4 })); if (extra) s.appendChild(sv("rect", { cls: "kbar", x: 3, y: 5, width: 3, height: 8, rx: 1 })); return s; }
+      function ln(cls) { var s = sv("svg", { width: 34, height: 12, viewBox: "0 0 34 12", "aria-hidden": "true" }); s.appendChild(sv("path", { cls: cls, d: "M1 6 H33" })); return s; }
+      var k = $("diagram-key");
+      [[sw("kr"), "Upstream (dünne Linie)"], [sw("ks", true), "Strang (dicke Linie plus Balken links)"], [sw("kb", true), "Upstream und Strang (dünne Linie plus Balken)"],
+       [sw("kx"), "extern (gepunktet)"], [sw("ki"), "im Paper-Lauf aus oder geplant (gestrichelt, Vermerk im Knoten)"],
+       [ln("kl"), "Datenfluss"], [ln("kld"), "optional oder im Paper-Lauf aus"], [ln("klm"), "manueller Übergang"]
+      ].forEach(function (p) { k.appendChild(h("span", null, [p[0], p[1]])); });
+    })();
+    $("edge-note").textContent = D.meta.edgeNote + " Kantenquellen: 2a Pipeline (verifiziert), 2b Betrieb, „abgeleitet“ aus den Knotentabellen der Research.";
+
+    /* Datenflüsse */
+    var flowRows = D.edges.map(function (e, i) {
+      return { attrs: { "data-flow": i }, cells: [nodeById[e.from].label, nodeById[e.to].label, e.label + (e.optional ? " (optional)" : "") + (e.manual ? " (manuell)" : ""), e.src + (e.ref ? " " + e.ref : "")] };
+    });
+    var flowT = makeTable("flow-table", ["Von", "Nach", "Was fließt", "Quelle"], flowRows);
+    $("flows").appendChild(flowT.table);
+
+    /* ---------- Matrix ---------- */
+    var compSel = $("f-comp");
+    D.components.forEach(function (c) { compSel.appendChild(h("option", { value: c.id, text: compLabel(c.id) })); });
+    var state = { node: null, set: null };
+    var matrixRows = D.requirements.map(function (r) {
+      var cb = h("button", { type: "button", cls: "link-btn", text: compLabel(r.comp), "aria-label": "Nach Komponente " + compLabel(r.comp) + " filtern" });
+      cb.addEventListener("click", function () { clearNode(); setComp(r.comp); applyFilters(); });
+      return {
+        attrs: { "data-req": r.id }, cls: ["idc", "", "", "", "", "", "ev"],
+        cells: [r.id, r.title, pill(r.status), h("span", { cls: "org " + r.originKind, text: r.origin }), r.phase, cb, r.evidence]
+      };
+    });
+    var mt = makeTable("mx", ["ID", "Titel", "Status", "Herkunft", "Phase/Quick", "Komponente", "Nachweis"], matrixRows);
+    var emptyTr = h("tr", { cls: "empty-row", hidden: "" }, [h("td", { colspan: "7", text: "Keine Einträge für diese Filter." })]);
+    mt.tbody.appendChild(emptyTr);
+    $("matrix-wrap").appendChild(mt.table);
+    var reqLookup = mt.trs.map(function (tr, i) {
+      var r = D.requirements[i];
+      return { tr: tr, r: r, text: [r.id, r.title, r.origin, r.phase, r.evidence].join(" ").toLowerCase() };
+    });
+
+    function setComp(id) {
+      var tmp = compSel.querySelector("option[data-tmp]"); if (tmp) compSel.removeChild(tmp);
+      state.set = null; compSel.value = id || "";
+    }
+    function applyFilters() {
+      var src = $("f-source").value, stv = $("f-status").value, org = $("f-origin").value, q = $("f-search").value.trim().toLowerCase(), cv = compSel.value, n = 0;
+      reqLookup.forEach(function (o) {
+        var r = o.r, ok = true;
+        if (src && r.source !== src) ok = false;
+        if (ok && stv) {
+          if (stv === "umgesetzt") ok = r.status === "umgesetzt" || r.status === "umgesetzt-override";
+          else if (stv === "teilweise") ok = r.status === "teilweise" || r.status === "teilweise-p6";
+          else if (stv === "p6") ok = r.status === "teilweise-p6";
+          else ok = r.status === stv;
+        }
+        if (ok && org && r.originKind !== org) ok = false;
+        if (ok && state.set) ok = state.set.indexOf(r.comp) >= 0;
+        else if (ok && cv && cv !== "__set") ok = r.comp === cv;
+        if (ok && q && o.text.indexOf(q) < 0) ok = false;
+        o.tr.hidden = !ok; if (ok) n++;
+      });
+      emptyTr.hidden = n > 0;
+      $("match-count").textContent = n + " von " + D.requirements.length + " Einträgen";
+      return n;
+    }
+
+    /* ---------- Knotenauswahl ---------- */
+    function clearNode() {
+      if (state.node && nodeEls[state.node]) { nodeEls[state.node].classList.remove("is-selected"); nodeEls[state.node].setAttribute("aria-pressed", "false"); }
+      state.node = null; state.set = null;
+      var tmp = compSel.querySelector("option[data-tmp]"); if (tmp) { compSel.removeChild(tmp); compSel.value = ""; }
+      svg.classList.remove("has-sel");
+      edgeEls.forEach(function (o) { o.els.forEach(function (el) { el.classList.remove("hi"); }); });
+      flowT.trs.forEach(function (tr) { tr.classList.remove("flow-hi"); });
+      $("comp-chip").hidden = true;
+      $("sel-detail").textContent = "Kein Knoten gewählt. Klick auf einen Knoten im Diagramm filtert die Matrix auf dessen Komponente.";
+      $("live").textContent = "";
+    }
+    function selectNode(id) {
+      if (state.node === id) { clearNode(); setComp(""); applyFilters(); return; }
+      clearNode();
+      var n = nodeById[id]; state.node = id;
+      nodeEls[id].classList.add("is-selected"); nodeEls[id].setAttribute("aria-pressed", "true");
+      svg.classList.add("has-sel");
+      edgeEls.forEach(function (o, i) {
+        var on = o.e.from === id || o.e.to === id;
+        o.els.forEach(function (el) { el.classList.toggle("hi", on); });
+        flowT.trs[i].classList.toggle("flow-hi", on);
+      });
+      if (n.comps.length === 1) { setComp(n.comps[0]); }
+      else {
+        state.set = n.comps.slice();
+        var o = h("option", { value: "__set", "data-tmp": "1", text: "— Knoten-Auswahl —" });
+        compSel.insertBefore(o, compSel.firstChild.nextSibling); compSel.value = "__set";
+      }
+      var names = n.comps.map(compLabel).join(" + ");
+      $("comp-chip-text").textContent = "Komponente: " + n.comps.join(" + ");
+      $("comp-chip").hidden = false;
+      var det = $("sel-detail"); det.textContent = "";
+      det.appendChild(h("strong", { text: n.label }));
+      det.appendChild(document.createTextNode(" · Komponente: " + names + " · Herkunft: " + n.origin + (n.file ? " · Datei: " : "")));
+      if (n.file) det.appendChild(h("code", { text: n.file }));
+      det.appendChild(h("div", { cls: "small muted", text: n.desc }));
+      var cnt = applyFilters();
+      $("live").textContent = "Gefiltert auf Komponente " + n.comps.join(" + ") + ": " + cnt + " Einträge.";
+    }
+    Object.keys(nodeEls).forEach(function (id) {
+      var el = nodeEls[id];
+      el.addEventListener("click", function () { selectNode(id); });
+      el.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") { ev.preventDefault(); selectNode(id); } });
+    });
+    ["f-source", "f-status", "f-origin"].forEach(function (id) { $(id).addEventListener("change", applyFilters); });
+    compSel.addEventListener("change", function () { if (compSel.value !== "__set") { clearNode(); setComp(compSel.value); } applyFilters(); });
+    $("f-search").addEventListener("input", applyFilters);
+    function resetAll() {
+      clearNode(); setComp("");
+      $("f-source").value = ""; $("f-status").value = ""; $("f-origin").value = ""; $("f-search").value = "";
+      applyFilters();
+    }
+    $("f-reset").addEventListener("click", resetAll);
+    $("comp-chip-x").addEventListener("click", function () { clearNode(); setComp(""); applyFilters(); });
+    clearNode(); applyFilters();
+
+    /* ---------- Methoden ---------- */
+    D.answer.forEach(function (t) { $("answer-list").appendChild(h("li", { text: t })); });
+    $("methods-note").textContent = D.meta.methodsNote;
+    var INFL_TEXT = { entscheidet: "entscheidet", eingabe: "Eingabe", nachauswertung: "Nachauswertung", leitplanke: "Leitplanke", ablauf: "Ablaufsteuerung", keiner: "keiner" };
+    [["stochastisch", "m-stoch"], ["heuristisch", "m-heur"], ["semantisch", "m-sem"]].forEach(function (g) {
+      var rows = D.methods.filter(function (m) { return m.group === g[0]; }).map(function (m) {
+        return { attrs: { "data-method": m.method }, cls: ["", "", "idc", "", "", ""], cells: [m.method, m.category, m.where, m.does, h("span", null, [h("span", { cls: "tag tag-" + m.influenceKind, text: INFL_TEXT[m.influenceKind] }), h("div", { cls: "small muted", text: m.influence })]), m.gap] };
+      });
+      var t = makeTable("mt", ["Methode", "Kategorie", "Wo", "Was sie tatsächlich tut", "Einfluss", "Lücke"], rows);
+      t.trs.forEach(function (tr) { tr.querySelector("td.idc").style.whiteSpace = "normal"; });
+      $(g[1]).appendChild(t.table);
+    });
+
+    /* ---------- Befunde ---------- */
+    D.findings.forEach(function (f) {
+      $("findings").appendChild(h("li", null, [h("strong", { text: f.title + ". " }), document.createTextNode(f.text + " "), h("span", { cls: "small muted", text: "(" + f.ref + ")" })]));
+    });
+
+    /* ---------- Theme ---------- */
+    var THEMES = ["", "light", "dark"], TNAME = { "": "System", light: "Hell", dark: "Dunkel" }, tb = $("theme-toggle");
+    function showTheme() { var t = root.getAttribute("data-theme") || ""; tb.textContent = "Farbschema: " + TNAME[t]; }
+    try { var saved = localStorage.getItem("tex-theme"); if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved); } catch (e1) { /* ignore */ }
+    showTheme();
+    tb.addEventListener("click", function () {
+      var cur = root.getAttribute("data-theme") || "", nxt = THEMES[(THEMES.indexOf(cur) + 1) % 3];
+      if (nxt) root.setAttribute("data-theme", nxt); else root.removeAttribute("data-theme");
+      try { if (nxt) localStorage.setItem("tex-theme", nxt); else localStorage.removeItem("tex-theme"); } catch (e2) { /* ignore */ }
+      showTheme();
+    });
+  } catch (err) {
+    root.setAttribute("data-render-error", String(err && err.message ? err.message : err));
+    var box = document.createElement("div"); box.className = "err"; box.textContent = "Render-Fehler: " + (err && err.message ? err.message : err);
+    var m = document.querySelector("main.page"); if (m) m.insertBefore(box, m.firstChild);
+  }
+})();
+</script>
