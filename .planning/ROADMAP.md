@@ -316,13 +316,13 @@ Plans:
 - Kein zweiter oder dritter Ticker zwingend — ein Durchstich genügt, die Mechanik ist tickerunabhängig.
 - Keine Ausweitung der Leiter und keine Änderung der Blockgröße „weil es gut lief".
 
-**Plans:** 1/10 plans executed
+**Plans:** 2/10 plans executed
 
 Plans:
 **Wave 1**
 
 - [x] 06-01-PLAN.md — Ledger: execId-Korrekturregel, signierte Fills (WR-07), `fill_records`, `alarm` (Welle 1)
-- [ ] 06-02-PLAN.md — Jev-Abgleich über `summary.json`, State `rating-jev` (D-05/D-06) (Welle 1)
+- [x] 06-02-PLAN.md — Jev-Abgleich über `summary.json`, State `rating-jev` (D-05/D-06) (Welle 1)
 - [ ] 06-03-PLAN.md — Socket-Sperre mit Order-Permit, `place_order` mit Fill-Warten, Fake (Welle 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
