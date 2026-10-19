@@ -433,6 +433,7 @@ texts: the order state of the client library has no reject-reason field.
 |---|---|---|
 | `skipped-hold` | 2 | the decision is Hold; nothing to do (D-16) |
 | `rating-review` | 2 | the rating needs a human look |
+| `rating-jev` | 2 | the rating came from the Jev fallback (summary.json `rating_source: jev`) or the source is unknown; not traded, ledger reason `review` (phase 6, D-05/D-06) |
 | `run-not-ok` | 2 | the run behind the decision did not finish ok |
 | `signal-null` | 2 | the run produced no signal |
 | `signal-divergence` | 2 | log entry and summary disagree on the signal |
@@ -465,6 +466,8 @@ texts: the order state of the client library has no reject-reason field.
 
 Source: `EXIT_BY_STATE` in `scripts/ibkr_decision.py`; a test keeps the table in
 step with it.
+
+A run without the field `rating_source` counts as an engine rating: the paper run writes the field only when the Jev fallback was active. A missing or unreadable summary.json is never traded (`summary-missing`, `summary-schema`, `summary-contract`).
 
 ### Block size
 
