@@ -1163,17 +1163,13 @@ class LivePlacer:
 
     Outcomes: clean fill, fill timeout / link event / parked (alarm, order stays open, run
     stops), rejection confirmed at the broker (key closed; an unconfirmed one is a fill
-    timeout), partial fill (deviation path).
+    timeout), partial fill (deviation path), unexpected failure after the send (fill timeout).
     """
 
     dry = False
 
     def complete(self, ctx, intent: dict) -> str:
-        guards = ctx.mods.guards
-        ledger_mod = ctx.mods.ledger
         placing = ctx.placing
-        key = intent["decision_key"]
-        ticker = intent["ticker"]
         # A GatewayUnavailable or ValueError is not caught here: the intent stays open, the
         # run ends on the existing error path and the next run reconciles it.
         result = placing.broker.place_order(
@@ -1187,6 +1183,21 @@ class LivePlacer:
             order_ref=intent["order_ref"],
             timeout_s=FILL_TIMEOUT_S,
         )
+        # From here on the order is out. No failure may end the run as a plain gateway error
+        # (exit 3) without an alarm: anything unexpected becomes a fill-timeout (WR-01).
+        try:
+            return self._after_send(ctx, intent, result)
+        except _ExecuteStop:
+            raise
+        except Exception as exc:  # noqa: BLE001 - every failure after the send is an alarm
+            raise self._post_send_failure(ctx, intent, result, exc) from exc
+
+    def _after_send(self, ctx, intent: dict, result) -> str:
+        """Everything after ``place_order`` returned: ``placed`` first, then the outcome."""
+        guards = ctx.mods.guards
+        ledger_mod = ctx.mods.ledger
+        key = intent["decision_key"]
+        ticker = intent["ticker"]
         ctx.ledger.append(
             ledger_mod.PLACED,
             decision_key=key,
@@ -1303,6 +1314,48 @@ class LivePlacer:
             "open, nothing was cancelled - the next run reconciles"
         )
         raise _ExecuteStop(EXIT_FILL_TIMEOUT, guards.FILL_TIMEOUT, detail)
+
+    @staticmethod
+    def _post_send_failure(ctx, intent: dict, result, exc: Exception) -> _ExecuteStop:
+        """An unexpected failure after the send (WR-01): alarm best-effort, stop with exit 9.
+
+        The order is out and its outcome unknown, so it is treated like a fill timeout: the
+        entry stays open, nothing is cancelled, the next run reconciles. Returns the stop for
+        the caller to raise; a failing alarm write is logged and does not change the exit.
+        """
+        guards = ctx.mods.guards
+        detail = f"post-send failure ({type(exc).__name__}): {exc}"
+        try:
+            ctx.ledger.append(
+                ctx.mods.ledger.ALARM,
+                state=guards.FILL_TIMEOUT,
+                decision_key=intent["decision_key"],
+                ticker=intent["ticker"],
+                detail=detail,
+                order_id=result.order_id,
+                perm_id=result.perm_id,
+                status=result.status,
+                filled=result.filled,
+            )
+        except Exception as alarm_exc:  # noqa: BLE001 - the stop must happen regardless
+            ctx.logger.error(
+                'ibkr-state=FILL_TIMEOUT ticker=%s key=%s detail="alarm not written (%s: %s)"',
+                intent["ticker"],
+                intent["decision_key"],
+                type(alarm_exc).__name__,
+                alarm_exc,
+            )
+        ctx.logger.error(
+            'ibkr-state=FILL_TIMEOUT ticker=%s key=%s detail="%s"',
+            intent["ticker"],
+            intent["decision_key"],
+            detail,
+        )
+        print(
+            f"execute: {guards.FILL_TIMEOUT} ({intent['ticker']}: {detail}); the order was "
+            "sent, nothing was cancelled - the next run reconciles"
+        )
+        return _ExecuteStop(EXIT_FILL_TIMEOUT, guards.FILL_TIMEOUT, detail)
 
     @staticmethod
     def _matches(record, intent: dict, result) -> bool:

@@ -641,8 +641,10 @@ and the exit code say:
   next ticker.
 - `fill-timeout` (exit 9): no fill within 60 s, a link event during the wait, 399
   ("parked"), a rejection the broker did not confirm (`rejection not confirmed by the
-  broker`, also when the history cannot be read). An `alarm` is written, the `placed`
-  entry stays open and the run stops; no further ticker is sent.
+  broker`, also when the history cannot be read), or an unexpected failure after the
+  order was sent (`post-send failure (<exception type>)`). An `alarm` is written (for a
+  post-send failure best-effort; the exit is 9 even if the alarm write fails), the
+  `placed` entry stays open and the run stops; no further ticker is sent.
 - `post-order-mismatch` (exit 10): the broker shows something other than the `intent`,
   also a partial fill that was cancelled afterwards (the fills that are certain are
   written first, as `partial`). The run stops.
@@ -772,7 +774,7 @@ collision or contradiction stays exit 6 in both ledgers.
 | `size-cap` | 5 | planned quantity above `MAX_QTY_PER_ORDER`; rejected, never trimmed |
 | `ledger-corrupt` | 6 | the ledger has a defect that is not a torn tail |
 | `reconcile-unresolved` | 6 | an open ledger entry cannot be resolved against the broker |
-| `fill-timeout` | 9 | no fill within the wait (also after a `ValidationError` warning), or a rejection the broker did not confirm; the order stays open, nothing is cancelled; the next run reconciles |
+| `fill-timeout` | 9 | no fill within the wait (also after a `ValidationError` warning), a rejection the broker did not confirm, or a failure after the send; the order stays open, nothing is cancelled; the next run reconciles |
 | `post-order-mismatch` | 10 | the state at IBKR after the order differs from the intent; the run stops, the next run reconciles |
 | `lock-error` | 7 | the lock attempt itself failed |
 | `lock-held` | 7 | another run holds the lock |

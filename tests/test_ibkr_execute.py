@@ -2923,6 +2923,53 @@ class TestLiveOutcomes:
         assert "rejection not confirmed by the broker" in alarm["detail"]
         assert "order history unreadable" in alarm["detail"]
 
+    def test_live_failure_after_the_send_is_an_alarm_and_exit_9(self, tmp_path, loop, capsys):
+        # WR-01: the order filled, but the read-back fails; never a silent exit 3.
+        fake = _filling_fake(("AAPL", "MSFT"))
+        _on_send(fake, lambda: setattr(fake, "open_orders", "hang"))
+        code, records = _live_run(
+            tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
+        )
+        assert code == executor.EXIT_FILL_TIMEOUT
+        assert code != executor.EXIT_GATEWAY
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "fill-timeout"
+        assert alarm["detail"].startswith("post-send failure (GatewayUnavailable)")
+        assert alarm["status"] == "Filled"
+        assert _chain(records)[-2:] == ["placed", "alarm"]
+        assert records[-1]["event"] == "run_end"
+        assert records[-1]["state"] == "fill-timeout"
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
+        assert "cancelOrder" not in fake.calls and "reqGlobalCancel" not in fake.calls
+        assert "the order was sent, nothing was cancelled" in capsys.readouterr().out
+
+    def test_live_placed_write_failure_is_exit_9(self, tmp_path, loop, monkeypatch):
+        """WR-01: a failing ``placed`` write still ends with exit 9, the alarm best-effort."""
+
+        def fails(data):
+            return b'"event":"placed"' in data
+
+        monkeypatch.setattr(ledger_mod, "open", _half_writing_open(fails), raising=False)
+        fake = _filling_fake()
+        code, _records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        assert len(fake.placed_orders) == 1
+        assert "post-send failure (OSError)" in _log_text(tmp_path)
+
+    def test_live_failing_alarm_write_after_the_send_still_exits_9(
+        self, tmp_path, loop, monkeypatch
+    ):
+        def fails(data):
+            return b'"event":"placed"' in data or b'"event":"alarm"' in data
+
+        monkeypatch.setattr(ledger_mod, "open", _half_writing_open(fails), raising=False)
+        fake = _filling_fake()
+        code, _records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        text = _log_text(tmp_path)
+        assert "alarm not written (OSError" in text
+        assert "post-send failure (OSError)" in text
+
     def test_live_parked_399_is_a_fill_timeout_not_a_rejection(self, tmp_path, loop):
         fake = _fake_for(
             place_outcome="ValidationError", place_errors=[(399, "Order parked until open")]
