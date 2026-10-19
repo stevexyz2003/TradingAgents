@@ -67,3 +67,13 @@ One row per ticker run. Written by `scripts/daily_paper_run.py`.
 | 2026-10-16 | AVGO | Hold | ok | 0.2324 | 145859/45995 | runs/2026-10-16/summary.json |
 | 2026-10-16 | AMD | Hold | ok | 0.2151 | 148136/39700 | runs/2026-10-16/summary.json |
 | 2026-10-16 | JPM | Hold | ok | 0.2395 | 163153/44362 | runs/2026-10-16/summary.json |
+| 2026-10-16 | LLY | Hold | ok | 0.2153 | 141753/39572 | runs/2026-10-16/summary.json |
+| 2026-10-16 | UNH | Hold | ok | 0.2343 | 148727/46628 | runs/2026-10-16/summary.json |
+| 2026-10-16 | XOM | Hold | ok | 0.1926 | 123742/35002 | runs/2026-10-16/summary.json |
+| 2026-10-16 | COST | Hold | ok | 0.2184 | 148169/38527 | runs/2026-10-16/summary.json |
+| 2026-10-16 | WMT | Hold | ok | 0.2179 | 149670/38972 | runs/2026-10-16/summary.json |
+| 2026-10-16 | KO | Hold | ok | 0.2388 | 151574/38262 | runs/2026-10-16/summary.json |
+| 2026-10-16 | CAT | Hold | ok | 0.2219 | 145597/40291 | runs/2026-10-16/summary.json |
+| 2026-10-16 | V | Hold | ok | 0.2029 | 145207/35770 | runs/2026-10-16/summary.json |
+| 2026-10-16 | NFLX | Underweight | ok | 0.2054 | 140315/37311 | runs/2026-10-16/summary.json |
+| 2026-10-16 | ORCL | Underweight | ok | 0.2108 | 158375/36718 | runs/2026-10-16/summary.json |
