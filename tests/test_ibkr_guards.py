@@ -502,3 +502,40 @@ def test_source_conflict_executed_ledger_attempted_broker_silent():
 @pytest.mark.parametrize("value", [True, False])
 def test_source_conflict_executed_agreeing_sources_are_clean(value):
     assert g.executed_conflict(ledger_attempted=value, history_has_ref=value) is None
+
+
+def _signed_ledger(tmp_path):
+    from datetime import UTC, datetime
+
+    spec = importlib.util.spec_from_file_location(
+        "ibkr_ledger_for_guards", _SCRIPTS / "ibkr_ledger.py"
+    )
+    led = importlib.util.module_from_spec(spec)
+    sys.modules["ibkr_ledger_for_guards"] = led
+    spec.loader.exec_module(led)
+    ledger = led.Ledger.open(
+        tmp_path / "l.jsonl",
+        mode="live",
+        clock=lambda: datetime(2026, 10, 16, 17, 21, tzinfo=UTC),
+        run_id="r1",
+    )
+    ledger.append("filled", decision_key="B", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.01")
+    ledger.append(
+        "filled", decision_key="S", con_id=1, side="SELL", filled_qty=2, exec_id="B.01.01"
+    )
+    return ledger
+
+
+def test_signed_buy_then_sell_is_no_source_conflict(tmp_path):
+    """WR-07: bought 2, sold 2, broker holds 0 -> no permanent source-conflict."""
+    ledger = _signed_ledger(tmp_path)
+    held = ledger.filled_quantity(1)
+    assert held == 0
+    assert g.position_conflict(ledger_filled_qty=held, broker_held=0) is None
+
+
+def test_signed_negative_control_unsigned_sum_reports_a_conflict(tmp_path):
+    ledger = _signed_ledger(tmp_path)
+    unsigned = sum(float(r["filled_qty"]) for r in ledger.records if r["event"] == "filled")
+    assert unsigned == 4
+    assert g.position_conflict(ledger_filled_qty=unsigned, broker_held=0)

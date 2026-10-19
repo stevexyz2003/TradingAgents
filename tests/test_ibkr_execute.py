@@ -2016,6 +2016,46 @@ class TestReconcile:
         assert resolved["seq"] < new_intents[0]["seq"]
         assert not executor.default_ledger_file().exists()
 
+    def test_reconcile_correction_writes_one_fill_row_for_the_corrected_execution(
+        self, tmp_path, loop
+    ):
+        """REQ-47: execId .01.01 then its correction .01.02 (2 pieces each) is one fill of 2."""
+        _prepare_ledger(_prepared_intent())
+        fake = _fake_for(
+            ("MSFT",),
+            executions=[
+                ibkr_fakes.fill(_CON, PREV_KEY, 2, exec_id="0000e0d5.6710a3c5.01.01"),
+                ibkr_fakes.fill(_CON, PREV_KEY, 2, exec_id="0000e0d5.6710a3c5.01.02"),
+            ],
+        )
+        code, records = _msft_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        (filled,) = [
+            r for r in records if r["event"] == "filled" and r.get("source") == "reconcile"
+        ]
+        assert filled["exec_id"] == "0000e0d5.6710a3c5.01.02"
+        assert filled["side"] == "BUY" and filled["filled_qty"] == 2.0
+        assert not [r for r in records if r["event"] == "partial"]
+
+    def test_reconcile_correction_aggregate_row_carries_the_side(self, tmp_path, loop):
+        """Only a completed order, no executions: one aggregate fill row with ``side``."""
+        _prepare_ledger(_prepared_intent())
+        fake = _fake_for(
+            ("MSFT",),
+            completed_orders=[
+                ibkr_fakes.completed_trade(
+                    _CON, "Filled", order_ref=PREV_KEY, quantity=2, filled=2.0
+                )
+            ],
+        )
+        code, records = _msft_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        (filled,) = [
+            r for r in records if r["event"] == "filled" and r.get("source") == "reconcile"
+        ]
+        assert "exec_id" not in filled
+        assert filled["side"] == "BUY" and filled["filled_qty"] == 2.0
+
     def test_g3_reconcile_unresolved_stays_unresolved_on_the_next_run(self, tmp_path, loop):
         """Blocker REQ-43: a reconcile line does not close an entry; every run stops again."""
         _prepare_ledger(_prepared_intent())
@@ -2168,7 +2208,13 @@ class TestSourceConflict:
 
     def test_source_conflict_position_only_that_ticker(self, tmp_path, loop):
         """D-18: the ledger holds own fills the broker does not show."""
-        filled = {"decision_key": PREV_KEY, "ticker": "AAPL", "con_id": _CON, "filled_qty": 2}
+        filled = {
+            "decision_key": PREV_KEY,
+            "ticker": "AAPL",
+            "con_id": _CON,
+            "side": "BUY",
+            "filled_qty": 2,
+        }
         _prepare_ledger((ledger_mod.FILLED, filled))
         fake = _fake_for(("AAPL", "MSFT"), positions=[_aapl_position(1)])
         code, records = _two_ticker_run(tmp_path, loop, fake)
@@ -2237,7 +2283,13 @@ class TestSourceConflict:
     def test_source_conflict_negative_control_position_check_removed(
         self, tmp_path, loop, monkeypatch
     ):
-        filled = {"decision_key": PREV_KEY, "ticker": "AAPL", "con_id": _CON, "filled_qty": 2}
+        filled = {
+            "decision_key": PREV_KEY,
+            "ticker": "AAPL",
+            "con_id": _CON,
+            "side": "BUY",
+            "filled_qty": 2,
+        }
         _prepare_ledger((ledger_mod.FILLED, filled))
         monkeypatch.setattr(guards, "position_conflict", lambda **kwargs: None)
         fake = _fake_for(("AAPL", "MSFT"), positions=[_aapl_position(1)])

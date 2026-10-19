@@ -593,8 +593,7 @@ def fill_records(
                     "ticker": entry.get("ticker"),
                     "con_id": entry["con_id"],
                     "side": entry["side"],
-                    "order_ref": getattr(execution, "order_ref", None)
-                    or entry.get("order_ref"),
+                    "order_ref": getattr(execution, "order_ref", None) or entry.get("order_ref"),
                     "exec_id": execution.exec_id,
                     "filled_qty": float(execution.shares),
                     "price": getattr(execution, "price", None),

@@ -811,15 +811,21 @@ def test_ledger_tables_know_rating_jev_and_place_rejected():
 def test_signed_filled_quantity_buy_then_sell_nets_to_zero(tmp_path):
     ledger = _open(tmp_path / "l.jsonl", mode="live")
     ledger.append("filled", decision_key="B", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.01")
-    ledger.append("filled", decision_key="S", con_id=1, side="SELL", filled_qty=2, exec_id="B.01.01")
+    ledger.append(
+        "filled", decision_key="S", con_id=1, side="SELL", filled_qty=2, exec_id="B.01.01"
+    )
     assert ledger.filled_quantity(1) == 0.0
-    unsigned = sum(float(r.get("filled_qty") or 0) for r in ledger.records if r["event"] == "filled")
+    unsigned = sum(
+        float(r.get("filled_qty") or 0) for r in ledger.records if r["event"] == "filled"
+    )
     assert unsigned == 4.0  # negative control: the old unsigned sum
 
 
 def test_signed_filled_quantity_counts_a_correction_once(tmp_path):
     ledger = _open(tmp_path / "l.jsonl", mode="live")
-    ledger.append("partial", decision_key="K", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.01")
+    ledger.append(
+        "partial", decision_key="K", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.01"
+    )
     ledger.append("filled", decision_key="K", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.02")
     assert ledger.filled_quantity(1) == 2.0
 

@@ -617,8 +617,7 @@ def run_resolve(
             return _fail(
                 logger,
                 EXIT_CONFIG,
-                f"ibkr-state=CONTRACTS_INVALID {contracts_path}: unreadable "
-                f"({type(exc).__name__})",
+                f"ibkr-state=CONTRACTS_INVALID {contracts_path}: unreadable ({type(exc).__name__})",
                 f"contracts file: {contracts_path}: unreadable ({type(exc).__name__})",
             )
         except contracts_mod.ContractsFileError as exc:
@@ -1480,10 +1479,14 @@ def _history(ctx):
     return ctx.history
 
 
-def _fill_quantity(entry: dict, history) -> float:
-    """Filled pieces of an entry: the executions first, else what the completed order reports."""
+def _fill_quantity(entry: dict, history, ledger_mod) -> float:
+    """Filled pieces of an entry: the executions first, else what the completed order reports.
+
+    Executions count once per execId family (a ``.02`` correction replaces ``.01``, REQ-47).
+    """
     key = entry.get("order_ref") or entry["decision_key"]
-    shares = sum(float(e.shares) for e in history.executions if e.order_ref == key)
+    mine = [e for e in history.executions if e.order_ref == key]
+    shares = sum(float(e.shares) for e in ledger_mod.effective_executions(mine))
     if shares:
         return shares
     return sum(
@@ -1527,15 +1530,30 @@ def _reconcile(ctx) -> None:
             if last is not None and last["event"] == ledger_mod.INTENT:
                 ctx.ledger.append(ledger_mod.PLACED, **follow)
         elif res.outcome in (ledger_mod.FILLED_OUT, ledger_mod.PARTIAL_OUT):
-            full = res.outcome == ledger_mod.FILLED_OUT
-            event = ledger_mod.FILLED if full else ledger_mod.PARTIAL
-            ctx.ledger.append(
-                event,
-                con_id=entry["con_id"],
-                filled_qty=_fill_quantity(entry, history),
-                detail=res.detail,
-                **follow,
-            )
+            key_ref = entry.get("order_ref") or key
+            mine = [e for e in history.executions if e.order_ref == key_ref]
+            if mine:
+                # One fill row per effective execId, the same helper the live placer uses (D-10).
+                known = {
+                    r["exec_id"]
+                    for r in ctx.ledger.records
+                    if r["event"] in (ledger_mod.FILLED, ledger_mod.PARTIAL)
+                    and r.get("decision_key") == key
+                    and r.get("exec_id")
+                }
+                for event, fields in ledger_mod.fill_records(entry, mine, known_exec_ids=known):
+                    ctx.ledger.append(event, source="reconcile", detail=res.detail, **fields)
+            else:
+                full = res.outcome == ledger_mod.FILLED_OUT
+                event = ledger_mod.FILLED if full else ledger_mod.PARTIAL
+                ctx.ledger.append(
+                    event,
+                    con_id=entry["con_id"],
+                    side=entry["side"],
+                    filled_qty=_fill_quantity(entry, history, ledger_mod),
+                    detail=res.detail,
+                    **follow,
+                )
         elif res.outcome == ledger_mod.NOT_FILLED:
             ctx.ledger.append(ledger_mod.REJECTED, state="not-filled", detail=res.detail, **follow)
         elif res.outcome == ledger_mod.NEVER_SENT:
@@ -1547,7 +1565,7 @@ def _reconcile(ctx) -> None:
         else:
             unresolved.append((key, res.outcome))
             ctx.logger.warning(
-                'ibkr-state=RECONCILE_UNRESOLVED key=%s outcome=%s open=%d completed=%d '
+                "ibkr-state=RECONCILE_UNRESOLVED key=%s outcome=%s open=%d completed=%d "
                 'executions=%d detail="%s"',
                 key,
                 res.outcome,
@@ -1722,12 +1740,12 @@ def _finish_run(ctx, rows: dict) -> int:
     decision_mod = ctx.mods.decision
     # A phase-3 rejection counts as exit 2, like every other precondition.
     states = [
-        row["state"] if row["state"] in decision_mod.EXIT_BY_STATE else decision_mod.NOT_RESOLVED_YET
+        row["state"]
+        if row["state"] in decision_mod.EXIT_BY_STATE
+        else decision_mod.NOT_RESOLVED_YET
         for row in rows.values()
     ]
-    payload = _preview_payload(
-        None, rows.values(), ctx.sha, ctx.remote, ctx.branch, ctx.now_utc
-    )
+    payload = _preview_payload(None, rows.values(), ctx.sha, ctx.remote, ctx.branch, ctx.now_utc)
     _write_preview(ctx.out, payload, ctx.mods.contracts, ctx.logger)
     return decision_mod.worst_exit(states)
 
