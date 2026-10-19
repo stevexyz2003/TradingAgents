@@ -316,7 +316,7 @@ Plans:
 - Kein zweiter oder dritter Ticker zwingend — ein Durchstich genügt, die Mechanik ist tickerunabhängig.
 - Keine Ausweitung der Leiter und keine Änderung der Blockgröße „weil es gut lief".
 
-**Plans:** 7/10 plans executed
+**Plans:** 8/10 plans executed
 
 Plans:
 **Wave 1**
@@ -340,7 +340,7 @@ Plans:
 **Wave 5** *(blocked on Wave 4 completion)*
 
 - [x] 06-07-PLAN.md — `execute --resolve KEY=never_sent --note` (D-14) (Welle 5)
-- [ ] 06-08-PLAN.md — Reihenfolgetest REQ-45 und Negativ-Kontrollen im `--live`-Pfad (D-12, D-15) (Welle 5)
+- [x] 06-08-PLAN.md — Reihenfolgetest REQ-45 und Negativ-Kontrollen im `--live`-Pfad (D-12, D-15) (Welle 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
