@@ -316,7 +316,7 @@ Plans:
 - Kein zweiter oder dritter Ticker zwingend — ein Durchstich genügt, die Mechanik ist tickerunabhängig.
 - Keine Ausweitung der Leiter und keine Änderung der Blockgröße „weil es gut lief".
 
-**Plans:** 3/10 plans executed
+**Plans:** 4/10 plans executed
 
 Plans:
 **Wave 1**
@@ -327,7 +327,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-04-PLAN.md — Neue Zustände/Exits 9 und 10, Frische-Neuprüfung vor `intent`, `rating_source` im Ledger (Welle 2)
+- [x] 06-04-PLAN.md — Neue Zustände/Exits 9 und 10, Frische-Neuprüfung vor `intent`, `rating_source` im Ledger (Welle 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
