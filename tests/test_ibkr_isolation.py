@@ -400,6 +400,9 @@ def test_handbook_documents_execute():
         "weekend_gap",
         "reconcile-unresolved",
         "ibkr_order_probe.py",
+        "--live",
+        "post-order-mismatch",
+        "alarm",
     ):
         assert needle in text, needle
 

@@ -53,6 +53,12 @@ is the setting *Configure → Settings → API → Settings → "Allow connectio
 from localhost only"*: the operator checked it on 2026-10-12 and it was already
 set. Keep the *Trusted IPs* list empty or at `127.0.0.1`.
 
+After the first live order (phase 6, D-04): the switch stays off after the
+release. What protects `execute --live` is `RELEASE` and `KILL`, not this switch.
+Whoever turns it on again does so on purpose and writes date and reason into the
+table above. With the switch on, `execute --live` ends at the preview with
+`preview-read-only` (exit 5) and never at the send (D-15).
+
 Phase 4 measurement (D-14, 2026-10-12, gateway 10.50.1, `ibkr-konto-befund.md`,
 section "whatIf-Vorschau und Read-Only-Schalter"): with the switch **off** the
 `whatIf` preview answers in 0.79 s with margin and commission; with the switch
@@ -548,14 +554,19 @@ What the switch does:
 ## execute
 
 ```
-ibkr_executor.py execute AAPL [MSFT ...] [--contracts PATH] [--log-file PATH] [--env-file PATH]
+ibkr_executor.py execute AAPL [MSFT ...] [--live] [--contracts PATH] [--log-file PATH] [--env-file PATH]
 ```
 
-At least one ticker is required (no default list). In phase 5 the run is forced
-dry: no option lifts that (phase 6 removes only the force). It goes through the
-whole chain, writes every decision that survives as an `intent` and completes it
-with `dry_complete`; no order leaves the process. Exit 0 with a `dry_complete`
-means "this order would have been sent".
+At least one ticker is required (no default list). Without `--live` the run is
+dry: it goes through the whole chain, writes every decision that survives as an
+`intent` into `ledger-dryrun.jsonl` and completes it with `dry_complete`; no order
+leaves the process. Exit 0 with a `dry_complete` means "this order would have been
+sent". With `--live` (D-01, per run, there is no global switch) the live placer
+sends one real market order per ticker to the paper account `DUQ634065` and the run
+writes `ledger.jsonl`. `--live` needs a valid `RELEASE` (without one: exit 4, no
+order) and `KILL` wins even with `--live`. Placer and mode must agree, checked
+before any file is touched: without `--live` a placer that is not dry ends the run
+as `not-dry`, with `--live` a dry placer ends it as `not-live` (both exit 1).
 
 Order of the chain, per run and per ticker:
 
@@ -572,8 +583,17 @@ Order of the chain, per run and per ticker:
 9. size cap
 10. session window
 11. switch check, whatIf with `orderRef`, switch check
-12. second size check, then `intent` (write-ahead, flushed to disk), then the dry
-    completion; nothing after the `intent` can refuse the order
+12. second size check, then `intent` (write-ahead, flushed to disk), then the
+    placer; nothing after the `intent` can refuse the order. The dry placer writes
+    `dry_complete`. The live placer, one market order per ticker:
+    1. sends the order and writes `placed` (`order_id`, `perm_id`)
+    2. waits up to 60 s for the fill (timeout and rejection: plan 06-06)
+    3. reads the completed order and the executions at the broker (a few reads,
+       the three broker sources are not read atomically)
+    4. compares them with the `intent`: status, quantity, side, `orderRef`, `conId`
+    5. writes the fills, one line per `exec_id`, into the same run
+    Any deviation writes an `alarm` (`post-order-mismatch`, with `expected` and
+    `seen`) and stops the whole run with exit 10: the remaining tickers are not sent.
 
 Console and log lines start with `execute:` and `ibkr-state=EXECUTE...`. The
 ledger is the record of the run; the log is the narrative.
@@ -604,13 +624,15 @@ whole run (exit 8), the others stop only that ticker.
 ## Ledger and reconciliation
 
 Files in the state folder: `ledger-dryrun.jsonl` (what phase 5 writes),
-`ledger.jsonl` (from phase 6; a dry run never touches it) and
+`ledger.jsonl` (written by `execute --live`; a dry run never touches it) and
 `ledger.jsonl.lock` (the run lock, always this name, also in dry mode).
 
 The ledger is JSONL, one line per event, appended and never rewritten. Events:
 `run_start`, `switch_check`, `reconcile`, `intent`, `dry_complete`, `placed`,
 `filled`, `partial`, `rejected`, `skipped` (always with a `reason`), `kill_cancel`,
-`run_end`. An attempt is the `intent`: per decision key (`trade_date|ticker`) there
+`alarm` (no lifecycle event: it leaves the entry open), `run_end`. A fill line (`filled` or `partial`) exists per `exec_id` and carries the
+`side`; a correction (`.02`) replaces its `.01`, and the position is the signed sum
+(BUY plus, SELL minus) of the effective fills. An attempt is the `intent`: per decision key (`trade_date|ticker`) there
 is at most one, and the first version wins. A second run of the same key is
 `already_attempted`; if the rating changed since, it is `decision_changed`. A
 `skipped` before the intent does not use the key up.
@@ -674,7 +696,7 @@ collision or contradiction stays exit 6 in both ledgers.
 | `dry-complete` | 0 | the dry run reached its end for this ticker; nothing was sent |
 | `kill-absent` | 0 | no KILL file |
 | `release-ok` | 0 | the release file is valid |
-| `not-dry` | 1 | the placer is not dry; phase 5 refuses to run |
+| `not-dry` | 1 | `--live` is absent but the placer is not dry |
 | `not-live` | 1 | `--live` given but the placer is dry |
 | `state-in-git-tree` | 1 | a state path lies inside a git work tree; refused |
 | `already-attempted` | 2 | the decision key has an `intent` already |
@@ -707,6 +729,9 @@ step with it. The run exit is the worst of these by the rank under "Exit codes".
 ```
 :: dry run: decision from paper-log to a whatIf preview, sends nothing
 python scripts/ibkr_executor.py preview AAPL
+
+:: one real market order on the paper account (needs a valid RELEASE); without --live the run is dry
+python scripts/ibkr_executor.py execute AAPL --live
 
 :: first build of contracts.json, anchor AAPL (Windows cmd)
 python scripts/ibkr_executor.py resolve --init AAPL MSFT NVDA
