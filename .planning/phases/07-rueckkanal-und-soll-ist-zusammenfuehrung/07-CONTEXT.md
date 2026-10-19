@@ -100,6 +100,27 @@ damit sie gegen das endgültige Ledger-Format baut.
 - **D-16:** Fehlende Kursinformation: **Zelle leer, Fußnote mit Grund**. Der Bericht
   scheitert nie an der Kursquelle, und es wird nichts geschätzt (S-08 / REQ-IBKR-68).
 
+### Nach der Recherche (2026-10-19, Operator bzw. Claude nach Empfehlung)
+- **D-17 (Operator):** Das Fork-Repo ist öffentlich; Ledger und `portfolio.json` werden
+  **unverändert veröffentlicht** (Kontonummer `DUQ634065`, Preise, permIds, Cash,
+  Positionen). Begründung: Paper-Konto ohne echtes Geld, Kontonummer ohne Login nutzlos.
+  Keine Maskierung.
+- **D-18 (Operator):** Akzeptiert: Ein gültiges Portfolio schaltet in CI die Jev-Prüfung
+  ab (`tradingagents/jev/hooks.py:112-113`), und die archivierten Reports auf `paper-log`
+  tragen dann Cash und Positionen. Das wird im Handbuch vermerkt; keine Änderung an
+  `jev/hooks.py` oder an den Reports.
+- **D-19:** `publish` **kopiert nur** und braucht kein Gateway; `portfolio.json` entsteht
+  weiter durch `account`. Betriebsablauf: `execute` → `account` → `publish`
+  (Handbuch; Phase 8 hängt das an den Zeitplan).
+- **D-20:** Der Ledger wird in Phase 7 **nicht** um `held`/`target` erweitert. Der Bericht
+  leitet Ziel/Ist aus dem `intent` ab; ohne `intent` bleibt die Zelle leer mit Fußnote.
+- **D-21:** `publish`-Fehler bekommen einen **eigenen Exit-Code `EXIT_PUBLISH = 11`**;
+  Exit-Tabelle in Handbuch und Isolationstests wird mitgezogen.
+- **D-22:** Der Isolationstest verbietet „IBKR“ in Workflow-Dateien
+  (`tests/test_ibkr_isolation.py:82-88`). Branchname und Lesen von `ibkr-log` liegen
+  deshalb in `scripts/daily_paper_run.py`; der Workflow bekommt nur ein neutrales Flag
+  (z. B. `--portfolio-from-published`) und den Pip-Schritt für den Börsenkalender.
+
 ### Claude's Discretion
 - Backup (REQ-51, SC4): wie `state_maintenance.py backup` Ledger (`ledger.jsonl`, auch
   `ledger-dryrun.jsonl`?) und `contracts.json`/`contracts-history.jsonl` aufnimmt —
