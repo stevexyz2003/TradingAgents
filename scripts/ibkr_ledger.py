@@ -45,6 +45,11 @@ RUN_END = "run_end"
 #: Run alarm after the order (D-08 fill timeout, D-09 mismatch): no lifecycle event, the
 #: entry stays open for the reconciliation of the next run.
 ALARM = "alarm"
+#: Closes an open live entry by hand (D-14, phase-5 D-19); never changes a line; the key
+#: stays used up (``attempt_of`` still finds the intent).
+RESOLVED = "resolved"
+NEVER_SENT = "never_sent"
+RESOLVE_OUTCOMES = frozenset({NEVER_SENT})
 
 EVENTS = frozenset(
     {
@@ -61,11 +66,12 @@ EVENTS = frozenset(
         KILL_CANCEL,
         RUN_END,
         ALARM,
+        RESOLVED,
     }
 )
 #: Only these events move the state of a decision key; reconcile, switch_check, skipped
 #: and the run events never do, so an unresolvable intent stays open in every later run.
-LIFECYCLE_EVENTS = frozenset({INTENT, PLACED, FILLED, PARTIAL, REJECTED, DRY_COMPLETE})
+LIFECYCLE_EVENTS = frozenset({INTENT, PLACED, FILLED, PARTIAL, REJECTED, DRY_COMPLETE, RESOLVED})
 OPEN_EVENTS = frozenset({INTENT, PLACED})
 
 # --- reasons for a skipped ticker (REQ-42) ---------------------------------------------------
@@ -235,6 +241,13 @@ def _schema_problem(record: dict) -> str | None:
             return f"is an intent with order_ref {order_ref!r}"
     if event == ALARM and not _is_text(record.get("state")):
         return f"is an alarm with state {record.get('state')!r}"
+    if event == RESOLVED:
+        if not _is_text(record.get("decision_key")):
+            return "is a resolved without a decision_key"
+        if record.get("outcome") not in RESOLVE_OUTCOMES:
+            return f"is a resolved with outcome {record.get('outcome')!r}"
+        if not _is_text(record.get("note")):
+            return f"is a resolved with note {record.get('note')!r}, expected text"
     if event in (FILLED, PARTIAL):
         if record.get("side") not in SIDES:
             return f"has side {record.get('side')!r}, expected BUY or SELL"
@@ -365,7 +378,7 @@ class Ledger:
             "event": event,
             **fields,
         }
-        if event in (FILLED, PARTIAL, ALARM):
+        if event in (FILLED, PARTIAL, ALARM, RESOLVED):
             # Refuse a fill or alarm line the next open would reject, before it is written.
             problem = _schema_problem(record)
             if problem:

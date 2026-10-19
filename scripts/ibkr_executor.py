@@ -45,6 +45,8 @@ Operating manual: ``scripts/IBKR_EXECUTION.md``.
                              [--env-file PATH]
     ibkr_executor.py execute TICKER... [--live] [--contracts PATH] [--log-file PATH]
                              [--env-file PATH]
+    ibkr_executor.py execute --resolve KEY=never_sent --note TEXT [--log-file PATH]
+                             [--env-file PATH]
 
 Settings come from the ``.env`` at the repository root (a fixed path, not the
 current directory) or from ``--env-file``. Only IBKR_HOST, IBKR_PORT,
@@ -810,10 +812,51 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="send real orders to the paper account (needs a valid RELEASE); without it the run is dry",
     )
+    execute.add_argument(
+        "--resolve",
+        metavar="KEY=OUTCOME",
+        default=None,
+        help=(
+            "close an open live intent without a broker trace: KEY=never_sent (needs --note); "
+            "takes no TICKER and no --live"
+        ),
+    )
+    execute.add_argument("--note", metavar="TEXT", default=None, help="reason for --resolve")
     execute.add_argument("--contracts", type=Path, default=None, help="contracts.json path")
     execute.add_argument("--log-file", type=Path, default=default_log_file())
     execute.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     return parser
+
+
+NOTE_MAX = 500
+
+
+def _split_resolve(value: str) -> tuple[str, str]:
+    """``KEY=OUTCOME`` split at the last ``=`` (the key itself never contains one)."""
+    key, _, outcome = value.rpartition("=")
+    return key, outcome
+
+
+def _resolve_args_problem(args) -> str | None:
+    """Why the ``--resolve`` arguments are unusable (exit 1), or None (D-14, T-06-37)."""
+    if args.tickers or args.live:
+        return "--resolve takes no TICKER and no --live"
+    key, outcome = _split_resolve(args.resolve)
+    if outcome != "never_sent":
+        return f"--resolve needs KEY=never_sent, got outcome {outcome!r}"
+    note = args.note
+    if note is None or not note.strip():
+        return "--resolve needs --note TEXT (why the order was never sent)"
+    if len(note) > NOTE_MAX or not note.isprintable():
+        return f"--note must be printable text of at most {NOTE_MAX} characters"
+    guards = load_guards_module()
+    trade_date, sep, ticker = key.partition(guards.DECISION_KEY_SEPARATOR)
+    try:
+        if not sep or guards.decision_key(trade_date, ticker) != key:
+            raise ValueError(key)
+    except ValueError:
+        return f"--resolve key {key!r} is not <trade date>{guards.DECISION_KEY_SEPARATOR}<ticker>"
+    return None
 
 
 def main(
@@ -847,7 +890,15 @@ def main(
         parser.print_usage(sys.stderr)
         print("error: preview needs at least one TICKER (no default list)", file=sys.stderr)
         return EXIT_CONFIG
-    if args.command == "execute" and not args.tickers:
+    if args.command == "execute" and args.resolve is not None:
+        problem = _resolve_args_problem(args)
+        if problem:
+            print(f"error: {problem}", file=sys.stderr)
+            return EXIT_CONFIG
+    elif args.command == "execute" and args.note is not None:
+        print("error: --note belongs to --resolve", file=sys.stderr)
+        return EXIT_CONFIG
+    if args.command == "execute" and args.resolve is None and not args.tickers:
         parser.print_usage(sys.stderr)
         print("error: execute needs at least one TICKER (no default list)", file=sys.stderr)
         return EXIT_CONFIG
@@ -1411,6 +1462,16 @@ def _execute(args, broker_factory, logger, clock, paper_log_factory, calendar, p
             return paperlog_mod.GitPaperLog(repo, remote, branch)
 
     placer = (LivePlacer() if args.live else DryPlacer()) if placer is None else placer
+    if args.resolve is not None:
+        progress = {"connecting": False, "connected": False}
+        resolve_mods = SimpleNamespace(broker=broker_mod, guards=guards_mod, ledger=ledger_mod)
+        return _guarded(
+            logger,
+            broker_mod,
+            progress,
+            lambda: run_resolve_entry(args, resolve_mods, broker_factory, logger, progress, clock),
+            "execute ledger",
+        )
     mods = SimpleNamespace(
         broker=broker_mod,
         contracts=contracts_mod,
@@ -1430,6 +1491,129 @@ def _execute(args, broker_factory, logger, clock, paper_log_factory, calendar, p
         ),
         "execute ledger",
     )
+
+
+def run_resolve_entry(args, mods, broker_factory, logger, progress, clock) -> int:
+    """``execute --resolve KEY=never_sent --note TEXT``: close a live ``intent`` by hand (D-14).
+
+    Appends one ``resolved`` event under the ledger lock and never changes a line. Only an
+    open entry whose last lifecycle event is ``intent`` qualifies, and only when the broker's
+    history shows no trace of it; the key stays used up. No order is sent, so RELEASE and KILL
+    are not looked at.
+    """
+    ledger_mod = mods.ledger
+    key, _outcome = _split_resolve(args.resolve)
+    raw = read_settings(args.env_file)
+    host, port, _account = validate_settings(raw, mods.broker.EXPECTED_ACCOUNT)
+    state_dir = default_ledger_file().parent
+    try:
+        ledger_mod.ensure_outside_git(state_dir)
+    except ledger_mod.StateInGitTree as exc:
+        return _fail(
+            logger, EXIT_CONFIG, f"ibkr-state=STATE_IN_GIT_TREE {exc}", f"state folder: {exc}"
+        )
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=STATE_DIR_UNUSABLE {state_dir}: {type(exc).__name__}: {exc}",
+            f"state folder not usable: {state_dir} ({type(exc).__name__})",
+        )
+    lock_stack = contextlib.ExitStack()
+    try:
+        held = lock_stack.enter_context(locked(default_ledger_file(), wait=False))
+    except OSError as exc:
+        lock_stack.close()
+        return _fail(
+            logger,
+            EXIT_LOCKED,
+            f'ibkr-state=LOCK_ERROR detail="{type(exc).__name__}: {exc}"',
+            "execute: lock-error (not resolved)",
+        )
+    if not held:
+        lock_stack.close()
+        return _fail(
+            logger,
+            EXIT_LOCKED,
+            f'ibkr-state=LOCK_HELD detail="{default_ledger_file()}.lock"',
+            "execute: lock-held (another run holds the ledger lock)",
+        )
+    with lock_stack:
+        try:
+            ledger = ledger_mod.Ledger.open(
+                default_ledger_file(),
+                mode=ledger_mod.MODE_LIVE,
+                clock=clock,
+                run_id=uuid.uuid4().hex,
+            )
+        except Exception as exc:  # noqa: BLE001 - an unreadable ledger is "corrupt"
+            detail = (
+                str(exc)
+                if isinstance(exc, ledger_mod.LedgerError)
+                else f"{type(exc).__name__}: {exc}"
+            )
+            return _fail(
+                logger,
+                EXIT_RECONCILE,
+                f'ibkr-state=LEDGER_CORRUPT detail="{detail}"',
+                f"execute: ledger-corrupt ({detail})",
+            )
+        entry = next((e for e in ledger.unresolved() if e["decision_key"] == key), None)
+        if entry is None:
+            return _fail(
+                logger,
+                EXIT_PRECONDITION,
+                f"ibkr-state=RESOLVE_NOT_OPEN key={key}",
+                f"execute: {key} is not an open entry of the live ledger",
+            )
+        last = ledger.last_event(key)
+        if last is None or last["event"] != ledger_mod.INTENT:
+            return _fail(
+                logger,
+                EXIT_PRECONDITION,
+                f"ibkr-state=RESOLVE_NOT_INTENT key={key} last={last and last['event']}",
+                f"execute: {key} is past its intent: a placed order was sent",
+            )
+        ctx = SimpleNamespace(
+            logger=logger,
+            progress=progress,
+            broker_factory=broker_factory,
+            host=host,
+            port=port,
+            broker=None,
+            history=None,
+            stack=contextlib.ExitStack(),
+        )
+        try:
+            history = _history(ctx)
+        except _ExecuteStop as stop:
+            return stop.code
+        finally:
+            ctx.stack.close()
+        res = ledger_mod.resolve_entry(entry, history, dry=False)
+        if res.outcome != ledger_mod.NO_TRACE:
+            return _fail(
+                logger,
+                EXIT_RECONCILE,
+                f"ibkr-state=RESOLVE_HAS_TRACE key={key} outcome={res.outcome} "
+                f"open={res.open} completed={res.completed} executions={res.executions}",
+                f"execute: {key} shows a trace at the broker ({res.outcome}); "
+                "the normal reconciliation resolves it",
+            )
+        ledger.append(
+            ledger_mod.RESOLVED,
+            decision_key=key,
+            ticker=entry["ticker"],
+            outcome=ledger_mod.NEVER_SENT,
+            note=args.note,
+            detail=res.detail,
+            source="operator",
+        )
+        logger.info('ibkr-state=RESOLVED_BY_OPERATOR key=%s note="%s"', key, args.note)
+        print(f"execute: resolved {key} as never_sent")
+        return EXIT_OK
 
 
 def _ledger_row_finished(ctx, row: dict, state: str, detail: str) -> None:
@@ -1829,7 +2013,7 @@ def _reconcile(ctx) -> None:
     A ``reconcile`` event is no lifecycle event: an entry that cannot be resolved stays open
     in every later run, and the run ends with exit 6 and no new ``intent`` (D-19). Resolution
     by hand follows the manual (IBKR_EXECUTION.md, Ledger and reconciliation); ``--resolve``
-    comes with phase 6.
+    closes a ``no_trace`` live intent.
     """
     pending = ctx.ledger.unresolved()
     if not pending:

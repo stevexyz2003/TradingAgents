@@ -838,3 +838,42 @@ def test_signed_filled_quantity_exec_rows_beat_the_aggregate_row(tmp_path):
     only_aggregate = _open(tmp_path / "m.jsonl", mode="live")
     only_aggregate.append("filled", decision_key="K", con_id=1, side="BUY", filled_qty=2)
     assert only_aggregate.filled_quantity(1) == 2.0
+
+
+def test_ledger_resolved_closes_an_open_intent_and_keeps_the_key_used_up(tmp_path):
+    path = tmp_path / "l.jsonl"
+    ledger = _open(path, mode="live")
+    ledger.append("intent", **_intent("K3"))
+    ledger.append(
+        led.RESOLVED,
+        decision_key="K3",
+        ticker="AAPL",
+        outcome="never_sent",
+        note="crash before send",
+        detail="no trace at the broker",
+        source="operator",
+    )
+    assert ledger.unresolved() == []
+    assert ledger.attempt_of("K3")["event"] == "intent"
+    assert ledger.last_event("K3")["event"] == "resolved"
+    reopened = _open(path, mode="live", run_id="r2")
+    assert reopened.unresolved() == []
+    assert reopened.attempt_of("K3")["event"] == "intent"
+    assert led.RESOLVED in led.LIFECYCLE_EVENTS and led.RESOLVED not in led.OPEN_EVENTS
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"outcome": "never_sent"},
+        {"outcome": "never_sent", "note": ""},
+        {"outcome": "filled", "note": "x"},
+        {"note": "x"},
+    ],
+    ids=["no-note", "empty-note", "wrong-outcome", "no-outcome"],
+)
+def test_ledger_resolved_with_a_bad_schema_is_refused(tmp_path, fields):
+    ledger = _open(tmp_path / "l.jsonl", mode="live")
+    ledger.append("intent", **_intent("K3"))
+    with pytest.raises(led.LedgerError):
+        ledger.append(led.RESOLVED, decision_key="K3", ticker="AAPL", **fields)
