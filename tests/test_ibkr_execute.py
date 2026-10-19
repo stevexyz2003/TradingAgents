@@ -2716,6 +2716,20 @@ def _own_open(**overrides):
     return ibkr_fakes.open_trade(CON_IDS["AAPL"], **args)
 
 
+def _on_send(fake, action):
+    """Run ``action`` right after the real (non-whatIf) order is sent: the broker's history
+    changes only then, a pre-set history would stop the run before the send."""
+    real = fake.placeOrder
+
+    def hook(contract, order):
+        trade = real(contract, order)
+        if not getattr(order, "whatIf", False):
+            action()
+        return trade
+
+    fake.placeOrder = hook
+
+
 class TestLiveOutcomes:
     """Outcomes of a send other than a clean fill (D-08, D-16, Pitfalls 2, 7, 9)."""
 
@@ -2789,11 +2803,79 @@ class TestLiveOutcomes:
         assert filled[0]["source"] == "reconcile"
         assert again.placed_orders == []
 
-    def test_live_place_rejected_on_validation_error_closes_the_key(self, tmp_path, loop):
+    def test_live_validation_error_warning_with_the_order_open_is_a_fill_timeout(
+        self, tmp_path, loop
+    ):
+        # CR-01: the library sets ValidationError for a warning (321); the order is live.
         fake = _fake_for(
             ("AAPL", "MSFT"),
             place_outcome="ValidationError",
             place_errors=[(321, "Error validating request")],
+        )
+        _on_send(fake, lambda: setattr(fake, "open_orders", [_own_open(perm_id=777)]))
+        code, records = _live_run(
+            tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
+        )
+        assert code == executor.EXIT_FILL_TIMEOUT
+        assert _events(records, "rejected") == []
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "fill-timeout"
+        assert alarm["status"] == "ValidationError"
+        assert "321" in alarm["detail"]
+        assert _chain(records)[-2:] == ["placed", "alarm"]
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
+        assert len(fake.placed_orders) == 1
+        assert "cancelOrder" not in fake.calls and "reqGlobalCancel" not in fake.calls
+        # The key stays open: the next run reconciles it instead of sending again.
+        again = _fake_for(open_orders=[_own_open(perm_id=777)])
+        code, records = _live_run(tmp_path, loop, again)
+        assert code == executor.EXIT_PRECONDITION
+        assert any(r.get("state") == "already-attempted" for r in records[-6:])
+        assert again.placed_orders == []
+
+    def test_live_locally_cancelled_but_open_at_the_broker_is_a_fill_timeout(self, tmp_path, loop):
+        # CR-01: the library sets Cancelled itself on a non-warning code; the broker says open.
+        fake = _fake_for(place_outcome="Cancelled", place_errors=[(10349, "info")])
+        _on_send(fake, lambda: setattr(fake, "open_orders", [_own_open(perm_id=777)]))
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        assert _events(records, "rejected") == []
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "fill-timeout"
+        assert "rejection not confirmed by the broker" in alarm["detail"]
+        assert "still open" in alarm["detail"]
+        assert _chain(records)[-2:] == ["placed", "alarm"]
+        assert "cancelOrder" not in fake.calls and "reqGlobalCancel" not in fake.calls
+
+    @pytest.mark.parametrize(
+        "history",
+        [
+            {"executions": [_own_fill(shares=1)]},
+            {"completed_orders": [_own_completed(status="Filled", filled=2)]},
+            {"completed_orders": [_own_completed(status="Cancelled", filled=1)]},
+            {"open_orders": [_own_open(perm_id=0, order_id=0)]},
+        ],
+        ids=["execution", "completed-filled", "completed-cancelled-with-fill", "open-by-ref"],
+    )
+    def test_live_rejection_with_a_broker_trace_is_not_confirmed(self, tmp_path, loop, history):
+        fake = _fake_for(place_outcome="Cancelled")
+
+        def trace():
+            for name, rows in history.items():
+                setattr(fake, name, rows)
+
+        _on_send(fake, trace)
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        assert _events(records, "rejected") == []
+        (alarm,) = _events(records, "alarm")
+        assert "rejection not confirmed by the broker" in alarm["detail"]
+
+    def test_live_confirmed_rejection_closes_the_key_and_the_run_goes_on(self, tmp_path, loop):
+        fake = _fake_for(
+            ("AAPL", "MSFT"),
+            place_outcome="Cancelled",
+            place_errors=[(201, "Order rejected - reason: no trading permission")],
         )
         code, records = _live_run(
             tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
@@ -2802,8 +2884,8 @@ class TestLiveOutcomes:
         assert code == executor.EXIT_REJECTED
         rejected = [r for r in _events(records, "rejected") if r["state"] == "place-rejected"]
         assert [r["ticker"] for r in rejected] == ["AAPL", "MSFT"]
-        assert rejected[0]["status"] == "ValidationError"
-        assert 321 in rejected[0]["error_codes"]
+        assert rejected[0]["status"] == "Cancelled"
+        assert 201 in rejected[0]["error_codes"]
         assert _events(records, "alarm") == []
         again = _fake_for(("AAPL", "MSFT"))
         code, records = _live_run(
@@ -2814,12 +2896,32 @@ class TestLiveOutcomes:
 
     def test_live_place_rejected_on_cancelled_without_fill(self, tmp_path, loop):
         fake = _fake_for(place_outcome="Cancelled")
+        # A completed row of the order, cancelled and never filled, still confirms.
+        _on_send(
+            fake,
+            lambda: setattr(
+                fake, "completed_orders", [_own_completed(status="Cancelled", filled=None)]
+            ),
+        )
         code, records = _live_run(tmp_path, loop, fake)
         assert code == executor.EXIT_REJECTED
         (rejected,) = _events(records, "rejected")
         assert rejected["state"] == "place-rejected"
         assert rejected["status"] == "Cancelled"
         assert "cancelOrder" not in fake.calls
+        # The confirmation read the history after the send.
+        assert "open_orders" in fake.calls[fake.calls.index("placeOrder") :]
+
+    def test_live_rejection_with_an_unreadable_history_is_a_fill_timeout(self, tmp_path, loop):
+        fake = _fake_for(place_outcome="Cancelled")
+        _on_send(fake, lambda: setattr(fake, "open_orders", "hang"))
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        assert _events(records, "rejected") == []
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "fill-timeout"
+        assert "rejection not confirmed by the broker" in alarm["detail"]
+        assert "order history unreadable" in alarm["detail"]
 
     def test_live_parked_399_is_a_fill_timeout_not_a_rejection(self, tmp_path, loop):
         fake = _fake_for(

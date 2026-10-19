@@ -632,16 +632,27 @@ The live placer waits up to 60 s for the fill. The outcome decides what the ledg
 and the exit code say:
 
 - `order-filled` (exit 0): filled and equal to the `intent`; the fills are written.
-- `place-rejected` (exit 5): a definite rejection after sending (error 321 or any
-  other code except 399, or the status `Cancelled`, `ApiCancelled` or `Inactive`
-  without a fill). The key is closed with a `rejected` line, so the next run does not
-  stop with exit 6. The run goes on with the next ticker.
-- `fill-timeout` (exit 9): no fill within 60 s, a link event during the wait, or 399
-  ("parked"). An `alarm` is written, the `placed` entry stays open and the run stops;
-  no further ticker is sent.
+- `place-rejected` (exit 5): a rejection the broker confirmed. The local status is
+  `Cancelled`, `ApiCancelled` or `Inactive` without a fill, and one more read of the
+  order history shows no open order of this placement (by permId, orderId or
+  `orderRef`), no execution of it, and, if a completed order of it is listed, that
+  order is cancelled or inactive with nothing filled. The key is closed with a
+  `rejected` line, so the next run does not stop with exit 6. The run goes on with the
+  next ticker.
+- `fill-timeout` (exit 9): no fill within 60 s, a link event during the wait, 399
+  ("parked"), a rejection the broker did not confirm (`rejection not confirmed by the
+  broker`, also when the history cannot be read). An `alarm` is written, the `placed`
+  entry stays open and the run stops; no further ticker is sent.
 - `post-order-mismatch` (exit 10): the broker shows something other than the `intent`,
   also a partial fill that was cancelled afterwards (the fills that are certain are
   written first, as `partial`). The run stops.
+
+`ValidationError` is not a rejection. The client library sets this status for every order
+*warning* (for example 321, 399, 404 and the 2100-2199 range) while the order is still
+live at the broker, so the wait goes on; without a fill it ends as `fill-timeout`.
+Likewise the client library may set `Cancelled` on its own after a non-warning error code,
+without any broker confirmation; that is why a rejection is read back before the key
+is closed.
 
 Nothing is ever cancelled by `execute --live` except through `KILL`. A `fill-timeout`
 leaves the order working at the broker; the operator decides in TWS whether to cancel.
@@ -757,11 +768,11 @@ collision or contradiction stays exit 6 in both ledgers.
 | `release-invalid` | 4 | not UTF-8 JSON, wrong keys or a bad date |
 | `release-missing` | 4 | no RELEASE file |
 | `release-unreadable` | 4 | the RELEASE file cannot be read |
-| `place-rejected` | 5 | IBKR rejected the sent order without a fill (status and error codes in the ledger) |
+| `place-rejected` | 5 | IBKR rejected the sent order without a fill, confirmed by a read of the order history (status and error codes in the ledger) |
 | `size-cap` | 5 | planned quantity above `MAX_QTY_PER_ORDER`; rejected, never trimmed |
 | `ledger-corrupt` | 6 | the ledger has a defect that is not a torn tail |
 | `reconcile-unresolved` | 6 | an open ledger entry cannot be resolved against the broker |
-| `fill-timeout` | 9 | no fill within the wait; the order stays open, nothing is cancelled; the next run reconciles |
+| `fill-timeout` | 9 | no fill within the wait (also after a `ValidationError` warning), or a rejection the broker did not confirm; the order stays open, nothing is cancelled; the next run reconciles |
 | `post-order-mismatch` | 10 | the state at IBKR after the order differs from the intent; the run stops, the next run reconciles |
 | `lock-error` | 7 | the lock attempt itself failed |
 | `lock-held` | 7 | another run holds the lock |

@@ -1151,7 +1151,10 @@ def _execution_view(execution) -> dict:
 # D-16: an order parked until the market opens (399) is not a rejection. Not measurable at the
 # gateway, covered by a fake test only (gap like ``halted``, REQ-67).
 PARKED_CODES = frozenset({399})
-REJECT_STATUSES = frozenset({"ValidationError", "Cancelled", "ApiCancelled", "Inactive"})
+#: Local end states that may be a rejection. ``ValidationError`` is none: the client library
+#: sets it for order warnings while the order is still live (CR-01). Even these states can be
+#: set by the library alone, so a rejection is booked only once the broker's history confirms.
+REJECT_STATUSES = frozenset({"Cancelled", "ApiCancelled", "Inactive"})
 
 
 class LivePlacer:
@@ -1159,7 +1162,8 @@ class LivePlacer:
     result against the intent (REQ-65) and writes the fills in the same run (REQ-47, REQ-48).
 
     Outcomes: clean fill, fill timeout / link event / parked (alarm, order stays open, run
-    stops), definite rejection (key closed), partial fill (deviation path).
+    stops), rejection confirmed at the broker (key closed; an unconfirmed one is a fill
+    timeout), partial fill (deviation path).
     """
 
     dry = False
@@ -1216,9 +1220,19 @@ class LivePlacer:
                 ctx,
                 intent,
                 result,
-                f"no fill within {FILL_TIMEOUT_S:g} s (status {result.status!r})",
+                f"no fill within {FILL_TIMEOUT_S:g} s (status {result.status!r})"
+                + (f"; {codes}" if result.error_codes else ""),
             )
         if kind == "rejected":
+            unconfirmed = self._unconfirmed_rejection(ctx, intent, result)
+            if unconfirmed is not None:
+                self._fill_timeout(
+                    ctx,
+                    intent,
+                    result,
+                    f"rejection not confirmed by the broker (status {result.status!r}, "
+                    f"{codes}): {unconfirmed}",
+                )
             return self._rejected(ctx, intent, result)
         if kind == "partial":
             order, mine = self._read_back(ctx, intent, result)
@@ -1291,8 +1305,44 @@ class LivePlacer:
         raise _ExecuteStop(EXIT_FILL_TIMEOUT, guards.FILL_TIMEOUT, detail)
 
     @staticmethod
+    def _matches(record, intent: dict, result) -> bool:
+        """Whether an order or execution of the history belongs to this placement."""
+        if result.perm_id and record.perm_id == result.perm_id:
+            return True
+        if result.order_id and getattr(record, "order_id", 0) == result.order_id:
+            return True
+        return record.order_ref == intent["order_ref"]
+
+    def _unconfirmed_rejection(self, ctx, intent: dict, result) -> str | None:
+        """Why a local rejection is not (yet) confirmed by the broker; ``None`` = confirmed.
+
+        ``Cancelled``/``Inactive`` can be set by the client library alone while the order is
+        live (CR-01). Confirmed means: no open order and no execution of this placement, and
+        a completed order of it (if any) is cancelled/inactive with nothing filled.
+        """
+        time.sleep(POST_ORDER_RETRY_S)
+        try:
+            history = ctx.placing.broker.order_history()
+        except Exception as exc:  # noqa: BLE001 - unreadable history never confirms
+            return f"order history unreadable ({type(exc).__name__}: {exc})"
+        still_open = [o for o in history.open if self._matches(o, intent, result)]
+        if still_open:
+            return f"order still open at the broker (status {still_open[0].status!r})"
+        _order, mine = self._own(history, intent, result)
+        if mine:
+            return f"{len(mine)} execution(s) of this order at the broker"
+        for order in history.completed:
+            if not self._matches(order, intent, result):
+                continue
+            if order.status not in REJECT_STATUSES:
+                return f"completed order status {order.status!r}"
+            if order.filled is not None and float(order.filled) != 0:
+                return f"completed order filled {order.filled}"
+        return None
+
+    @staticmethod
     def _rejected(ctx, intent: dict, result) -> str:
-        """A definite rejection closes the key, so the next run has nothing to reconcile."""
+        """A rejection the broker confirmed closes the key: nothing left to reconcile."""
         guards = ctx.mods.guards
         ctx.ledger.append(
             ctx.mods.ledger.REJECTED,

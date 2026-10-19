@@ -1951,15 +1951,22 @@ def test_place_order_timeout_returns_open_and_cancels_nothing(loop):
     assert adapter._order_permit.open is False
 
 
-def test_place_order_validation_error_is_an_end_state_not_a_hang(loop):
+def test_place_order_validation_error_is_no_end_state_the_wait_runs_to_the_deadline(loop):
+    # ib_async sets ValidationError for order *warnings* while the order is still live
+    # (CR-01): the wait must not end there; without a fill the deadline gives timed_out.
     fake = FakeIB(place_outcome="ValidationError", place_errors=[(321, "Error validating request")])
     adapter = _connected(fake, loop)
     started = time.monotonic()
-    result = adapter.place_order(**PLACE, timeout_s=5)
-    assert time.monotonic() - started < 2
-    assert result.timed_out is False
+    result = adapter.place_order(**PLACE, timeout_s=0.3)
+    assert time.monotonic() - started >= 0.25
+    assert result.timed_out is True
     assert result.status == "ValidationError"
     assert 321 in result.error_codes
+    assert "cancelOrder" not in fake.calls and "reqGlobalCancel" not in fake.calls
+
+
+def test_place_order_validation_error_is_not_in_the_terminal_states():
+    assert "ValidationError" not in broker._FILL_TERMINAL
 
 
 def test_place_order_keeps_a_parked_399_in_the_error_codes(loop):
@@ -1967,8 +1974,9 @@ def test_place_order_keeps_a_parked_399_in_the_error_codes(loop):
         place_outcome="ValidationError", place_errors=[(399, "Order message: held until open")]
     )
     adapter = _connected(fake, loop)
-    result = adapter.place_order(**PLACE, timeout_s=5)
+    result = adapter.place_order(**PLACE, timeout_s=0.3)
     assert 399 in result.error_codes and result.status == "ValidationError"
+    assert result.timed_out is True
 
 
 def test_place_order_reports_a_link_event_during_the_wait(loop):

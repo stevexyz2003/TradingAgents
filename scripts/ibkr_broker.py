@@ -412,10 +412,13 @@ class PlaceResult:
     error_texts: tuple[str, ...]
 
 
-#: Order states that end the wait of place_order. ``ValidationError`` is no done state
-#: of the library (``OrderStatus.DoneStates``) but must end the wait here: otherwise a
-#: 321/399 rejection hangs until the deadline (06-RESEARCH Pattern 2).
-_FILL_TERMINAL = frozenset({"Filled", "Cancelled", "ApiCancelled", "Inactive", "ValidationError"})
+#: Order states that end the wait of place_order. ``ValidationError`` is deliberately
+#: NOT one of them: ib_async sets it for every order *warning* (321, 399, 404,
+#: 2100-2199, ...) while the order is still live at the broker. A warning keeps the
+#: wait going; without a fill the deadline gives ``timed_out`` (fill-timeout, D-08).
+#: A ``Cancelled``/``Inactive`` here may also be set by the library alone, so the
+#: caller confirms a rejection at the broker before booking it.
+_FILL_TERMINAL = frozenset({"Filled", "Cancelled", "ApiCancelled", "Inactive"})
 _FILL_POLL_S = 0.1
 
 #: Execution side as the library reports it -> broker-neutral side.
@@ -1447,8 +1450,11 @@ class IbkrBroker:
         write barrier for this one call and shuts it again in ``finally``; the order is
         built by the same functions as the whatIf preview. Nothing is cancelled when the
         deadline passes (D-08): ``timed_out`` says so and the caller reads the state
-        again. ``ValidationError`` counts as an end state, so a 321/399 answer does not
-        hang until the deadline. The caller gives the deadline; there is no default.
+        again. ``ValidationError`` is no end state: ib_async sets it for order warnings
+        while the order is still live, so a 321/399 answer without a fill ends at the
+        deadline (``timed_out``). ``Cancelled``/``Inactive`` end the wait but can be
+        library-local; the caller confirms them at the broker. The caller gives the
+        deadline; there is no default.
         """
         if action not in _ORDER_SIDES:
             raise ValueError(f"action must be BUY or SELL, got {action!r}")
