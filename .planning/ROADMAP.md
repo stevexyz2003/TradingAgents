@@ -373,7 +373,29 @@ Plans:
 - Keine Alpha-/Backtest-Auswertung aus Fills.
 - Kein Alarm — der Bericht ist eine Lesefunktion, die Alarmierung ist Phase 8.
 
-**Plans:** TBD
+**Plans:** 9 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 07-01-PLAN.md — Reines Modul `ibkr_publish.py`: Ein-Branch-Klon, Commit nur bei Diff, Push ohne Force nur auf `fork/ibkr-log` (Welle 1)
+- [ ] 07-02-PLAN.md — `state_maintenance.py backup --ibkr-dir --dry-run`, IBKR-Allow-Liste, Runbook (REQ-51) (Welle 1)
+- [ ] 07-03-PLAN.md — `second_last_close_utc` (D-06) und `fetch_depth` in `GitPaperLog` (Welle 1)
+- [ ] 07-04-PLAN.md — Bericht, Datenschicht: Decision-Log-Dedup, Ledger lesen, Join je `decision_key` (REQ-49, SC5) (Welle 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 07-05-PLAN.md — Bericht: zwei Tabellen, Paper-Fill-Hinweis, Slippage fail-soft, CLI ohne Checkout (REQ-49/-50) (Welle 2)
+- [ ] 07-06-PLAN.md — `ibkr_executor.py publish`, `EXIT_PUBLISH = 11`, Handbuch-Invariante „one writer per branch“ (REQ-52) (Welle 2)
+- [ ] 07-07-PLAN.md — CI-Rückkanal `--portfolio-from-published` fail-open, `portfolio_feed`, Workflow-Pip-Schritt + Flag (SC6) (Welle 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 07-08-PLAN.md — Handbuch: Bericht, Backup, CI-Rückkanal (D-17/D-18); Reinheit `ibkr_report.py` (Welle 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 07-09-PLAN.md — Operator-Checkpoint: erster echter `publish`, CI-Lauf mit Portfolio, Bericht gegen echte Branches (Welle 4)
 
 ---
 

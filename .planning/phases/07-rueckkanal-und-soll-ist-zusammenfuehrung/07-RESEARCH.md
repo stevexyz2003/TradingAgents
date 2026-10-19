@@ -397,20 +397,20 @@ Phase ist keine Rename-Phase; **ausgelassen**. Relevanter neuer Laufzeitzustand:
 | A4 | Fremd-Commit nur warnen, nicht blockieren, ist richtig | Pattern 1 Schritt 9 | Strenger (Exit) wäre Alternative; Benutzerentscheidung |
 | A5 | GitHub-Branchschutz könnte die Schreiber-Invariante zusätzlich erzwingen | Pitfall 10 | Nicht geprüft; nur Hinweis |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Öffentliche Sichtbarkeit von Ledger/Portfolio (Entscheidung des Operators bestätigen)**
+1. **Öffentliche Sichtbarkeit von Ledger/Portfolio (Entscheidung des Operators bestätigen)** — RESOLVED: D-17 (Operator: unverändert veröffentlichen, keine Maskierung)
    - Known: Fork ist PUBLIC; `ledger.jsonl` enthält `release_account: DUQ634065`, Preise, permIds; `portfolio.json` Cash (~1.005.000 EUR Paper) und Positionen.
    - Unclear: Ob die Kontonummer/Positionen eines Paper-Kontos öffentlich sein dürfen.
    - Recommendation: D-02 gilt (Papierkonto); vor der ersten Veröffentlichung kurze Bestätigung des Operators einholen und im Handbuch als Hinweis führen. Kein Code-Umbau nötig; Alternative wäre ein privates Repo (außerhalb der Phase).
-2. **Soll `publish` das Portfolio selbst frisch holen (Gateway) oder weiter nur kopieren?**
+2. **Soll `publish` das Portfolio selbst frisch holen (Gateway) oder weiter nur kopieren?** — RESOLVED: D-19 (`publish` kopiert nur; `account` bleibt eigener Schritt, Ablauf execute → account → publish)
    - Known: D-03 verlangt, dass ein Git-/Netzfehler `execute` nie beeinflusst; „publish braucht kein Gateway“ (Auftrag).
    - Recommendation: Nur kopieren; `account` bleibt eigener Schritt, Phase 8 legt die Reihenfolge fest.
-3. **Ledger additiv um `held`/`target` auf `skipped` erweitern?**
+3. **Ledger additiv um `held`/`target` auf `skipped` erweitern?** — RESOLVED: D-20 (keine Ledger-Erweiterung in Phase 7; Ziel/Ist nur aus dem Intent, sonst leer mit Fußnote)
    - Known: Ist-Position ist ohne Intent nicht strukturiert im Ledger (nur Freitext `detail`).
    - Recommendation: Phase 7 liest rein ableitend (Intent-Zeilen exakt, sonst leer + Fußnote); eine additive Erweiterung von `_ledger_row_finished` (`ibkr_executor.py:1830-1864`) wäre Phase-6-Code und gehört nicht hierher, kann aber später die Lücken schließen. Planer bestätigt.
-4. **Jev-Entfall und Cash im öffentlichen Report akzeptiert?** (Pitfall 8) — Folge von SC6, bitte im Handbuch festhalten.
-5. **`EXIT_PUBLISH = 11` oder Wiederverwendung von 3/5?** Empfehlung 11 (eigener Fehlerraum, Tabelle und Test mitziehen).
+4. **Jev-Entfall und Cash im öffentlichen Report akzeptiert?** — RESOLVED: D-18 (Jev-Entfall und Cash/Positionen in öffentlichen Reports akzeptiert, im Handbuch vermerkt) (Pitfall 8) — Folge von SC6, bitte im Handbuch festhalten.
+5. **`EXIT_PUBLISH = 11` oder Wiederverwendung von 3/5?** — RESOLVED: D-21 (`EXIT_PUBLISH = 11`) Empfehlung 11 (eigener Fehlerraum, Tabelle und Test mitziehen).
 
 ## Environment Availability
 

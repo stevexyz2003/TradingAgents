@@ -2,7 +2,7 @@
 phase: 7
 slug: rueckkanal-und-soll-ist-zusammenfuehrung
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-10-19
 ---
@@ -37,20 +37,29 @@ created: 2026-10-19
 
 ## Per-Task Verification Map
 
-Wird nach dem Planen mit Task-IDs gefüllt. Abdeckung je Success Criterion:
+Task-IDs aus den Plänen 07-01..07-09 (`<plan>-<task>`). Jeder `auto`-Task hat einen automatisierten Befehl; nur die zwei Operator-Checkpoints in 07-09 sind manuell.
 
-| Req/SC | Behavior | Test Type | Automated Command | File Exists | Status |
-|--------|----------|-----------|-------------------|-------------|--------|
-| SC1 / REQ-52 | `publish` pusht nur `ibkr-log` auf `fork`; Erstanlage; leerer Diff = kein Commit; Non-FF = Exit 11 ohne Force; Lock = Exit 7; kein `origin`/`paper-log` in Push-Argumenten; Bytes-Treue ohne `\r\n`; kein Gateway | integration-light (Bare-Repo als `fork`) + unit | `pytest tests/test_ibkr_publish.py -x` | ❌ W0 | ⬜ pending |
-| SC1 | Handbuch nennt Invariante „ein Schreiber pro Branch“ | unit (Text-Guard) | `pytest tests/test_ibkr_isolation.py -k writer` | ✅ (Pin ❌) | ⬜ pending |
-| SC2 / REQ-49 | Join `(trade_date, ticker)` mit allen SC2-Spalten und Zustandsspalte; liest zwei Branches per `fetch` + `cat-file`, ohne Checkout | unit + integration-light | `pytest tests/test_ibkr_report.py -k "join or real_git"` | ❌ W0 | ⬜ pending |
-| SC3 / REQ-50 | Zwei getrennte Tabellen; Top-of-Book-Hinweis; Slippage-Vorzeichen; Fill-Quote 0 bei Timeout/Reject; leere Zelle + Fußnote bei Kursfehler | unit (`settlement.get_closes` gepatcht) | `pytest tests/test_ibkr_report.py -k "metrics or slippage or footnote"` | ❌ W0 | ⬜ pending |
-| SC4 / REQ-51 | `backup --dry-run` listet Ledger, Contracts, Contracts-History; nicht `RELEASE`/`KILL`/Lock/Logs; Standardpfad = Executor-Pfad | unit | `pytest tests/test_state_maintenance.py -k "ibkr or dry_run"` | ✅ (Tests ❌) | ⬜ pending |
-| SC5 / REQ-39/40 | Doppelte `(trade_date, ticker)` → eine Zeile, erste Fassung gewinnt | unit | `pytest tests/test_ibkr_report.py -k dedup` | ❌ W0 | ⬜ pending |
-| SC6 | Gültiger Stand wird übergeben; jede Störung → kein `portfolio` + `portfolio_feed.reason`; lokales `--portfolio` unverändert | unit | `pytest tests/test_daily_paper_run.py -k "feed or published"` | ✅ (Tests ❌) | ⬜ pending |
-| SC6 | `second_last_close_utc` an Wochenende/Feiertag | unit | `pytest tests/test_ibkr_decision.py -k second_last` | ✅ (Tests ❌) | ⬜ pending |
-| SC6 | Workflow: nur neutrales Flag + Pip-Schritt; `paper-log`-Schritte unverändert; kein „IBKR“ im YAML | unit (Text-Pins) | `pytest tests/test_ibkr_isolation.py -k "workflow or ci"` | ✅ (Pins ❌) | ⬜ pending |
-| Querschnitt | `ib_async` nur im Adapter; Exit-Tabelle inkl. 11 | unit | `pytest tests/test_ibkr_isolation.py -x` | ✅ anpassen | ⬜ pending |
+| Task ID | Plan | Wave | Req/SC | Behavior | Automated Command | Status |
+|---------|------|------|--------|----------|-------------------|--------|
+| 07-01-01 | 07-01 | 1 | REQ-52 / SC1 | `publish`-Modul: Erstanlage, Fortschreibung, leerer Diff, Non-FF, Bytes-Treue, kein origin/paper-log/--force | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_publish.py -x -q` | ⬜ pending |
+| 07-02-01 | 07-02 | 1 | REQ-51 / SC4 | `backup --dry-run --ibkr-dir`, Allow-Liste, Default = Executor-Pfad, LOCALAPPDATA isoliert | `.venv/Scripts/python.exe -m pytest tests/test_state_maintenance.py -x -q` | ⬜ pending |
+| 07-02-02 | 07-02 | 1 | REQ-51 / REQ-52 | Runbook: Backup und Verweis auf ibkr-log | `grep -c "ibkr-dir\|dry-run\|contracts-history.jsonl\|ibkr-log" scripts/STATE_OPERATIONS.md` | ⬜ pending |
+| 07-03-01 | 07-03 | 1 | SC6 (D-06) | `second_last_close_utc` an Wochenende/Feiertag | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_decision.py -k second_last -x -q` | ⬜ pending |
+| 07-03-02 | 07-03 | 1 | SC6 | `GitPaperLog(fetch_depth)` additiv, Docstring | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_paperlog.py -x -q` | ⬜ pending |
+| 07-04-01 | 07-04 | 1 | REQ-49 / SC5 | Decision-Log-Dedup (synthetisches Dreifach), Ledger lesen | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_report.py -k "dedup or smoke or read_ledger" -x -q` | ⬜ pending |
+| 07-04-02 | 07-04 | 1 | REQ-49 / SC2 | Join je `decision_key`, Zustandsspalte, Ziel/Ist aus Intent | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_report.py -k join -x -q` | ⬜ pending |
+| 07-05-01 | 07-05 | 2 | REQ-50 / SC3 | Zwei Tabellen, Top-of-Book-Hinweis, Slippage-Vorzeichen, Fill-Quote, Fußnoten | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_report.py -k "metrics or slippage or footnote" -x -q` | ⬜ pending |
+| 07-05-02 | 07-05 | 2 | REQ-49 / SC2 | CLI liest zwei Branches per fetch + cat-file, ohne Checkout; --since/--until/--out | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_report.py -k "real_git or cli" -x -q` | ⬜ pending |
+| 07-06-01 | 07-06 | 2 | REQ-52 / SC1 | `publish`-Unterbefehl, Exit 0/1/6/7/11, kein Gateway, EXIT_NAMES/Docstring | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_publish_cli.py tests/test_ibkr_executor.py -x -q` | ⬜ pending |
+| 07-06-02 | 07-06 | 2 | SC1 | Handbuch-Invariante „one writer per branch“, Exit-Tabelle 13, Reinheit `ibkr_publish.py` | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_isolation.py -x -q` | ⬜ pending |
+| 07-07-01 | 07-07 | 2 | SC6 | Fail-open je Grund, `portfolio_feed`, lokales `--portfolio` unverändert | `.venv/Scripts/python.exe -m pytest tests/test_daily_paper_run.py -k "feed or published" -x -q` | ⬜ pending |
+| 07-07-02 | 07-07 | 2 | SC6 | Workflow: Pip-Schritt + Flag, paper-log-Schritte byte-gleich, kein IBKR im YAML | `.venv/Scripts/python.exe -m pytest tests/test_daily_paper_run.py -k workflow -x -q` | ⬜ pending |
+| 07-08-01 | 07-08 | 3 | REQ-49..52 | Handbuch: Bericht, Backup, CI-Rückkanal, D-17/D-18 | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_isolation.py -k handbook -q` | ⬜ pending |
+| 07-08-02 | 07-08 | 3 | Querschnitt | Reinheit `ibkr_report.py`, Handbuch-Pins | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_isolation.py -x -q` | ⬜ pending |
+| 07-09-01 | 07-09 | 4 | Vorbedingung | 06-10 erledigt, Ausgangslage, Suite selbst gelaufen | `.venv/Scripts/python.exe -m pytest tests/test_ibkr_publish.py tests/test_ibkr_publish_cli.py tests/test_ibkr_report.py tests/test_daily_paper_run.py tests/test_state_maintenance.py tests/test_ibkr_isolation.py -q` | ⬜ pending |
+| 07-09-02 | 07-09 | 4 | REQ-52 / SC6 | Erster echter publish, Push fork/main, CI-Lauf (Operator) | manuell (checkpoint:human-action) | ⬜ pending |
+| 07-09-03 | 07-09 | 4 | SC1/SC2/SC5/SC6 | Nachprüfung ibkr-log, paper-log-Autoren, `portfolio_feed`, Bericht gegen echte Branches | `git ls-remote --exit-code --heads fork ibkr-log` | ⬜ pending |
+| 07-09-04 | 07-09 | 4 | REQ-49/50 | Sichtprüfung Bericht gegen Ledger (Operator) | manuell (checkpoint:human-verify) | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -77,11 +86,11 @@ Wird nach dem Planen mit Task-IDs gefüllt. Abdeckung je Success Criterion:
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (neue Testdateien entstehen in 07-01, 07-04, 07-06; Isolation in 07-02)
+- [x] No watch-mode flags
 - [ ] Feedback latency < 60s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending
