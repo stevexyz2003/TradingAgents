@@ -1939,6 +1939,22 @@ def test_place_order_filled_returns_the_result_and_shuts_the_permit(loop):
     assert adapter._order_permit.open is False and adapter._order_permit.sent == 1
 
 
+def test_place_order_takes_the_perm_id_from_the_order_when_the_status_has_none(loop):
+    # IN-01: the status may not carry the permId yet; the order object does.
+    fake = FakeIB(place_perm_id=0)
+    real = fake.placeOrder
+
+    def with_order_perm_id(contract, order):
+        trade = real(contract, order)
+        trade.order.permId = 888
+        return trade
+
+    fake.placeOrder = with_order_perm_id
+    adapter = _connected(fake, loop)
+    result = adapter.place_order(**PLACE, timeout_s=5)
+    assert result.perm_id == 888
+
+
 def test_place_order_timeout_returns_open_and_cancels_nothing(loop):
     fake = FakeIB(place_outcome="Submitted")
     adapter = _connected(fake, loop)

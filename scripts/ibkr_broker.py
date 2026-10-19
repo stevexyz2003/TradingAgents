@@ -1509,7 +1509,10 @@ class IbkrBroker:
         ]
         result = PlaceResult(
             order_id=int(getattr(trade.order, "orderId", 0) or 0),
-            perm_id=int(getattr(trade.orderStatus, "permId", 0) or 0),
+            # The status may not carry the permId yet; the order object often does (IN-01).
+            perm_id=int(
+                getattr(trade.orderStatus, "permId", 0) or getattr(trade.order, "permId", 0) or 0
+            ),
             status=status,
             filled=_unset_to_none(getattr(trade.orderStatus, "filled", None)) or 0.0,
             remaining=_unset_to_none(getattr(trade.orderStatus, "remaining", None)),

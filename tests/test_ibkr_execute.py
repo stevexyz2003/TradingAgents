@@ -2695,6 +2695,15 @@ class TestLivePlacer:
         assert ledger.filled_quantity(CON_IDS["AAPL"]) == 2
         assert ledger.unresolved() == []
 
+    def test_without_perm_id_the_completed_order_is_found_by_order_ref(self, tmp_path, loop):
+        # IN-01: no permId on the result, and the completed order carries orderId 0.
+        fake = _filling_fake(place_perm_id=0, completed=_own_completed(order_id=0))
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        assert _events(records, "alarm") == []
+        (filled,) = _events(records, "filled")
+        assert filled["completed_status"] == "Filled"
+
     def test_executions_that_appear_on_the_second_read_raise_no_alarm(self, tmp_path, loop):
         fake = _filling_fake(executions=[])
         real = fake.reqExecutionsAsync

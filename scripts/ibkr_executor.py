@@ -1429,14 +1429,21 @@ class LivePlacer:
     def _own(history, intent: dict, result):
         """The broker's own order and executions of this placement (Pitfall 4).
 
-        The order is found by ``permId`` (``orderId`` when the permanent id is not set); the
-        executions by ``permId`` or by ``orderRef``, never by the reference alone.
+        The order is found by ``permId``. Without a permanent id it is found by ``orderId``
+        or, since completed orders usually carry orderId 0, by ``orderRef`` (IN-01); a
+        completed order wins over an open one. The executions by ``permId`` or by
+        ``orderRef``.
         """
         pool = (*history.completed, *history.open)
         if result.perm_id:
             orders = [o for o in pool if o.perm_id == result.perm_id]
         else:
-            orders = [o for o in pool if o.order_id == result.order_id]
+            orders = [
+                o
+                for o in pool
+                if (result.order_id and o.order_id == result.order_id)
+                or o.order_ref == intent["order_ref"]
+            ]
         order = orders[0] if orders else None
         mine = [
             e
