@@ -2471,3 +2471,230 @@ class TestLiveSwitch:
         ((path, mode, _lock),) = seen
         assert path == executor.default_ledger_file()
         assert mode == "live"
+
+
+EXEC_ID = "0000e0d5.6710a3c5.01.01"
+
+
+def _own_fill(**overrides):
+    """The execution a clean fill of the AAPL intent produces."""
+    args = {
+        "con_id": CON_IDS["AAPL"],
+        "order_ref": KEY,
+        "shares": 2,
+        "side": "BOT",
+        "exec_id": EXEC_ID,
+        "price": 250.1,
+        "perm_id": 777,
+        "order_id": 5,
+    }
+    args.update(overrides)
+    con_id = args.pop("con_id")
+    order_ref = args.pop("order_ref")
+    shares = args.pop("shares")
+    return ibkr_fakes.fill(con_id, order_ref, shares, **args)
+
+
+def _own_completed(**overrides):
+    args = {
+        "status": "Filled",
+        "order_ref": KEY,
+        "action": "BUY",
+        "quantity": 2,
+        "filled": 2,
+        "perm_id": 777,
+        "order_id": 5,
+    }
+    args.update(overrides)
+    return ibkr_fakes.completed_trade(CON_IDS["AAPL"], **args)
+
+
+def _filling_fake(tickers=("AAPL",), *, executions=None, completed=None, **kwargs):
+    return _fake_for(
+        tickers,
+        place_executions=[_own_fill()] if executions is None else executions,
+        place_completed=_own_completed() if completed is None else completed,
+        **kwargs,
+    )
+
+
+class TestLivePlacer:
+    """The live placer: send, ``placed``, read back, compare, persist (D-09, D-10, REQ-65)."""
+
+    @pytest.fixture(autouse=True)
+    def _no_wait(self, monkeypatch):
+        monkeypatch.setattr(executor, "POST_ORDER_RETRY_S", 0)
+
+    def test_live_chain_intent_placed_filled(self, tmp_path, loop, capsys):
+        fake = _filling_fake()
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        chain = [
+            r for r in records if r.get("decision_key") == KEY and r["event"] != "switch_check"
+        ]
+        assert [r["event"] for r in chain] == ["intent", "placed", "filled"]
+        intent, placed, filled = chain
+        assert placed["order_id"] == 5
+        assert placed["perm_id"] == 777
+        assert filled["exec_id"] == EXEC_ID
+        assert filled["filled_qty"] == 2
+        assert filled["side"] == "BUY"
+        assert filled["order_ref"] == KEY
+        assert filled["avg_price"] == 250.1
+        assert filled["perm_id"] == 777
+        assert filled["order_id"] == 5
+        assert filled["completed_status"] == "Filled"
+        assert intent["seq"] < placed["seq"] < filled["seq"]
+        assert _events(records, "skipped") == []
+        assert records[-1]["event"] == "run_end"
+        assert records[-1]["exit"] == 0
+        assert "execute: AAPL order-filled" in capsys.readouterr().out
+        assert "ibkr-state=ORDER_FILLED" in _log_text(tmp_path)
+        assert not executor.default_dryrun_ledger_file().exists()
+
+    def test_intent_before_place(self, tmp_path, loop):
+        fake = _filling_fake()
+        seen = []
+        real = fake.placeOrder
+
+        def hook(contract, order):
+            if not getattr(order, "whatIf", False):
+                seen.append(_read_records(executor.default_ledger_file()))
+            return real(contract, order)
+
+        fake.placeOrder = hook
+        code, _records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        (on_disk,) = seen
+        assert [r["event"] for r in on_disk][-1] == "intent"
+        assert on_disk[-1]["decision_key"] == KEY
+
+    def test_the_sent_order_equals_the_preview_order_except_what_if(self, tmp_path, loop):
+        fake = _filling_fake()
+        code, _records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        (sent,) = fake.placed_orders
+        previewed = fake.whatif_calls[-1][1]
+        a, b = dict(vars(sent)), dict(vars(previewed))
+        assert a.pop("whatIf") is False
+        assert b.pop("whatIf") is True
+        a.pop("orderId", None)
+        b.pop("orderId", None)
+        assert a == b
+
+    @pytest.mark.parametrize(
+        "case",
+        ["short-fill", "wrong-side", "other-ref", "other-con-id", "empty-ref", "order-short"],
+    )
+    def test_post_order_mismatch_stops_the_whole_run(self, tmp_path, loop, case):
+        executions = [_own_fill()]
+        completed = _own_completed()
+        if case == "short-fill":
+            executions = [_own_fill(shares=1)]
+        elif case == "wrong-side":
+            executions = [_own_fill(side="SLD")]
+        elif case == "other-ref":
+            executions = [_own_fill(order_ref="2026-10-09|XXXX")]
+        elif case == "other-con-id":
+            executions = [_own_fill(con_id=999)]
+        elif case == "empty-ref":
+            executions = [_own_fill(order_ref="")]
+        elif case == "order-short":
+            completed = _own_completed(filled=1)
+        fake = _filling_fake(("AAPL", "MSFT"), executions=executions, completed=completed)
+        code, records = _live_run(
+            tmp_path,
+            loop,
+            fake,
+            tickers=("AAPL", "MSFT"),
+            paper=_two_buys(tmp_path),
+        )
+        assert code == executor.EXIT_POST_ORDER
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "post-order-mismatch"
+        assert alarm["decision_key"] == KEY
+        assert alarm["expected"]["side"] == "BUY"
+        assert alarm["expected"]["quantity"] == 2
+        assert alarm["expected"]["order_ref"] == KEY
+        assert alarm["expected"]["con_id"] == CON_IDS["AAPL"]
+        assert "executions" in alarm["seen"]
+        assert records[-1]["event"] == "run_end"
+        assert records[-1]["state"] == "post-order-mismatch"
+        assert records[-1]["exit"] == executor.EXIT_POST_ORDER
+        # MSFT is never sent and never gets an intent.
+        assert len(fake.placed_orders) == 1
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
+
+    def test_a_status_other_than_filled_ends_in_the_deviation_path(
+        self, tmp_path, loop, monkeypatch
+    ):
+        monkeypatch.setattr(executor, "FILL_TIMEOUT_S", 0.3)
+        fake = _fake_for(place_outcome="Submitted")
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_POST_ORDER
+        assert [r["event"] for r in records if r.get("decision_key") == KEY][-2:] == [
+            "placed",
+            "alarm",
+        ]
+
+    def test_executions_that_appear_on_the_second_read_raise_no_alarm(self, tmp_path, loop):
+        fake = _filling_fake(executions=[])
+        real = fake.reqExecutionsAsync
+        reads = []
+
+        async def delayed(execFilter=None):
+            if fake.placed_orders:
+                reads.append(1)
+                if len(reads) >= 2:
+                    fake.executions = [_own_fill()]
+            return await real(execFilter)
+
+        fake.reqExecutionsAsync = delayed
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        assert len(reads) >= 2
+        assert _events(records, "alarm") == []
+        assert [r["exec_id"] for r in _events(records, "filled")] == [EXEC_ID]
+
+    def test_fills_are_persisted_in_the_same_run_for_the_next_day(self, tmp_path, loop):
+        fake = _filling_fake()
+        code, _records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        # Next run: the broker's history is empty, the position is held; the ledger alone
+        # knows the fills.
+        again = _fake_for(positions=[_aapl_position(2)])
+        code, records = _live_run(tmp_path, loop, again)
+        assert code != executor.EXIT_RECONCILE
+        assert again.placed_orders == []
+        assert not any(r.get("state") == "source-conflict" for r in records)
+        ledger = ledger_mod.Ledger.open(
+            executor.default_ledger_file(),
+            mode=ledger_mod.MODE_LIVE,
+            clock=lambda: OPEN_NOW,
+            run_id="check",
+        )
+        assert ledger.filled_quantity(CON_IDS["AAPL"]) == 2
+
+    def test_place_order_called_at_one_site(self):
+        import ast
+
+        tree = ast.parse(Path(executor.__file__).read_text(encoding="utf-8"))
+        sites = []
+
+        def walk(node, owner):
+            for child in ast.iter_child_nodes(node):
+                scope = owner
+                if isinstance(child, ast.ClassDef):
+                    scope = (child.name, owner[1])
+                elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                    scope = (owner[0], child.name)
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "place_order"
+                ):
+                    sites.append(scope)
+                walk(child, scope)
+
+        walk(tree, (None, None))
+        assert sites == [("LivePlacer", "complete")]

@@ -1083,13 +1083,213 @@ class DryPlacer:
         return ctx.mods.guards.DRY_COMPLETE
 
 
+def _execution_view(execution) -> dict:
+    """One execution as plain data for the alarm line."""
+    return {
+        "exec_id": execution.exec_id,
+        "shares": execution.shares,
+        "price": execution.price,
+        "side": execution.side,
+        "con_id": execution.con_id,
+        "order_ref": execution.order_ref,
+        "perm_id": execution.perm_id,
+        "order_id": execution.order_id,
+    }
+
+
 class LivePlacer:
-    """The phase-6 placer: sends one market order per intent (``--live`` only)."""
+    """The phase-6 placer: sends one market order per intent, waits for the fill, checks the
+    result against the intent (REQ-65) and writes the fills in the same run (REQ-47, REQ-48).
+
+    Every outcome other than a clean fill ends in the deviation path here; plan 06-06 splits
+    the fill timeout and a definite rejection off from it.
+    """
 
     dry = False
 
     def complete(self, ctx, intent: dict) -> str:
-        raise NotImplementedError
+        guards = ctx.mods.guards
+        ledger_mod = ctx.mods.ledger
+        placing = ctx.placing
+        key = intent["decision_key"]
+        ticker = intent["ticker"]
+        # A GatewayUnavailable or ValueError is not caught here: the intent stays open, the
+        # run ends on the existing error path and the next run reconciles it.
+        result = placing.broker.place_order(
+            con_id=intent["con_id"],
+            symbol=placing.symbol,
+            sec_type=placing.sec_type,
+            currency=placing.currency,
+            primary_exchange=placing.primary_exchange,
+            action=intent["side"],
+            quantity=int(intent["quantity"]),
+            order_ref=intent["order_ref"],
+            timeout_s=FILL_TIMEOUT_S,
+        )
+        ctx.ledger.append(
+            ledger_mod.PLACED,
+            decision_key=key,
+            ticker=ticker,
+            order_id=result.order_id,
+            perm_id=result.perm_id,
+            status=result.status,
+            source="placer",
+        )
+        ctx.logger.info(
+            "ibkr-state=ORDER_PLACED ticker=%s key=%s order_id=%s perm_id=%s status=%s",
+            ticker,
+            key,
+            result.order_id,
+            result.perm_id,
+            result.status,
+        )
+        if result.status != "Filled" or result.timed_out or result.link_event:
+            detail = (
+                f"order status {result.status!r} (timed_out={result.timed_out}, "
+                f"link_event={result.link_event}, codes={list(result.error_codes)}, "
+                f"texts={list(result.error_texts)})"
+            )
+            self._deviation(ctx, intent, result, None, [], detail)
+        order, mine = self._read_back(ctx, intent, result)
+        problems = self._compare(ledger_mod, intent, result, order, mine)
+        if problems:
+            self._deviation(ctx, intent, result, order, mine, "; ".join(problems))
+        records = ledger_mod.fill_records(intent, mine)
+        for number, (event, fields) in enumerate(records):
+            fields = {**fields, "source": "placer"}
+            fields["order_id"] = result.order_id
+            fields["perm_id"] = result.perm_id
+            if number == len(records) - 1:
+                fields["avg_price"] = result.avg_fill_price
+                fields["completed_status"] = order.status
+                fields["completed_filled"] = order.filled
+            ctx.ledger.append(event, **fields)
+        ctx.logger.info(
+            "ibkr-state=ORDER_FILLED ticker=%s key=%s exec_ids=%s avg_price=%s",
+            ticker,
+            key,
+            ",".join(e.exec_id for e in ledger_mod.effective_executions(mine)),
+            result.avg_fill_price,
+        )
+        return guards.ORDER_FILLED
+
+    @staticmethod
+    def _own(history, intent: dict, result):
+        """The broker's own order and executions of this placement (Pitfall 4).
+
+        The order is found by ``permId`` (``orderId`` when the permanent id is not set); the
+        executions by ``permId`` or by ``orderRef``, never by the reference alone.
+        """
+        pool = (*history.completed, *history.open)
+        if result.perm_id:
+            orders = [o for o in pool if o.perm_id == result.perm_id]
+        else:
+            orders = [o for o in pool if o.order_id == result.order_id]
+        order = orders[0] if orders else None
+        mine = [
+            e
+            for e in history.executions
+            if (result.perm_id and e.perm_id == result.perm_id)
+            or e.order_ref == intent["order_ref"]
+        ]
+        return order, mine
+
+    def _read_back(self, ctx, intent: dict, result):
+        """Read the order history until it shows the whole fill (Pitfall 8: not atomic)."""
+        ledger_mod = ctx.mods.ledger
+        want = float(intent["quantity"])
+        order, mine = None, []
+        for attempt in range(POST_ORDER_READS):
+            history = ctx.placing.broker.order_history()
+            order, mine = self._own(history, intent, result)
+            shares = sum(float(e.shares) for e in ledger_mod.effective_executions(mine))
+            if order is not None and shares >= want:
+                break
+            if attempt + 1 < POST_ORDER_READS:
+                time.sleep(POST_ORDER_RETRY_S)
+        return order, mine
+
+    @staticmethod
+    def _compare(ledger_mod, intent: dict, result, order, mine: list) -> list[str]:
+        """Every difference between what was meant and what the broker shows (REQ-65)."""
+        problems: list[str] = []
+        ref = intent["order_ref"]
+        want = float(intent["quantity"])
+        if order is None:
+            problems.append("no order with this permId/orderId in the broker's history")
+        else:
+            if order.status != "Filled":
+                problems.append(f"order status {order.status!r}, expected 'Filled'")
+            if order.action != intent["side"]:
+                problems.append(f"order side {order.action!r}, expected {intent['side']!r}")
+            if float(order.quantity) != want:
+                problems.append(f"order quantity {order.quantity}, expected {want}")
+            if order.filled is not None and float(order.filled) != want:
+                problems.append(f"order filled {order.filled}, expected {want}")
+            if order.order_ref != ref:
+                problems.append(f"order orderRef {order.order_ref!r}, expected {ref!r}")
+            if order.con_id != intent["con_id"]:
+                problems.append(f"order conId {order.con_id}, expected {intent['con_id']}")
+        for execution in mine:
+            if execution.side != intent["side"]:
+                problems.append(f"execution {execution.exec_id} side {execution.side!r}")
+            if execution.con_id != intent["con_id"]:
+                problems.append(f"execution {execution.exec_id} conId {execution.con_id}")
+            if execution.order_ref != ref:
+                problems.append(f"execution {execution.exec_id} orderRef {execution.order_ref!r}")
+            if result.perm_id and execution.perm_id and execution.perm_id != result.perm_id:
+                problems.append(f"execution {execution.exec_id} permId {execution.perm_id}")
+        shares = sum(float(e.shares) for e in ledger_mod.effective_executions(mine))
+        if shares != want:
+            problems.append(f"executions add up to {shares}, expected {want}")
+        return problems
+
+    def _deviation(self, ctx, intent: dict, result, order, mine: list, detail: str) -> None:
+        """Alarm and stop the whole run (D-09); the fills that are certain are kept first."""
+        guards = ctx.mods.guards
+        ledger_mod = ctx.mods.ledger
+        key = intent["decision_key"]
+        ref = intent["order_ref"]
+        trusted = [
+            e
+            for e in mine
+            if e.side == intent["side"] and e.con_id == intent["con_id"] and e.order_ref == ref
+        ]
+        for event, fields in ledger_mod.fill_records(intent, trusted):
+            fields = {**fields, "source": "placer", "order_id": result.order_id}
+            fields["perm_id"] = result.perm_id
+            ctx.ledger.append(event, **fields)
+        ctx.ledger.append(
+            ledger_mod.ALARM,
+            state=guards.POST_ORDER_MISMATCH,
+            decision_key=key,
+            ticker=intent["ticker"],
+            detail=detail,
+            expected={
+                "side": intent["side"],
+                "quantity": intent["quantity"],
+                "order_ref": ref,
+                "con_id": intent["con_id"],
+            },
+            seen={
+                "status": order.status if order is not None else result.status,
+                "filled": order.filled if order is not None else result.filled,
+                "order_ref": order.order_ref if order is not None else None,
+                "perm_id": result.perm_id,
+                "executions": [_execution_view(e) for e in mine],
+            },
+        )
+        ctx.logger.error(
+            'ibkr-state=POST_ORDER_MISMATCH ticker=%s key=%s detail="%s"',
+            intent["ticker"],
+            key,
+            detail,
+        )
+        print(
+            f"execute: {guards.POST_ORDER_MISMATCH} ({intent['ticker']}: {detail}); "
+            "run stopped - see IBKR_EXECUTION.md"
+        )
+        raise _ExecuteStop(EXIT_POST_ORDER, guards.POST_ORDER_MISMATCH, detail)
 
 
 def _execute(args, broker_factory, logger, clock, paper_log_factory, calendar, placer) -> int:
@@ -2338,6 +2538,14 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         ctx.sha,
         plan.side,
         plan.quantity,
+    )
+    # What the live placer needs to send: the same values the whatIf above used.
+    ctx.placing = SimpleNamespace(
+        broker=broker,
+        symbol=spec.symbol,
+        sec_type=spec.sec_type,
+        currency=identity.currency,
+        primary_exchange=identity.primary_exchange,
     )
     state = ctx.placer.complete(ctx, intent)
     _finish_row(ctx, row, state, f"{plan.side} {plan.quantity} {key}")
