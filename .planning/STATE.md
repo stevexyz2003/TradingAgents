@@ -23,6 +23,13 @@ progress:
 
 Phase: 06 (die-erste-echte-order) — EXECUTING
 Plan: 9 of 10
+**Messtag 06-09/06-10 verschoben (2026-10-19):** Read-Only-Beleg per Sonde gelungen
+(321, `READ_ONLY_API`), aber `preview` zeigt AAPL/MSFT/NVDA alle Hold (trade_date
+2026-10-16), also nach D-03 keine erste Order. Kein RELEASE, kein `--live`; Schalter
+laut Operator um 16:35 MESZ an und um 16:32 MESZ wieder aus (so gemeldet). 06-09 wird
+am ersten Handelstag mit frischer BUY-Entscheidung im paper-log wiederholt, 06-10
+folgt am selben Tag. Befund: `ibkr-konto-befund.md`, Abschnitt „Erste echte Order
+(Phase 6)“ (035af86).
 **Nächster Schritt: M2 Phase 5 planen — `/gsd:plan-phase 5`** (Kontext steht in
 `.planning/phases/05-leitplanken-scharf/05-CONTEXT.md`). Kill-Switch, Ledger,
 Lock, Reconciliation und neu das Sitzungsfenster aus REQ-IBKR-25, alles ohne eine
@@ -119,6 +126,12 @@ Betriebszweck statt nur Framework-Zulieferer zu sein.
 
 ### Blockers/Concerns
 
+- **Phase 6 wartet auf eine BUY-Entscheidung** (2026-10-19): 06-09/06-10 brauchen einen
+  Handelstag mit frischer BUY-Entscheidung im paper-log; am 2026-10-19 waren alle drei
+  Ticker Hold.
+- Volle Suite unter Windows: 5 rote Tests ohne Phasenbezug neben dem bekannten
+  `test_yfinance_…`: `test_chatgpt_auth.py` ×2 (prüft `0o600`), `test_cli_commands.py`
+  ×1, `test_cli_updates.py` ×2. Separat klären.
 - Kein Push-Zugriff auf origin (nur pull) — veröffentlicht wird über den Fork (`fork` = stevexyz2003/TradingAgents, Force-Push nach Rebase nötig)
 - uv.lock: Upstream hat die Datei entfernt (0b61eff) — Operator-Kopie liegt untracked auf Disk + Scratchpad-Backup; Lockfile-Thema damit erledigt
 - CLI-Memory-Parität — **erledigt upstream (neu geprüft 2026-10-10 gegen v0.6.0):** die Lessons kommen jetzt aus dem Graph-Schritt `_memory_step`, der settelt und `past_context` zurückgibt (tradingagents/graph/trading_graph.py:330, :356, :362; verdrahtet in `__init__` über `memory_node=self._memory_step`, :128). Die CLI startet über `graph.create_run_state` (cli/run.py:237) und loggt über `graph.record_decision` (cli/run.py:371), nutzt also denselben Weg wie `propagate`. Die alte Zitatstelle `_resolve_pending_entries` existiert nicht mehr — die Methode ist in `tradingagents/memory/settlement.py` aufgegangen.
