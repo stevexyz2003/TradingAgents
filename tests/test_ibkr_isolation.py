@@ -188,7 +188,7 @@ def test_handbook_exit_table_matches_executor():
         for name in dir(executor)
         if name.startswith("EXIT_") and isinstance(getattr(executor, name), int)
     }
-    assert len(codes) == 10
+    assert len(codes) == 12
     for name, value in codes.items():
         assert re.search(rf"^\| {value} \| `{name}` \|", text, re.M), f"{name}={value} not in table"
 

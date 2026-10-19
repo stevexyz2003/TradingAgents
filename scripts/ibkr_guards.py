@@ -56,8 +56,17 @@ LEDGER_CORRUPT = "ledger-corrupt"
 RECONCILE_UNRESOLVED = "reconcile-unresolved"
 STATE_IN_GIT_TREE = "state-in-git-tree"
 NOT_DRY = "not-dry"
+NOT_LIVE = "not-live"
+ORDER_FILLED = "order-filled"
+PLACE_REJECTED = "place-rejected"
+FILL_TIMEOUT = "fill-timeout"
+POST_ORDER_MISMATCH = "post-order-mismatch"
 
-# Values mirror EXIT_OK ... EXIT_ACCOUNT_GUARD from scripts/ibkr_executor.py; the
+#: States the live placer records in the ledger itself; `_ledger_row_finished` writes
+#: nothing for them (ticker ends the placer records in the ledger itself).
+PLACER_STATES = frozenset({ORDER_FILLED, PLACE_REJECTED})
+
+# Values mirror EXIT_OK ... EXIT_POST_ORDER from scripts/ibkr_executor.py; the
 # equality test lives in tests/test_ibkr_execute.py (plan 05-04).
 (
     _EXIT_OK,
@@ -69,11 +78,13 @@ NOT_DRY = "not-dry"
     _EXIT_RECONCILE,
     _EXIT_LOCKED,
     _EXIT_ACCOUNT_GUARD,
-) = (0, 1, 2, 3, 4, 5, 6, 7, 8)
+    _EXIT_FILL_TIMEOUT,  # mirror of EXIT_FILL_TIMEOUT in the executor
+    _EXIT_POST_ORDER,  # mirror of EXIT_POST_ORDER in the executor
+) = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 
 EXIT_BY_STATE: Mapping[str, int] = MappingProxyType(
     {
-        **dict.fromkeys((RELEASE_OK, KILL_ABSENT, DRY_COMPLETE), _EXIT_OK),
+        **dict.fromkeys((RELEASE_OK, KILL_ABSENT, DRY_COMPLETE, ORDER_FILLED), _EXIT_OK),
         **dict.fromkeys(
             (
                 RELEASE_MISSING,
@@ -86,7 +97,9 @@ EXIT_BY_STATE: Mapping[str, int] = MappingProxyType(
             ),
             _EXIT_KILL_SWITCH,
         ),
-        SIZE_CAP: _EXIT_REJECTED,
+        **dict.fromkeys((SIZE_CAP, PLACE_REJECTED), _EXIT_REJECTED),
+        FILL_TIMEOUT: _EXIT_FILL_TIMEOUT,
+        POST_ORDER_MISMATCH: _EXIT_POST_ORDER,
         **dict.fromkeys(
             (
                 OUTSIDE_SESSION,
@@ -100,11 +113,13 @@ EXIT_BY_STATE: Mapping[str, int] = MappingProxyType(
         ACCOUNT_CONFLICT: _EXIT_ACCOUNT_GUARD,
         **dict.fromkeys((LOCK_HELD, LOCK_ERROR), _EXIT_LOCKED),
         **dict.fromkeys((LEDGER_CORRUPT, RECONCILE_UNRESOLVED), _EXIT_RECONCILE),
-        **dict.fromkeys((STATE_IN_GIT_TREE, NOT_DRY), _EXIT_CONFIG),
+        **dict.fromkeys((STATE_IN_GIT_TREE, NOT_DRY, NOT_LIVE), _EXIT_CONFIG),
     }
 )
 
-#: Rank for the run exit, ascending: 0 < 2 < 5 < 1 < 3 < 8 < 6 < 7 < 4.
+#: Rank for the run exit, ascending: 0 < 2 < 5 < 1 < 3 < 8 < 9 < 10 < 6 < 7 < 4.
+#: An alarm after the order (9, 10) outweighs any ticker abort; an unresolvable entry (6),
+#: a held lock (7) and the kill switch (4) outweigh the alarm.
 #: Among the exits combined here (ticker ends and run-level stops of one run) the kill
 #: switch wins; 6 and 7 beat everything else; below that 1 > 5 > 2 > 0. Exits that end
 #: the run before or outside this combination do not pass through it: a lock that is
@@ -121,6 +136,8 @@ _RUN_EXIT_RANK = {
             _EXIT_CONFIG,
             _EXIT_GATEWAY,
             _EXIT_ACCOUNT_GUARD,
+            _EXIT_FILL_TIMEOUT,
+            _EXIT_POST_ORDER,
             _EXIT_RECONCILE,
             _EXIT_LOCKED,
             _EXIT_KILL_SWITCH,

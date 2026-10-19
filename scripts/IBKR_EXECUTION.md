@@ -141,11 +141,13 @@ Identical to the table in the docstring of `scripts/ibkr_executor.py`; a test
 | 6 | `EXIT_RECONCILE` | ledger corrupt or a ledger entry could not be reconciled against open orders, completed orders and executions; no new order |
 | 7 | `EXIT_LOCKED` | run lock not acquired (another run holds `ledger.jsonl.lock`) or the lock attempt failed; nothing was done |
 | 8 | `EXIT_ACCOUNT_GUARD` | account guard violated (managedAccounts != ["DUQ634065"]) |
+| 9 | `EXIT_FILL_TIMEOUT` | the order is placed but not filled within the wait; it stays open and nothing is cancelled (D-08) |
+| 10 | `EXIT_POST_ORDER` | the state at IBKR after the order differs from the intent (D-09, REQ-65) |
 | 20 | `EXIT_NO_CREDENTIALS` | IBKR settings missing or unreadable - same meaning as `EXIT_NO_CREDENTIALS` in `daily_paper_run.py` |
 
 Exits 4, 6 and 7 are active since phase 5 (`execute`). When several things go
-wrong in one run, the run exit is the worst by this rank: `4 > 7 > 6 > 8 > 3 >
-1 > 5 > 2 > 0`. The rank combines the ticker ends and run-level stops of a run that
+wrong in one run, the run exit is the worst by this rank: `4 > 7 > 6 > 10 > 9 >
+8 > 3 > 1 > 5 > 2 > 0`. The rank combines the ticker ends and run-level stops of a run that
 got past the lock; it does not make 4 win everywhere. A lock that is held or fails
 ends the run with 7 before the switches are read, a wrong account at connect
 (`managedAccounts`) ends it with 8 even with `KILL` present (that run never cancels),
@@ -668,10 +670,12 @@ collision or contradiction stays exit 6 in both ledgers.
 
 | State | Exit | Meaning |
 |---|---|---|
+| `order-filled` | 0 | the order is filled and matches the intent; fills are in the ledger |
 | `dry-complete` | 0 | the dry run reached its end for this ticker; nothing was sent |
 | `kill-absent` | 0 | no KILL file |
 | `release-ok` | 0 | the release file is valid |
 | `not-dry` | 1 | the placer is not dry; phase 5 refuses to run |
+| `not-live` | 1 | `--live` given but the placer is dry |
 | `state-in-git-tree` | 1 | a state path lies inside a git work tree; refused |
 | `already-attempted` | 2 | the decision key has an `intent` already |
 | `decision-changed` | 2 | the decision key has an `intent` for another rating |
@@ -685,9 +689,12 @@ collision or contradiction stays exit 6 in both ledgers.
 | `release-invalid` | 4 | not UTF-8 JSON, wrong keys or a bad date |
 | `release-missing` | 4 | no RELEASE file |
 | `release-unreadable` | 4 | the RELEASE file cannot be read |
+| `place-rejected` | 5 | IBKR rejected the sent order without a fill (status and error codes in the ledger) |
 | `size-cap` | 5 | planned quantity above `MAX_QTY_PER_ORDER`; rejected, never trimmed |
 | `ledger-corrupt` | 6 | the ledger has a defect that is not a torn tail |
 | `reconcile-unresolved` | 6 | an open ledger entry cannot be resolved against the broker |
+| `fill-timeout` | 9 | no fill within the wait; the order stays open, nothing is cancelled; the next run reconciles |
+| `post-order-mismatch` | 10 | the state at IBKR after the order differs from the intent; the run stops, the next run reconciles |
 | `lock-error` | 7 | the lock attempt itself failed |
 | `lock-held` | 7 | another run holds the lock |
 | `account-conflict` | 8 | account sources disagree; the whole run stops |

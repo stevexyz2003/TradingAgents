@@ -354,6 +354,8 @@ class TestWiring:
             "EXIT_RECONCILE",
             "EXIT_LOCKED",
             "EXIT_ACCOUNT_GUARD",
+            "EXIT_FILL_TIMEOUT",
+            "EXIT_POST_ORDER",
         )
         constants = {getattr(executor, name) for name in names}
         assert set(guards.EXIT_BY_STATE.values()) <= constants
@@ -366,6 +368,8 @@ class TestWiring:
         assert guards._EXIT_RECONCILE == executor.EXIT_RECONCILE
         assert guards._EXIT_LOCKED == executor.EXIT_LOCKED
         assert guards._EXIT_ACCOUNT_GUARD == executor.EXIT_ACCOUNT_GUARD
+        assert guards._EXIT_FILL_TIMEOUT == executor.EXIT_FILL_TIMEOUT == 9
+        assert guards._EXIT_POST_ORDER == executor.EXIT_POST_ORDER == 10
 
 
 # --- the dry-run ledger and the local chain ---------------------------------------------------

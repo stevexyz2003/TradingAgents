@@ -60,6 +60,8 @@ Exit codes:
     6   ledger corrupt or reconciliation unresolved
     7   run lock not acquired (second instance), clean exit
     8   account guard violated (managedAccounts != ["DUQ634065"])
+    9   fill timeout: the order is placed but not filled within the wait; it stays open (D-08)
+    10  post-order mismatch: the state at IBKR after the order differs from the intent (D-09, REQ-65)
     20  IBKR settings missing or unreadable - same meaning as EXIT_NO_CREDENTIALS in daily_paper_run.py
 
 Code 3 means "gateway" here, unlike EXIT_RUN_FAILED (3) in the paper run.
@@ -95,6 +97,8 @@ EXIT_REJECTED = 5
 EXIT_RECONCILE = 6
 EXIT_LOCKED = 7
 EXIT_ACCOUNT_GUARD = 8
+EXIT_FILL_TIMEOUT = 9
+EXIT_POST_ORDER = 10
 EXIT_NO_CREDENTIALS = 20
 
 #: The settings the command needs (D-06). User name and password stay out:
@@ -1120,8 +1124,8 @@ def _ledger_row_finished(ctx, row: dict, state: str, detail: str) -> None:
     """
     guards = ctx.mods.guards
     ledger_mod = ctx.mods.ledger
-    if state == guards.DRY_COMPLETE:
-        return  # the placer wrote ``dry_complete`` already
+    if state == guards.DRY_COMPLETE or state in guards.PLACER_STATES:
+        return  # the placer wrote ``dry_complete`` / its own fill or reject lines already
     fresh = row["freshness"]
     fields = {
         "ticker": row["ticker"],

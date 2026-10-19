@@ -323,6 +323,39 @@ def test_exit_table_covers_every_state(state, code):
     assert g.EXIT_BY_STATE[state] == code
 
 
+@pytest.mark.parametrize(
+    ("state", "code"),
+    [
+        (g.NOT_LIVE, 1),
+        (g.ORDER_FILLED, 0),
+        (g.PLACE_REJECTED, 5),
+        (g.FILL_TIMEOUT, 9),
+        (g.POST_ORDER_MISMATCH, 10),
+    ],
+)
+def test_live_states_exit_table(state, code):
+    assert g.EXIT_BY_STATE[state] == code
+
+
+def test_live_states_placer_states_are_the_ones_the_placer_records():
+    assert {g.ORDER_FILLED, g.PLACE_REJECTED} == g.PLACER_STATES
+
+
+@pytest.mark.parametrize(
+    ("codes", "expected"),
+    [
+        ([0, 9], 9),
+        ([9, 10], 10),
+        ([10, 6], 6),
+        ([10, 4], 4),
+        ([1, 9], 9),
+        ([8, 9], 9),
+    ],
+)
+def test_rank_with_alarm_exits(codes, expected):
+    assert g.worst_run_exit(codes) == expected
+
+
 def test_exit_table_is_read_only():
     with pytest.raises(TypeError):
         g.EXIT_BY_STATE["x"] = 1  # type: ignore[index]
