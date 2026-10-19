@@ -32,6 +32,10 @@ SHA as provenance) and only then completed by the placer. In phase 5 the placer 
 dry: it writes ``dry_complete`` and sends nothing. Dry runs write ``ledger-dryrun.jsonl`` in
 the state folder, never ``ledger.jsonl``; a state folder inside a git work tree is refused.
 
+Phase 6 adds ``--live`` to ``execute``: dry unless that flag is given. With it the live placer
+sends one market order per intent, waits for the fill, checks the result against the intent
+and writes the fills to ``ledger.jsonl`` in the same run; any deviation ends the whole run.
+
 Operating manual: ``scripts/IBKR_EXECUTION.md``.
 
     ibkr_executor.py account --out PATH [--log-file PATH] [--env-file PATH]
@@ -39,7 +43,8 @@ Operating manual: ``scripts/IBKR_EXECUTION.md``.
                              [--out PATH] [--log-file PATH] [--env-file PATH]
     ibkr_executor.py preview TICKER... [--contracts PATH] [--out PATH] [--log-file PATH]
                              [--env-file PATH]
-    ibkr_executor.py execute TICKER... [--contracts PATH] [--log-file PATH] [--env-file PATH]
+    ibkr_executor.py execute TICKER... [--live] [--contracts PATH] [--log-file PATH]
+                             [--env-file PATH]
 
 Settings come from the ``.env`` at the repository root (a fixed path, not the
 current directory) or from ``--env-file``. Only IBKR_HOST, IBKR_PORT,
@@ -130,9 +135,14 @@ _STATE_MAINTENANCE_PATH = Path(__file__).with_name("state_maintenance.py")
 _GUARDS_PATH = Path(__file__).with_name("ibkr_guards.py")
 _LEDGER_PATH = Path(__file__).with_name("ibkr_ledger.py")
 
-#: ``execute`` runs dry in phase 5: a placer that is not dry ends the run before any file
-#: is touched. Phase 6 removes only this.
-EXECUTE_FORCED_DRY = True
+#: How long the live placer waits for the fill of one market order (D-08). The deadline never
+#: cancels: a timeout is reported and the state is read again.
+FILL_TIMEOUT_S = 60.0
+
+#: After a fill the broker's order history is read up to this many times, this far apart: its
+#: three sources (open, completed, executions) are not read atomically (Pitfall 8).
+POST_ORDER_READS = 5
+POST_ORDER_RETRY_S = 1.0
 
 #: After the global cancel the open orders are read again for this long, every interval:
 #: the request is fire-and-forget, only the re-read proves it worked (Pitfall 5).
@@ -762,7 +772,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "IBKR paper executor for DUQ634065 (read-only in phases 2-4; "
             "phase 4 previews with whatIf and sends nothing; "
-            "phase 5 executes dry: guards, ledger, no order)."
+            "execute is dry unless --live: guards, ledger, and with --live a market order)."
         ),
     )
     sub = parser.add_subparsers(dest="command")
@@ -790,10 +800,16 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument("--log-file", type=Path, default=default_log_file())
     preview.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
 
-    # No live, release or date option (D-07): phase 5 executes dry and nothing lifts that.
-    help_execute = "guarded chain to a dry completion; phase 5 sends no order"
+    # ``--live`` per run (phase 6, D-01); no release or date option: RELEASE is a file, the
+    # date comes from the paper-log.
+    help_execute = "guarded chain: dry by default; --live places market orders on the paper account"
     execute = sub.add_parser("execute", help=help_execute)
     execute.add_argument("tickers", nargs="*", metavar="TICKER")
+    execute.add_argument(
+        "--live",
+        action="store_true",
+        help="send real orders to the paper account (needs a valid RELEASE); without it the run is dry",
+    )
     execute.add_argument("--contracts", type=Path, default=None, help="contracts.json path")
     execute.add_argument("--log-file", type=Path, default=default_log_file())
     execute.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
@@ -1067,6 +1083,15 @@ class DryPlacer:
         return ctx.mods.guards.DRY_COMPLETE
 
 
+class LivePlacer:
+    """The phase-6 placer: sends one market order per intent (``--live`` only)."""
+
+    dry = False
+
+    def complete(self, ctx, intent: dict) -> str:
+        raise NotImplementedError
+
+
 def _execute(args, broker_factory, logger, clock, paper_log_factory, calendar, placer) -> int:
     try:
         broker_mod = load_broker_module()
@@ -1094,7 +1119,7 @@ def _execute(args, broker_factory, logger, clock, paper_log_factory, calendar, p
         def paper_log_factory(repo, remote, branch):
             return paperlog_mod.GitPaperLog(repo, remote, branch)
 
-    placer = DryPlacer() if placer is None else placer
+    placer = (LivePlacer() if args.live else DryPlacer()) if placer is None else placer
     mods = SimpleNamespace(
         broker=broker_mod,
         contracts=contracts_mod,
@@ -1156,18 +1181,26 @@ def _ledger_row_finished(ctx, row: dict, state: str, detail: str) -> None:
 def run_execute(
     args, mods, broker_factory, paper_log_factory, calendar, placer, logger, progress, clock
 ) -> int:
-    """The guarded chain to a dry completion; nothing is sent (phase 5).
+    """The guarded chain: dry unless ``--live`` (then the live placer sends, D-01).
 
     ``clock`` is the injected callable: ``now_utc`` is read once here, later guard checks
     read ``ctx.clock()`` again.
     """
-    # Phase 6 removes only this check (EXECUTE_FORCED_DRY): before any file is touched.
-    if EXECUTE_FORCED_DRY and getattr(placer, "dry", None) is not True:
+    # Placer and mode must agree, before any file is touched (D-01): no global switch.
+    live = bool(getattr(args, "live", False))
+    if not live and getattr(placer, "dry", None) is not True:
         return _fail(
             logger,
             EXIT_CONFIG,
             "ibkr-state=NOT_DRY the placer is not dry",
-            "phase 5: execute is forced dry",
+            "execute without --live needs a dry placer",
+        )
+    if live and getattr(placer, "dry", None) is not False:
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            "ibkr-state=NOT_LIVE --live with a dry placer",
+            "execute --live needs the live placer",
         )
     now_utc = clock()
     raw = read_settings(args.env_file)
@@ -1392,9 +1425,10 @@ def _run_locked(
         switches.release.valid_until,
     )
     try:
+        live = bool(getattr(args, "live", False))
         ctx.ledger = ledger_mod.Ledger.open(
-            default_dryrun_ledger_file(),
-            mode=ledger_mod.MODE_DRYRUN,
+            default_ledger_file() if live else default_dryrun_ledger_file(),
+            mode=ledger_mod.MODE_LIVE if live else ledger_mod.MODE_DRYRUN,
             clock=clock,
             run_id=uuid.uuid4().hex,
         )

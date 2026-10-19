@@ -217,7 +217,12 @@ def _run_execute(
         placer=placer,
     )
     executor.close_logging()
-    return code, _read_records(executor.default_dryrun_ledger_file())
+    ledger_file = (
+        executor.default_ledger_file()
+        if "--live" in extra
+        else executor.default_dryrun_ledger_file()
+    )
+    return code, _read_records(ledger_file)
 
 
 def _assert_nothing_sent(fake, previews=None):
@@ -274,7 +279,7 @@ class TestWiring:
         assert records == []
         assert "execute needs at least one TICKER (no default list)" in capsys.readouterr().err
 
-    @pytest.mark.parametrize("flag", ["--live", "--wet", "--real", "--force"])
+    @pytest.mark.parametrize("flag", ["--wet", "--real", "--force"])
     def test_there_is_no_option_that_lifts_the_dry_run(self, tmp_path, flag):
         factory = _PaperLogFactory(FixturePaperLog.unavailable("x"))
         code, records = _run_execute(
@@ -607,6 +612,39 @@ def _gateway_run(
         placer=placer,
         release=release,
         kill=kill,
+    )
+
+
+def _live_run(
+    tmp_path,
+    loop,
+    fake,
+    *,
+    rating="Buy",
+    tickers=("AAPL",),
+    paper=None,
+    clock=OPEN_NOW,
+    calendar=None,
+    placer=None,
+    release=True,
+    kill=False,
+    extra_argv=(),
+):
+    """Like ``_gateway_run`` with ``--live``; returns (exit code, ``ledger.jsonl`` records)."""
+    paper = _buy_paper(tmp_path, rating) if paper is None else paper
+    contracts = _contracts_file(tmp_path, {t: _identity(t) for t in tickers})
+    return _run_execute(
+        tmp_path,
+        _fake_factory(fake, loop),
+        list(tickers),
+        paper_log=paper,
+        clock=clock,
+        calendar=calendar,
+        contracts=contracts,
+        placer=placer,
+        release=release,
+        kill=kill,
+        extra=("--live", *extra_argv),
     )
 
 
@@ -2363,3 +2401,73 @@ class TestSourceConflict:
         code, records = _two_ticker_run(tmp_path, loop, fake)
         assert code == executor.EXIT_OK
         assert _intent_tickers(records) == ["AAPL", "MSFT"]
+
+
+class TestLiveSwitch:
+    """``--live`` switches per run (D-01); placer and mode must agree before any file."""
+
+    def test_not_live_refuses_a_dry_placer_before_any_file(self, tmp_path):
+        factory = _RecordingFactory()
+        code, records = _run_execute(
+            tmp_path,
+            factory,
+            ["AAPL"],
+            paper_log=_buy_paper(tmp_path),
+            placer=executor.DryPlacer(),
+            extra=("--live",),
+        )
+        assert code == executor.EXIT_CONFIG
+        assert "ibkr-state=NOT_LIVE" in _log_text(tmp_path)
+        assert records == []
+        assert not executor.default_ledger_file().exists()
+        assert not executor.default_dryrun_ledger_file().exists()
+        assert factory.calls == []
+
+    def test_without_live_the_default_placer_is_dry_and_writes_only_the_dryrun_ledger(
+        self, tmp_path, loop
+    ):
+        fake = _fake_for()
+        code, records = _gateway_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_OK
+        assert [r["event"] for r in records][-2:] == ["dry_complete", "run_end"]
+        assert not executor.default_ledger_file().exists()
+        _assert_nothing_sent(fake, 1)
+
+    def test_live_without_release_exits_4_and_sends_nothing(self, tmp_path, loop):
+        fake = _fake_for()
+        code, records = _live_run(tmp_path, loop, fake, release=False)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert "placeOrder" not in fake.calls
+        assert fake.placed_orders == []
+        assert records[0]["event"] == "run_start"
+        assert records[0]["mode"] == "live"
+        assert not executor.default_dryrun_ledger_file().exists()
+
+    def test_live_kill_wins_even_with_a_release(self, tmp_path, loop):
+        fake = _fake_for()
+        code, records = _live_run(tmp_path, loop, fake, kill=True)
+        assert code == executor.EXIT_KILL_SWITCH
+        assert "placeOrder" not in fake.calls
+        assert fake.placed_orders == []
+        assert records[-1]["event"] == "run_end"
+
+    def test_live_ledger_mode_and_lock_path(self, tmp_path, loop):
+        fake = _fake_for()
+        seen = []
+
+        class SpyPlacer(executor.LivePlacer):
+            def complete(self, ctx, intent):
+                seen.append(
+                    (
+                        ctx.ledger.path,
+                        ctx.ledger.mode,
+                        executor.default_ledger_file().with_name("ledger.jsonl.lock").exists(),
+                    )
+                )
+                return ctx.mods.guards.ORDER_FILLED
+
+        code, _records = _live_run(tmp_path, loop, fake, placer=SpyPlacer())
+        assert code == executor.EXIT_OK
+        ((path, mode, _lock),) = seen
+        assert path == executor.default_ledger_file()
+        assert mode == "live"
