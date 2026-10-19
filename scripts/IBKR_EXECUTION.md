@@ -676,6 +676,13 @@ two ways:
 Neither case sends a second order or ends with exit 6. If the order has been filled
 in the meantime, the reconciliation writes the fills with `source: reconcile`.
 
+**Reconcile on the same trading day.** After a `fill-timeout` (the console line says
+so), rerun `execute` the same trading day, after the session close at the latest, or
+check the order in TWS. The broker's completed orders and executions cover the current
+day only: a DAY order that expired unfilled leaves no trace the next day, and the run
+after it ends with exit 6 (`no_trace`) on its `placed` entry. That case is closed with
+`--resolve KEY=expired_unfilled` (see "Resolving exit 6").
+
 ## Ledger and reconciliation
 
 Files in the state folder: `ledger-dryrun.jsonl` (what phase 5 writes),
@@ -686,7 +693,7 @@ The ledger is JSONL, one line per event, appended and never rewritten. Events:
 `run_start`, `switch_check`, `reconcile`, `intent`, `dry_complete`, `placed`,
 `filled`, `partial`, `rejected`, `skipped` (always with a `reason`), `kill_cancel`,
 `alarm` (no lifecycle event: it leaves the entry open), `resolved` (an operator closed a live
-`intent` by hand, see below), `run_end`. A fill line (`filled` or `partial`) exists per `exec_id` and carries the
+`intent` (`never_sent`) or `placed` entry (`expired_unfilled`) by hand, see below), `run_end`. A fill line (`filled` or `partial`) exists per `exec_id` and carries the
 `side`; a correction (`.02`) replaces its `.01`, and the position is the signed sum
 (BUY plus, SELL minus) of the effective fills. An attempt is the `intent`: per decision key (`trade_date|ticker`) there
 is at most one, and the first version wins. A second run of the same key is
@@ -743,15 +750,36 @@ collision or contradiction stays exit 6 in both ledgers.
    `ledger-dryrun.jsonl` (for instance to `ledger-dryrun.jsonl.bak`). Never edit or
    delete lines inside it.
 4. In the live ledger, when the console names `no_trace` and the three sources plus TWS show
-   no order for the key, close the entry by hand:
-   `python scripts/ibkr_executor.py execute --resolve "2026-10-09|AAPL=never_sent" --note "why"`.
-   The flag only appends one `resolved` event (D-14) and never changes a line. It works
-   only on an open `intent` without a `placed`, and only when the broker history shows no
-   trace (a fresh read at that moment); a trace is exit 6, an unknown, closed or `placed`
-   key is exit 2, bad arguments are exit 1, a held lock is exit 7. `--note` is required
-   (1-500 printable characters), and the line is marked `source: operator`. Afterwards the
-   key stays used up (`already_attempted`): the decision is not sent again. `collision`
-   and `contradiction` stay manual work.
+   no order for the key, close the entry by hand. There are two outcomes, one per last
+   lifecycle event of the entry:
+   - `never_sent`: the last event is `intent` (a crash before or during the send):
+     `python scripts/ibkr_executor.py execute --resolve "2026-10-09|AAPL=never_sent" --note "why"`.
+   - `expired_unfilled`: the last event is `placed` (a `fill-timeout` whose DAY order
+     expired; reconciled only on a later day). First confirm in TWS (order history of
+     that day) that the order expired without a fill, then:
+     `python scripts/ibkr_executor.py execute --resolve "2026-10-09|AAPL=expired_unfilled" --note "expired unfilled per TWS"`.
+
+   The flag only appends one `resolved` event (D-14) with the outcome and never changes
+   a line. Each outcome refuses the other's case (exit 2); an unknown or closed key is
+   exit 2, bad arguments are exit 1, a held lock is exit 7. `--note` is required (1-500
+   printable characters), and the line is marked `source: operator`. Afterwards the key
+   stays used up (`already_attempted`): the decision is not sent again.
+
+   **Broker guard (both outcomes, WR-03).** Before writing, the flag reads the broker
+   read-only (order history and positions; no write permit) and refuses without writing
+   when:
+   - an open order, a completed order or an execution matches the entry's `orderRef`,
+     or the `permId`/`orderId` of its `placed` line: exit 6, the normal reconciliation
+     resolves it;
+   - the broker position for the ticker's `conId` differs from the signed sum of the
+     ledger's own fills for that `conId` (unaccounted shares, which may come from this
+     very order, filled outside the visible window): exit 6
+     (`RESOLVE_POSITION_MISMATCH`). Shares bought by hand in TWS trip this too; then
+     the ledger and the account have to be brought in line by hand first;
+   - the broker cannot be read: exit 3 (fail-closed).
+
+   This is why `never_sent` cannot book an order that filled as "never sent": its
+   shares show up in the position. `collision` and `contradiction` stay manual work.
 
 ### States (phase 5)
 
@@ -794,6 +822,9 @@ step with it. The run exit is the worst of these by the rank under "Exit codes".
 ```
 :: close a live intent that never reached the broker (no trace anywhere); appends one resolved line
 python scripts/ibkr_executor.py execute --resolve "2026-10-09|AAPL=never_sent" --note "crash before send"
+
+:: close a placed live entry whose DAY order expired unfilled (confirmed in TWS); appends one resolved line
+python scripts/ibkr_executor.py execute --resolve "2026-10-09|AAPL=expired_unfilled" --note "expired unfilled per TWS"
 
 :: dry run: decision from paper-log to a whatIf preview, sends nothing
 python scripts/ibkr_executor.py preview AAPL

@@ -584,3 +584,15 @@ def test_handbook_documents_resolve_never_sent():
     for needle in ("--resolve", "never_sent", "--note", "resolved"):
         assert needle in text, needle
     assert "comes with phase 6" not in text
+
+
+@pytest.mark.unit
+def test_handbook_documents_resolve_expired_unfilled_and_the_broker_guard():
+    text = _handbook_text()
+    for needle in (
+        "expired_unfilled",
+        "Reconcile on the same trading day",
+        "Broker guard",
+        "RESOLVE_POSITION_MISMATCH",
+    ):
+        assert needle in text, needle

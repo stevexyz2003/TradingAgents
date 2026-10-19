@@ -49,10 +49,13 @@ RUN_END = "run_end"
 #: run (``fills_booked: true``), which closes the entry (WR-02).
 ALARM = "alarm"
 #: Closes an open live entry by hand (D-14, phase-5 D-19); never changes a line; the key
-#: stays used up (``attempt_of`` still finds the intent).
+#: stays used up (``attempt_of`` still finds the intent). ``never_sent`` closes an entry
+#: whose last lifecycle event is ``intent``; ``expired_unfilled`` one whose last is
+#: ``placed`` (the operator confirmed in TWS that the DAY order expired unfilled, WR-03).
 RESOLVED = "resolved"
 NEVER_SENT = "never_sent"
-RESOLVE_OUTCOMES = frozenset({NEVER_SENT})
+EXPIRED_UNFILLED = "expired_unfilled"
+RESOLVE_OUTCOMES = frozenset({NEVER_SENT, EXPIRED_UNFILLED})
 
 EVENTS = frozenset(
     {

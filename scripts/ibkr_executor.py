@@ -817,8 +817,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY=OUTCOME",
         default=None,
         help=(
-            "close an open live intent without a broker trace: KEY=never_sent (needs --note); "
-            "takes no TICKER and no --live"
+            "close an open live entry without a broker trace: KEY=never_sent (last event "
+            "intent) or KEY=expired_unfilled (last event placed, DAY order expired unfilled "
+            "per TWS); needs --note, takes no TICKER and no --live"
         ),
     )
     execute.add_argument("--note", metavar="TEXT", default=None, help="reason for --resolve")
@@ -829,6 +830,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 NOTE_MAX = 500
+#: ``--resolve`` outcome -> the last lifecycle event it may close (D-14, WR-03). Literals
+#: on purpose: the ledger module is loaded lazily; a test keeps them in step with it.
+RESOLVE_LAST_EVENT = {"never_sent": "intent", "expired_unfilled": "placed"}
 
 
 def _split_resolve(value: str) -> tuple[str, str]:
@@ -842,11 +846,11 @@ def _resolve_args_problem(args) -> str | None:
     if args.tickers or args.live:
         return "--resolve takes no TICKER and no --live"
     key, outcome = _split_resolve(args.resolve)
-    if outcome != "never_sent":
-        return f"--resolve needs KEY=never_sent, got outcome {outcome!r}"
+    if outcome not in RESOLVE_LAST_EVENT:
+        return f"--resolve needs KEY=never_sent or KEY=expired_unfilled, got outcome {outcome!r}"
     note = args.note
     if note is None or not note.strip():
-        return "--resolve needs --note TEXT (why the order was never sent)"
+        return "--resolve needs --note TEXT (why the entry can be closed)"
     if len(note) > NOTE_MAX or not note.isprintable():
         return f"--note must be printable text of at most {NOTE_MAX} characters"
     guards = load_guards_module()
@@ -1311,7 +1315,9 @@ class LivePlacer:
         )
         print(
             f"execute: {guards.FILL_TIMEOUT} ({intent['ticker']}: {detail}); the order stays "
-            "open, nothing was cancelled - the next run reconciles"
+            "open, nothing was cancelled - the next run reconciles. Reconcile on the SAME "
+            "trading day (rerun execute after the session or check TWS): the next day the "
+            "broker may show no trace of it"
         )
         raise _ExecuteStop(EXIT_FILL_TIMEOUT, guards.FILL_TIMEOUT, detail)
 
@@ -1353,7 +1359,8 @@ class LivePlacer:
         )
         print(
             f"execute: {guards.FILL_TIMEOUT} ({intent['ticker']}: {detail}); the order was "
-            "sent, nothing was cancelled - the next run reconciles"
+            "sent, nothing was cancelled - the next run reconciles. Reconcile on the SAME "
+            "trading day (rerun execute after the session or check TWS)"
         )
         return _ExecuteStop(EXIT_FILL_TIMEOUT, guards.FILL_TIMEOUT, detail)
 
@@ -1620,15 +1627,18 @@ def _execute(args, broker_factory, logger, clock, paper_log_factory, calendar, p
 
 
 def run_resolve_entry(args, mods, broker_factory, logger, progress, clock) -> int:
-    """``execute --resolve KEY=never_sent --note TEXT``: close a live ``intent`` by hand (D-14).
+    """``execute --resolve KEY=<outcome> --note TEXT``: close an open live entry by hand.
 
-    Appends one ``resolved`` event under the ledger lock and never changes a line. Only an
-    open entry whose last lifecycle event is ``intent`` qualifies, and only when the broker's
-    history shows no trace of it; the key stays used up. No order is sent, so RELEASE and KILL
-    are not looked at.
+    ``never_sent`` closes an entry whose last lifecycle event is ``intent`` (D-14),
+    ``expired_unfilled`` one whose last is ``placed`` (WR-03); each refuses the other's case.
+    Appends one ``resolved`` event under the ledger lock and never changes a line; the key
+    stays used up. Before writing, a read-only broker guard must pass: no open order,
+    execution or completed order of the entry (orderRef, permId, orderId) and a broker
+    position for its conId equal to the ledger's own fills. An unreadable broker refuses.
+    No order is sent, so RELEASE and KILL are not looked at.
     """
     ledger_mod = mods.ledger
-    key, _outcome = _split_resolve(args.resolve)
+    key, outcome = _split_resolve(args.resolve)
     raw = read_settings(args.env_file)
     host, port, _account = validate_settings(raw, mods.broker.EXPECTED_ACCOUNT)
     state_dir = default_ledger_file().parent
@@ -1695,12 +1705,21 @@ def run_resolve_entry(args, mods, broker_factory, logger, progress, clock) -> in
                 f"execute: {key} is not an open entry of the live ledger",
             )
         last = ledger.last_event(key)
-        if last is None or last["event"] != ledger_mod.INTENT:
+        found = last and last["event"]
+        if outcome == ledger_mod.NEVER_SENT and found != ledger_mod.INTENT:
             return _fail(
                 logger,
                 EXIT_PRECONDITION,
-                f"ibkr-state=RESOLVE_NOT_INTENT key={key} last={last and last['event']}",
-                f"execute: {key} is past its intent: a placed order was sent",
+                f"ibkr-state=RESOLVE_NOT_INTENT key={key} last={found}",
+                f"execute: {key} is past its intent: a placed order was sent "
+                "(expired_unfilled closes a placed entry)",
+            )
+        if outcome == ledger_mod.EXPIRED_UNFILLED and found != ledger_mod.PLACED:
+            return _fail(
+                logger,
+                EXIT_PRECONDITION,
+                f"ibkr-state=RESOLVE_NOT_PLACED key={key} last={found}",
+                f"execute: {key} has no placed order (never_sent closes an intent)",
             )
         ctx = SimpleNamespace(
             logger=logger,
@@ -1712,8 +1731,11 @@ def run_resolve_entry(args, mods, broker_factory, logger, progress, clock) -> in
             history=None,
             stack=contextlib.ExitStack(),
         )
+        # Read-only: order history and positions, no write permit. A failing read ends on
+        # the existing error path (exit 3) before anything is written: fail-closed.
         try:
             history = _history(ctx)
+            snapshot = _session(ctx).positions()
         except _ExecuteStop as stop:
             return stop.code
         finally:
@@ -1728,18 +1750,74 @@ def run_resolve_entry(args, mods, broker_factory, logger, progress, clock) -> in
                 f"execute: {key} shows a trace at the broker ({res.outcome}); "
                 "the normal reconciliation resolves it",
             )
+        trace = _resolve_id_trace(ledger, ledger_mod, entry, history)
+        if trace is not None:
+            return _fail(
+                logger,
+                EXIT_RECONCILE,
+                f'ibkr-state=RESOLVE_HAS_TRACE key={key} detail="{trace}"',
+                f"execute: {key} shows a trace at the broker ({trace}); "
+                "the normal reconciliation resolves it",
+            )
+        con_id = entry["con_id"]
+        held = sum(float(p.quantity) for p in snapshot.positions if p.con_id == con_id)
+        booked = ledger.filled_quantity(con_id)
+        if held != booked:
+            return _fail(
+                logger,
+                EXIT_RECONCILE,
+                f"ibkr-state=RESOLVE_POSITION_MISMATCH key={key} con_id={con_id} "
+                f"broker={held:g} ledger={booked:g}",
+                f"execute: {key} not resolved: the broker holds {held:g} of conId {con_id}, "
+                f"the ledger's fills account for {booked:g}; unaccounted shares may come "
+                "from this order",
+            )
         ledger.append(
             ledger_mod.RESOLVED,
             decision_key=key,
             ticker=entry["ticker"],
-            outcome=ledger_mod.NEVER_SENT,
+            outcome=outcome,
             note=args.note,
-            detail=res.detail,
+            detail=f"{res.detail}; position broker={held:g} ledger={booked:g}",
             source="operator",
         )
-        logger.info('ibkr-state=RESOLVED_BY_OPERATOR key=%s note="%s"', key, args.note)
-        print(f"execute: resolved {key} as never_sent")
+        logger.info(
+            'ibkr-state=RESOLVED_BY_OPERATOR key=%s outcome=%s note="%s"', key, outcome, args.note
+        )
+        print(f"execute: resolved {key} as {outcome}")
         return EXIT_OK
+
+
+def _resolve_id_trace(ledger, ledger_mod, entry: dict, history) -> str | None:
+    """A broker trace of the entry by its ids, beyond ``resolve_entry``'s ``orderRef`` match.
+
+    The ``placed`` lines of the key carry the broker's ``permId``/``orderId``; an open order or
+    an execution (or a completed order) with one of them, or with the ``orderRef``, is a trace
+    and refuses ``--resolve`` (WR-03).
+    """
+    key = entry["decision_key"]
+    ref = entry.get("order_ref") or key
+    placed = [r for r in ledger.records if r.get("decision_key") == key]
+    perm_ids = {r.get("perm_id") for r in placed if r["event"] == ledger_mod.PLACED} - {0, None}
+    order_ids = {r.get("order_id") for r in placed if r["event"] == ledger_mod.PLACED} - {0, None}
+
+    def hit(record) -> bool:
+        # orderIds are per client session, so they only count on the entry's own conId.
+        return (
+            record.order_ref == ref
+            or getattr(record, "perm_id", 0) in perm_ids
+            or (record.con_id == entry["con_id"] and getattr(record, "order_id", 0) in order_ids)
+        )
+
+    for name, rows in (
+        ("open order", history.open),
+        ("execution", history.executions),
+        ("completed order", history.completed),
+    ):
+        matching = [r for r in rows if hit(r)]
+        if matching:
+            return f"{len(matching)} {name}(s) match orderRef/permId/orderId"
+    return None
 
 
 def _ledger_row_finished(ctx, row: dict, state: str, detail: str) -> None:
@@ -2139,7 +2217,8 @@ def _reconcile(ctx) -> None:
     A ``reconcile`` event is no lifecycle event: an entry that cannot be resolved stays open
     in every later run, and the run ends with exit 6 and no new ``intent`` (D-19). Resolution
     by hand follows the manual (IBKR_EXECUTION.md, Ledger and reconciliation); ``--resolve``
-    closes a ``no_trace`` live intent.
+    closes a ``no_trace`` live entry (``never_sent`` after ``intent``, ``expired_unfilled`` after
+    ``placed``).
     """
     pending = ctx.ledger.unresolved()
     if not pending:
