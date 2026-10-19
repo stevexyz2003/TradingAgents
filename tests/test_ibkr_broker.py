@@ -98,7 +98,7 @@ class _WritesDuringConnect(FakeIB):
 def test_forbidden_call_check_sees_a_client_write_without_the_barrier(loop, monkeypatch):
     # Without the barrier the client recorder runs, and the check over ``calls``
     # trips: proof that the assertion in the guard tests can fail.
-    monkeypatch.setattr(broker, "_arm_write_barrier", lambda client, permit=None: None)
+    monkeypatch.setattr(broker, "_arm_write_barrier", lambda client, permit=None, order_permit=None: None)
     fake = _WritesDuringConnect()
     _connected(fake, loop)
     assert any(call in fake.calls for call in FORBIDDEN_CALLS)
@@ -1774,3 +1774,137 @@ def test_positions_refuses_an_account_value_that_is_not_a_finite_number(loop, ta
         _connected(fake, loop).positions()
     assert info.value.state == "SNAPSHOT_INCOMPLETE"
     assert tag in info.value.detail
+
+
+# --- phase 6: the one-shot order permit for a real market order (REQ-IBKR-10, REQ-66) ----
+
+ORDER_REF = "2026-10-09|AAPL"
+
+
+def _real_order(ib_async, **overrides):
+    fields = {
+        "action": "BUY",
+        "totalQuantity": 2,
+        "orderType": "MKT",
+        "tif": "DAY",
+        "account": "DUQ634065",
+        "orderRef": ORDER_REF,
+        "whatIf": False,
+    }
+    fields.update(overrides)
+    return ib_async.Order(**fields)
+
+
+def _order_permit_client(loop, monkeypatch, *, open_permit=True):
+    ib_async, client, sent = _wire_client(loop, monkeypatch)
+    permit = broker._OrderPermit()
+    broker._arm_write_barrier(client, None, permit)
+    permit.open = open_permit
+    contract, _ = _stock_and_order(ib_async, False)
+    return ib_async, client, sent, permit, contract
+
+
+def test_order_permit_closed_refuses_a_real_order_on_every_level(loop, monkeypatch):
+    ib_async, client, sent, permit, contract = _order_permit_client(
+        loop, monkeypatch, open_permit=False
+    )
+    with pytest.raises(broker.ReadOnlyViolation, match="placeOrder"):
+        client.placeOrder(1, contract, _real_order(ib_async))
+    with pytest.raises(broker.ReadOnlyViolation, match="message 3"):
+        client.sendMsg("3\0" + "1\0")
+    del client.placeOrder  # the class method goes through the guarded send
+    with pytest.raises(broker.ReadOnlyViolation, match="message 3"):
+        client.placeOrder(1, contract, _real_order(ib_async))
+    assert sent == [] and permit.sent == 0
+
+
+def test_order_permit_open_passes_one_plain_market_order_and_shuts_on_the_wire(
+    loop, monkeypatch
+):
+    ib_async, client, sent, permit, contract = _order_permit_client(loop, monkeypatch)
+    client.placeOrder(1, contract, _real_order(ib_async))
+    assert len(sent) == 1
+    assert permit.open is False and permit.sent == 1
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.placeOrder(2, contract, _real_order(ib_async))
+    assert len(sent) == 1 and permit.sent == 1
+
+
+def test_order_permit_real_client_layout_pin(loop, monkeypatch):
+    ib_async, client, sent, permit, contract = _order_permit_client(loop, monkeypatch)
+    client.placeOrder(1, contract, _real_order(ib_async))
+    parts = sent[0][4:].decode().split("\0")
+    assert parts[0] == "3"
+    assert parts[4] == "STK"
+    assert parts[16] == "BUY"
+    assert parts[17] == "2"
+    assert parts[18] == "MKT"
+    assert parts[21] == "DAY"
+    assert parts[23] == "DUQ634065"
+    assert parts[26] == ORDER_REF
+    assert parts[84] == "0"
+
+
+def test_order_permit_open_passes_a_plain_order_on_the_field_level(loop, monkeypatch):
+    ib_async, client, sent, permit, contract = _order_permit_client(loop, monkeypatch)
+    del client.placeOrder
+    client.placeOrder(1, contract, _real_order(ib_async))
+    assert len(sent) == 1 and permit.sent == 1
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"orderType": "LMT", "lmtPrice": 100.0},
+        {"account": "DU0000000"},
+        {"orderRef": ""},
+        {"tif": "GTC"},
+        {"totalQuantity": 0},
+        {"action": "SSHORT"},
+    ],
+    ids=["limit", "other-account", "no-ref", "gtc", "zero-quantity", "bad-action"],
+)
+@pytest.mark.parametrize("field_level", (False, True), ids=["named", "fields"])
+def test_order_permit_open_refuses_what_is_not_a_plain_market_order(
+    loop, monkeypatch, overrides, field_level
+):
+    ib_async, client, sent, permit, contract = _order_permit_client(loop, monkeypatch)
+    if field_level:
+        del client.placeOrder
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.placeOrder(1, contract, _real_order(ib_async, **overrides))
+    assert sent == [] and permit.sent == 0 and permit.open is True
+
+
+def test_order_permit_open_refuses_an_option_contract(loop, monkeypatch):
+    ib_async, client, sent, permit, _ = _order_permit_client(loop, monkeypatch)
+    option = ib_async.Contract(conId=1, symbol="AAPL", secType="OPT", exchange="SMART")
+    with pytest.raises(broker.ReadOnlyViolation):
+        client.placeOrder(1, option, _real_order(ib_async))
+    assert sent == [] and permit.sent == 0 and permit.open is True
+
+
+@pytest.mark.parametrize("msg_id", (4, 19, 21, 58))
+def test_order_permit_open_keeps_the_other_write_messages_shut(loop, monkeypatch, msg_id):
+    ib_async, client, sent, permit, contract = _order_permit_client(loop, monkeypatch)
+    with pytest.raises(broker.ReadOnlyViolation, match=f"message {msg_id}"):
+        client.send(msg_id, 1)
+    with pytest.raises(broker.ReadOnlyViolation, match=f"message {msg_id}"):
+        client.sendMsg(f"{msg_id}\0" + "1\0")
+    assert sent == [] and permit.sent == 0
+
+
+@pytest.mark.parametrize("name", ("cancelOrder", "reqGlobalCancel"))
+def test_order_permit_open_keeps_cancel_calls_shut(loop, monkeypatch, name):
+    ib_async, client, sent, permit, contract = _order_permit_client(loop, monkeypatch)
+    with pytest.raises(broker.ReadOnlyViolation, match=name):
+        getattr(client, name)()
+    assert sent == []
+
+
+def test_order_permit_whatif_runs_with_a_closed_permit_and_does_not_count(loop, monkeypatch):
+    ib_async, client, sent, permit, contract = _order_permit_client(
+        loop, monkeypatch, open_permit=False
+    )
+    client.placeOrder(1, contract, _real_order(ib_async, whatIf=True))
+    assert len(sent) == 1 and permit.sent == 0 and permit.open is False

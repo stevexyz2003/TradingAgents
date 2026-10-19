@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -81,6 +82,27 @@ _PO_DELTA_NEUTRAL_CONTRACT = 70
 _PO_ALGO_STRATEGY = 71
 _PO_WHATIF = 73
 _PO_MIN_FIELDS = _PO_WHATIF + 1
+#: Indices into the serialized PLACE_ORDER message of a real order (contract expanded
+#: to 12 fields), measured with the real client class, ib_async 2.1.0, server >= 177,
+#: STK; tests/test_ibkr_broker.py pins them.
+_PM_SEC_TYPE = 4
+_PM_ACTION = 16
+_PM_QUANTITY = 17
+_PM_ORDER_TYPE = 18
+_PM_TIF = 21
+_PM_ACCOUNT = 23
+_PM_ORDER_REF = 26
+_PM_WHATIF = 84
+#: The same positions on the field level, where the contract is one field.
+_PF_SHIFT = 12 - 1
+_PF_ACTION = _PM_ACTION - _PF_SHIFT
+_PF_QUANTITY = _PM_QUANTITY - _PF_SHIFT
+_PF_ORDER_TYPE = _PM_ORDER_TYPE - _PF_SHIFT
+_PF_TIF = _PM_TIF - _PF_SHIFT
+_PF_ACCOUNT = _PM_ACCOUNT - _PF_SHIFT
+_PF_ORDER_REF = _PM_ORDER_REF - _PF_SHIFT
+_ORDER_SIDES = frozenset({"BUY", "SELL"})
+_ORDER_TYPE = "MKT"
 #: A contract is one field on the field level and 12 on the string level; the
 #: string-level secType sits at offset 2 inside them.
 _CONTRACT_WIDTH = 12
@@ -468,6 +490,22 @@ def _is_unset_number(value) -> bool:
     return number <= 0 or number >= _UNSET_DOUBLE
 
 
+def _plain_blocks(fields) -> bool:
+    """True when every conditional block that would shift the whatIf position is empty."""
+    if len(fields) < _PO_MIN_FIELDS:
+        return False
+    if not _is_empty(fields[_PO_DELTA_NEUTRAL_TYPE]):
+        return False
+    if not _is_unset_number(fields[_PO_SCALE_PRICE_INCREMENT]):
+        return False
+    if not _is_empty(fields[_PO_HEDGE_TYPE]):
+        return False
+    dnc = fields[_PO_DELTA_NEUTRAL_CONTRACT]
+    if not (dnc is False or (isinstance(dnc, str) and dnc == "0")):
+        return False
+    return _is_empty(fields[_PO_ALGO_STRATEGY])
+
+
 def _whatif_layout(fields) -> bool:
     """True only for a plain order whose whatIf field is set; unknown layout = False.
 
@@ -531,6 +569,112 @@ def _whatif_in_message(msg) -> bool:
         return False
 
 
+def _whole_positive(value) -> bool:
+    """A whole number > 0, as a typed value or as its decimal string."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, str):
+        return re.fullmatch(r"[1-9][0-9]*", value) is not None
+    if isinstance(value, int):
+        return value > 0
+    if isinstance(value, float):
+        return math.isfinite(value) and value > 0 and value.is_integer()
+    return False
+
+
+def _whatif_not_set(flag) -> bool:
+    return flag is False or (isinstance(flag, str) and flag in ("0", ""))
+
+
+def _plain_market_order(
+    *, sec_type, action, order_type, tif, account, order_ref, quantity, what_if
+) -> bool:
+    return (
+        sec_type == "STK"
+        and order_type == _ORDER_TYPE
+        and action in _ORDER_SIDES
+        and _whatif_not_set(what_if)
+        and account == EXPECTED_ACCOUNT
+        and isinstance(order_ref, str)
+        and order_ref != ""
+        and tif == PREVIEW_TIF
+        and _whole_positive(quantity)
+    )
+
+
+def _real_order_ok(contract, order) -> bool:
+    """Name level whitelist: a plain stock market order for the paper account."""
+    try:
+        return _plain_market_order(
+            sec_type=getattr(contract, "secType", None),
+            action=getattr(order, "action", None),
+            order_type=getattr(order, "orderType", None),
+            tif=getattr(order, "tif", None),
+            account=getattr(order, "account", None),
+            order_ref=getattr(order, "orderRef", None),
+            quantity=getattr(order, "totalQuantity", None),
+            what_if=getattr(order, "whatIf", False),
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _real_order_in_fields(fields) -> bool:
+    """Field level whitelist of a real order (id 3); unknown layout = False."""
+    try:
+        if len(fields) < _PO_MIN_FIELDS or _message_id(fields[0]) != 3:
+            return False
+        if not _plain_blocks(list(fields)):
+            return False
+        return _plain_market_order(
+            sec_type=getattr(fields[2], "secType", None),
+            action=fields[_PF_ACTION],
+            order_type=fields[_PF_ORDER_TYPE],
+            tif=fields[_PF_TIF],
+            account=fields[_PF_ACCOUNT],
+            order_ref=fields[_PF_ORDER_REF],
+            quantity=fields[_PF_QUANTITY],
+            what_if=fields[_PO_WHATIF],
+        )
+    except (IndexError, TypeError, ValueError):
+        return False
+
+
+def _real_order_in_message(msg) -> bool:
+    """String level whitelist of a serialized real order; unknown layout = False."""
+    try:
+        if not isinstance(msg, str):
+            return False
+        parts = msg.split("\0")
+        if parts[0] != "3" or len(parts) <= _PM_WHATIF + 1:
+            return False
+        fields = [*parts[:2], None, *parts[2 + _CONTRACT_WIDTH :]]
+        if not _plain_blocks(fields):
+            return False
+        return _plain_market_order(
+            sec_type=parts[_PM_SEC_TYPE],
+            action=parts[_PM_ACTION],
+            order_type=parts[_PM_ORDER_TYPE],
+            tif=parts[_PM_TIF],
+            account=parts[_PM_ACCOUNT],
+            order_ref=parts[_PM_ORDER_REF],
+            quantity=parts[_PM_QUANTITY],
+            what_if=parts[_PM_WHATIF],
+        )
+    except (IndexError, TypeError, ValueError):
+        return False
+
+
+class _OrderPermit:
+    """One pass of one plain stock market order on message 3, opened per order by place_order (phase 6).
+
+    Unlike the cancel permit it is per order, not per session; it closes on the wire.
+    """
+
+    open: bool = False
+    sent: int = 0
+
+
 class _CancelPermit:
     """One pass of message 58, opened only by cancel_all after a detected kill switch (D-05).
 
@@ -542,7 +686,11 @@ class _CancelPermit:
     sent: int = 0
 
 
-def _arm_write_barrier(client, permit: _CancelPermit | None = None) -> None:
+def _arm_write_barrier(
+    client,
+    permit: _CancelPermit | None = None,
+    order_permit: _OrderPermit | None = None,
+) -> None:
     """Refuse every write on this client instance, by call name and on the wire.
 
     The named write calls are replaced first. ``placeOrder`` and message id 3
@@ -555,18 +703,24 @@ def _arm_write_barrier(client, permit: _CancelPermit | None = None) -> None:
     ``reqGlobalCancel`` (name, field level and message 58) is the one exception to
     "refused": it passes while ``permit.open`` is True, and the pass is counted on
     the wire level. Without a ``permit`` the exception never opens.
+
+    A real order (message 3 without whatIf) is the second exception: it passes only
+    while ``order_permit.open`` is True and only as a plain stock market order
+    (whitelist on name, field and string level); the permit shuts on the wire.
     """
     permit = permit if permit is not None else _CancelPermit()
+    order_permit = order_permit if order_permit is not None else _OrderPermit()
     original_place = getattr(client, "placeOrder", None)
     original_global_cancel = getattr(client, "reqGlobalCancel", None)
 
     def guarded_place(*args, **kwargs):
         contract = args[1] if len(args) > 1 else kwargs.get("contract")
         order = args[2] if len(args) > 2 else kwargs.get("order")
-        if (
-            getattr(order, "whatIf", None) is not True
-            or getattr(contract, "secType", None) not in _WHATIF_SEC_TYPES
-        ):
+        is_preview = (
+            getattr(order, "whatIf", None) is True
+            and getattr(contract, "secType", None) in _WHATIF_SEC_TYPES
+        )
+        if not is_preview and not (order_permit.open and _real_order_ok(contract, order)):
             raise ReadOnlyViolation(
                 "read-only session: placeOrder without whatIf refused before it reached the gateway"
             )
@@ -607,7 +761,9 @@ def _arm_write_barrier(client, permit: _CancelPermit | None = None) -> None:
     def guarded_send(*fields, **kwargs):
         msg_id = _message_id(fields[0]) if fields else None
         if msg_id == 3:
-            if not _whatif_in_fields(fields):
+            if not _whatif_in_fields(fields) and not (
+                order_permit.open and _real_order_in_fields(fields)
+            ):
                 refuse_message(msg_id)
         elif msg_id == 58 and permit.open:
             pass
@@ -619,8 +775,15 @@ def _arm_write_barrier(client, permit: _CancelPermit | None = None) -> None:
         head = msg.split("\0", 1)[0] if isinstance(msg, str) else None
         msg_id = _message_id(head) if head else None
         if msg_id == 3:
-            if not _whatif_in_message(msg):
+            if _whatif_in_message(msg):
+                return original_send_msg(msg, *args, **kwargs)
+            if not (order_permit.open and _real_order_in_message(msg)):
                 refuse_message(msg_id)
+            result = original_send_msg(msg, *args, **kwargs)
+            order_permit.open = False
+            # Counted as handed to the client; when throttled it may only be queued (IN-02).
+            order_permit.sent += 1
+            return result
         elif msg_id == 58 and permit.open:
             result = original_send_msg(msg, *args, **kwargs)
             permit.open = False
@@ -674,6 +837,7 @@ class IbkrBroker:
         self._ib = None
         #: One-shot permit for message 58; shut until cancel_all opens it.
         self._permit = _CancelPermit()
+        self._order_permit = _OrderPermit()
         self.link_lost = False
         self.server_link_broken = False
         self.port_changed = False
@@ -714,7 +878,7 @@ class IbkrBroker:
         # Subscribed first: a 326 arrives before the handshake completes.
         ib.errorEvent += self._on_error
         # D-01: the barrier stands before a single byte flows.
-        _arm_write_barrier(ib.client, self._permit)
+        _arm_write_barrier(ib.client, self._permit, self._order_permit)
         host, port, timeout = self._host, self._port, self._connect_timeout
         bound = timeout + self._connect_grace
         try:
