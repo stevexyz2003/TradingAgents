@@ -652,6 +652,29 @@ def test_reconcile_finished_order_in_both_answers_is_no_contradiction():
     assert (res.open, res.completed) == (0, 1)
 
 
+def test_reconcile_completed_order_with_zero_quantity_is_filled_out():
+    """The gateway reports totalQuantity 0 on a completed order (first live order,
+    2026-10-19, ibkr-konto-befund.md); filled and the executions carry the size."""
+    hist = _hist(completed=[_order("Filled", filled=2.0, qty=0.0)], executions=[_exe(2)])
+    assert led.resolve_entry(ENTRY, hist).outcome == led.FILLED_OUT
+
+
+def test_reconcile_zero_quantity_twin_in_both_answers_is_one_order():
+    hist = _hist(
+        open=[_order("Filled", filled=2.0)], completed=[_order("Filled", filled=2.0, qty=0.0)]
+    )
+    res = led.resolve_entry(ENTRY, hist)
+    assert res.outcome == led.FILLED_OUT
+    assert (res.open, res.completed) == (0, 1)
+
+
+def test_reconcile_finished_twin_with_another_size_is_a_collision():
+    hist = _hist(
+        open=[_order("Filled", filled=2.0, qty=5.0)], completed=[_order("Filled", filled=2.0)]
+    )
+    assert led.resolve_entry(ENTRY, hist).outcome == led.COLLISION
+
+
 def test_reconcile_finished_order_only_in_the_open_answer_counts_as_completed():
     res = led.resolve_entry(ENTRY, _hist(open=[_order("Cancelled", filled=0.0)]))
     assert res.outcome == led.NOT_FILLED

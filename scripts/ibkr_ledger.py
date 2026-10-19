@@ -650,14 +650,17 @@ def resolve_entry(entry: dict, history: object, *, dry: bool = False) -> Resolut
     # A finished order in the open answer is not open (WR-06): the same permId in the
     # completed answer is the same order, not a contradiction (the quantity is checked for
     # every record below); without that twin it counts as completed.
-    finished = {(o.perm_id, float(o.quantity)) for o in completed if getattr(o, "perm_id", 0)}
+    # The gateway reports totalQuantity 0 on completed orders (first live order,
+    # 2026-10-19, ibkr-konto-befund.md): a zero quantity says nothing about the size,
+    # so it neither breaks the twin match nor counts as a different order.
+    finished = {o.perm_id: float(o.quantity) for o in completed if getattr(o, "perm_id", 0)}
     opened = []
     for order in history.open:
         if order.order_ref != key:
             continue
         if order.status not in _DONE:
             opened.append(order)
-        elif (getattr(order, "perm_id", 0), float(order.quantity)) not in finished:
+        elif finished.get(getattr(order, "perm_id", 0)) not in (0.0, float(order.quantity)):
             completed.append(order)
     executions = [e for e in history.executions if e.order_ref == key]
     counts = f"open={len(opened)} completed={len(completed)} executions={len(executions)}"
@@ -668,7 +671,8 @@ def resolve_entry(entry: dict, history: object, *, dry: bool = False) -> Resolut
         )
 
     for order in (*opened, *completed):
-        if order.con_id != con_id or order.action != side or float(order.quantity) != quantity:
+        size_differs = bool(order.quantity) and float(order.quantity) != quantity
+        if order.con_id != con_id or order.action != side or size_differs:
             return result(COLLISION, "orderRef is not unique at IBKR")
     for execution in executions:
         if execution.con_id != con_id or execution.side != side:
