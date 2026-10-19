@@ -47,6 +47,7 @@ INVALID_TRADE_DATE = "invalid-trade-date"
 LOG_FINDING = "log-finding"
 PAPER_LOG_UNAVAILABLE = "paper-log-unavailable"
 STALE_DECISION = "stale-decision"
+FRESH = "fresh"
 FUTURE_DECISION = "future-decision"
 CALENDAR_CONFLICT = "calendar-conflict"
 NOT_RESOLVED_YET = "not-resolved-yet"
@@ -585,7 +586,7 @@ def freshness(trade_date: date, now_utc: datetime, calendar: SessionCalendar) ->
         )
     gap = (exec_day - trade_date).days
     return Freshness(
-        "fresh", exec_day, in_session, gap, (), gap > 1,
+        FRESH, exec_day, in_session, gap, (), gap > 1,
         f"trade_date {trade_date}, execution session {exec_day}, {gap} calendar day(s)",
     )
 

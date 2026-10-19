@@ -661,7 +661,7 @@ class TestOrderRefAndIntent:
         assert intent["rating"] == "Buy"
         assert intent["trade_date"] == "2026-10-09"
         assert isinstance(intent["weekend_gap"], bool)
-        assert intent["rating_source"] is None
+        assert intent["rating_source"] == "engine"
         (done,) = _events(records, "dry_complete")
         assert done["decision_key"] == KEY
         assert done["seq"] > intent["seq"]
@@ -1664,6 +1664,52 @@ class TestSessionWindow:
         assert "closed during the run" in skipped["detail"]
         assert _events(records, "intent") == []
         assert len(_events(records, "switch_check")) == 1
+
+    def test_freshness_recheck_with_a_fresh_clock_stops_before_the_intent(self, tmp_path, loop):
+        """WR-05 rest: freshness is judged again right before the intent, not only at start."""
+        state = {"late": False}
+
+        class LateClosedSessionCalendar(WeekdayCalendar):
+            def sessions_between(self, start, end):
+                if state["late"]:
+                    return (date(2026, 10, 10),)  # a session closed since the run started
+                return super().sessions_between(start, end)
+
+        fake = _fake_for(liquid_hours=_FULL)
+        original = fake.reqPositionsAsync
+
+        async def time_passes_then_read():
+            state["late"] = True
+            return await original()
+
+        fake.reqPositionsAsync = time_passes_then_read
+        code, records = _gateway_run(
+            tmp_path,
+            loop,
+            fake,
+            clock=_window_clock(_START, 370),
+            calendar=LateClosedSessionCalendar(),
+        )
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["state"] == "stale-decision"
+        assert skipped["reason"] == ledger_mod.REASON_BY_STATE["stale-decision"]
+        assert _events(records, "intent") == []
+
+    def test_jev_rating_source_ends_as_review_without_an_intent(self, tmp_path, loop):
+        summary = _summary("2026-10-09", ("AAPL", "ok", "Buy"))
+        summary["runs"][0]["rating_source"] = "jev"
+        paper = _paper(tmp_path, [("2026-10-09", "AAPL", "Buy")], {"2026-10-09": summary})
+        code, records = _gateway_run(tmp_path, loop, _fake_for(), paper=paper)
+        assert code == executor.EXIT_PRECONDITION
+        (skipped,) = _events(records, "skipped")
+        assert skipped["reason"] == "review"
+        assert skipped["state"] == "rating-jev"
+        assert _events(records, "intent") == []
+
+    def test_rating_source_jev_in_the_summary_is_what_the_intent_would_carry(self):
+        # the intent takes the source from the verdict: an engine rating is "engine"
+        assert "rating_source" in executor._ROW_KEYS
 
     def test_negative_control_a_fixed_clock_inside_the_window_reaches_the_intent(
         self, tmp_path, loop

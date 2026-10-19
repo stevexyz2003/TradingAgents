@@ -1684,6 +1684,7 @@ _ROW_KEYS = (
     "trade_date",
     "rating",
     "freshness",
+    "rating_source",
     "session",
     "position",
     "open_orders",
@@ -1865,6 +1866,7 @@ def _local_chain(ctx, source, tickers) -> tuple[dict, list[str]]:
         row["rating"] = entry["rating"]
         row["trade_date"] = entry_day
         verdict = decision_mod.evaluate_decision(entry, read_summary(entry_day) if parsed else None)
+        row["rating_source"] = verdict.rating_source
         if verdict.state != decision_mod.EXECUTABLE:
             _finish_row(ctx, row, verdict.state, verdict.detail)
             continue
@@ -1885,7 +1887,7 @@ def _local_chain(ctx, source, tickers) -> tuple[dict, list[str]]:
             "weekend_gap": fresh.weekend_gap,
             "closed_sessions": [day.isoformat() for day in fresh.closed_sessions],
         }
-        if fresh.state != "fresh":
+        if fresh.state != decision_mod.FRESH:
             _finish_row(ctx, row, fresh.state, fresh.detail)
             continue
         remaining.append(ticker)
@@ -2260,6 +2262,14 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         )
         _finish_row(ctx, row, guards.OUTSIDE_SESSION, detail)
         return
+    # Freshness anew with a fresh clock (WR-05): judged at run start until phase 5; the
+    # placer sends right after the intent.
+    fresh = decision_mod.freshness(
+        decision_mod.parse_trade_date(row["trade_date"]), now, ctx.calendar
+    )
+    if fresh.state != decision_mod.FRESH:
+        _finish_row(ctx, row, fresh.state, fresh.detail)
+        return
     intent = ledger_mod.intent_record(
         decision_key=key,
         ticker=ticker,
@@ -2271,6 +2281,7 @@ def _execute_ticker(ctx, broker, row: dict, result, snapshot) -> None:
         con_id=identity.con_id,
         order_ref=key,
         weekend_gap=bool(row["freshness"]["weekend_gap"]),
+        rating_source=row["rating_source"],
     )
     # A second size check at the last step before the write-ahead line, with the same
     # constant as the first one: after the ``intent`` nothing may refuse the order (WR-02).
