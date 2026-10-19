@@ -496,3 +496,86 @@ TWS-Sitzung getrennt hatte. Die Abnahme lief deshalb serverseitig über das Gate
   Fehler. Daraus folgt: „Read-Only API“ ist im Gateway **aus** (bei eingeschaltetem
   Schalter käme `READ_ONLY_API` mit Fehler 321, siehe Phase 4, D-14). Der Schalter
   bleibt aus, weil Phase 6 senden wird.
+
+## Erste echte Order (Phase 6)
+
+### Versuch 2026-10-19: verschoben, keine BUY-Entscheidung (D-03)
+
+Ausgangslage (Montag, 2026-10-19; regulärer US-Handelstag, Sitzung bis 16:00 New York):
+
+- IB Gateway Paper auf `127.0.0.1:7497`, Konto `DUQ634065`.
+- „Read-Only API“ laut Operator **an um 16:35 MESZ** (14:35 UTC). Die Sonde unten hat
+  den Schalter aber schon um 14:29:47 UTC als wirksam gemessen. Die Meldung ist
+  also nur ungefähr, und der Schalter war spätestens ab 14:29 UTC an.
+- State-Ordner vorher: kein `KILL`, kein `RELEASE`, kein `ledger.jsonl` (nur
+  `ledger-dryrun.jsonl` und eine leere `ledger.jsonl.lock` vom 2026-10-17).
+- Vorab (Agent selbst): `ruff check .` sauber; `pytest tests/test_ibkr_call_order.py
+  tests/test_ibkr_never_sent.py` 48 passed. Volle Suite: 2883 passed, 6 failed:
+  `test_yfinance_keeps_its_cache_out_of_the_users_home` (bekannt) plus fünf
+  plattformbedingte Fehler ohne IBKR-Bezug (`test_chatgpt_auth.py` ×2 prüft
+  `0o600` unter Windows, `test_cli_commands.py` ×1, `test_cli_updates.py` ×2).
+- `resolve AAPL MSFT NVDA` (14:29:38 UTC):
+
+```text
+resolve: AAPL ok conId=265598 NASDAQ/USD/AAPL tradable until 2026-10-19T15:45:00-04:00
+resolve: MSFT ok conId=272093 NASDAQ/USD/MSFT tradable until 2026-10-19T15:45:00-04:00
+resolve: NVDA ok conId=4815747 NASDAQ/USD/NVDA tradable until 2026-10-19T15:45:00-04:00
+EXIT=0
+```
+
+#### Read-Only-Beleg vor RELEASE
+
+`scripts/smoke/ibkr_order_probe.py --whatif AAPL --quantity 1 --order-ref readonly-proof`
+um 14:29:47 UTC, Exit 0:
+
+```json
+{
+  "ticker": "AAPL",
+  "order_ref": "readonly-proof",
+  "state": "READ_ONLY_API",
+  "errors": [
+    [
+      321,
+      "Bei der Validierung der Anfrage ist ein Fehler aufgetreten.-'bC' : cause - Die API befindet sich im schreibgesch\\u00fctzten Modus."
+    ]
+  ],
+  "echo_order_ref": null,
+  "echo_account": null,
+  "effective_tif": null,
+  "sent_tif": "DAY",
+  "init_margin_change": null,
+  "commission": null
+}
+```
+
+Maschinelle Prüfung (`state == "READ_ONLY_API"` und Code 321 in `errors`): **Exit 0**.
+Der erste Prüflauf endete mit Exit 1, weil PowerShells `>` die Datei mit BOM
+schreibt und `json.load(encoding="utf-8")` daran scheitert. Die Prüfung lief danach
+unverändert mit `utf-8-sig`. Das Kriterium wurde nicht aufgeweicht.
+
+#### Ticker für die erste Order (D-03)
+
+`scripts/ibkr_executor.py preview AAPL MSFT NVDA` (14:30:05 UTC, Trockenlauf,
+paper-log `fork/paper-log` @ `5541cd9`), Exit 2:
+
+```text
+preview: AAPL skipped-hold (trade_date 2026-10-16)
+preview: MSFT skipped-hold (trade_date 2026-10-16)
+preview: NVDA skipped-hold (trade_date 2026-10-16)
+```
+
+`preview.json`: alle drei Zeilen `rating: "Hold"`, `rating_source: "engine"`,
+`state: "skipped-hold"`, `sent: false`.
+
+**Keine BUY-Entscheidung heute.** Nach D-03 wird keine Entscheidung künstlich
+erzeugt. Deshalb gab es kein `RELEASE`, keinen `--live`-Lauf und keine Probe
+`--history`. „Messung 1: 321 im scharfen Pfad“ steht noch aus.
+
+Folgen:
+
+- 06-09 wird an einem anderen Handelstag wiederholt, sobald der paper-log für
+  mindestens einen Ticker eine frische Entscheidung mit BUY-Plan enthält. 06-10
+  folgt am selben Tag.
+- Der Read-Only-Schalter wirkt am whatIf über das Gateway (zweiter unabhängiger
+  Beleg nach Phase 4).
+- State-Ordner nachher: kein `RELEASE`, kein `KILL`, kein `ledger.jsonl`.
