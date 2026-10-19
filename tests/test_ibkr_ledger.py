@@ -421,7 +421,7 @@ def test_ledger_placed_stays_open_until_filled(tmp_path):
     ledger.append("intent", **_intent("K1"))
     ledger.append("placed", decision_key="K1")
     assert [e["decision_key"] for e in ledger.unresolved()] == ["K1"]
-    ledger.append("filled", decision_key="K1", con_id=265598, filled_qty=2)
+    ledger.append("filled", decision_key="K1", con_id=265598, filled_qty=2, side="BUY")
     assert ledger.unresolved() == []
 
 
@@ -437,9 +437,9 @@ def test_ledger_rejected_or_skipped_without_intent_is_not_open(tmp_path):
 def test_ledger_filled_quantity_sums_filled_and_partial(tmp_path):
     ledger = _open(tmp_path / "l.jsonl", mode="live")
     assert ledger.filled_quantity(265598) == 0.0
-    ledger.append("filled", decision_key="K1", con_id=265598, filled_qty=2)
-    ledger.append("partial", decision_key="K2", con_id=265598, filled_qty=1)
-    ledger.append("filled", decision_key="K3", con_id=1, filled_qty=5)
+    ledger.append("filled", decision_key="K1", con_id=265598, filled_qty=2, side="BUY")
+    ledger.append("partial", decision_key="K2", con_id=265598, filled_qty=1, side="BUY")
+    ledger.append("filled", decision_key="K3", con_id=1, filled_qty=5, side="BUY")
     assert ledger.filled_quantity(265598) == 3.0
 
 
@@ -713,3 +713,122 @@ def test_reconcile_falls_back_to_decision_key():
 
 def test_reconcile_unresolvable_set():
     assert {"no_trace", "collision", "contradiction"} == led.UNRESOLVABLE
+
+
+# --- execId families, corrections and signed fills (06-01, REQ-47, WR-07) -------------------
+
+# The raw execId form is confirmed with the first real fill in 06-10 (D-13).
+FAM = "0000e0d5.6710a3c5"
+
+
+def _ex(exec_id, shares, side="BUY"):
+    return SimpleNamespace(
+        exec_id=exec_id,
+        shares=shares,
+        side=side,
+        order_ref=REF,
+        con_id=265598,
+        price=100.0,
+        perm_id=7,
+        order_id=3,
+        time="t",
+    )
+
+
+def test_exec_id_family_and_correction_rank():
+    assert led.exec_family(f"{FAM}.01.02") == f"{FAM}.01"
+    assert led.exec_family("0001") == "0001"
+    assert led.exec_family("abc.x") == "abc.x"
+    assert led.correction_rank(f"{FAM}.01.02") == 2
+    assert led.correction_rank("0001") == 0
+    assert led.correction_rank("abc.x") == 0
+
+
+def test_exec_id_correction_replaces_the_earlier_execution():
+    first, second = _ex(f"{FAM}.01.01", 2), _ex(f"{FAM}.01.02", 2)
+    assert led.effective_executions([first, second]) == [second]
+    other = _ex("other.01.01", 1)
+    assert led.effective_executions([first, other]) == [first, other]
+    tie_a, tie_b = _ex("x.01.01", 1), _ex("x.01.01", 1)
+    assert led.effective_executions([tie_a, tie_b])[0] is tie_b
+
+
+def test_exec_id_correction_does_not_double_the_resolved_quantity():
+    """SC5 fixture: two executions of 2 as .01/.02 are 2 pieces, not 4 (REQ-47)."""
+    hist = _hist(executions=[_ex(f"{FAM}.01.01", 2), _ex(f"{FAM}.01.02", 2)])
+    assert led.resolve_entry(ENTRY, hist).outcome == led.FILLED_OUT
+
+
+def test_exec_id_fill_records_one_row_per_effective_execution():
+    entry = {**ENTRY, "quantity": 2, "decision_key": "K", "ticker": "AAPL"}
+    rows = led.fill_records(
+        entry,
+        [_ex(f"{FAM}.01.01", 1), _ex(f"{FAM}.01.02", 1), _ex("other.01.01", 1)],
+    )
+    assert [event for event, _ in rows] == ["partial", "filled"]
+    first = rows[0][1]
+    for name in ("exec_id", "side", "filled_qty", "price", "con_id", "order_ref", "perm_id"):
+        assert name in first
+    assert first["side"] == "BUY" and first["exec_id"] == f"{FAM}.01.02"
+
+
+def test_exec_id_fill_records_skip_known_exec_ids():
+    entry = {**ENTRY, "quantity": 2, "decision_key": "K", "ticker": "AAPL"}
+    rows = led.fill_records(
+        entry, [_ex("a.01.01", 1), _ex("b.01.01", 1)], known_exec_ids={"a.01.01"}
+    )
+    assert [r["exec_id"] for _, r in rows] == ["b.01.01"]
+    assert rows[0][0] == "filled"
+
+
+@pytest.mark.parametrize("event", ["filled", "partial"])
+@pytest.mark.parametrize("side", [None, "BOT"])
+def test_exec_id_fill_without_valid_side_is_a_ledger_error(tmp_path, event, side):
+    ledger = _open(tmp_path / "l.jsonl", mode="live")
+    fields = {"decision_key": "K", "con_id": 1, "filled_qty": 1}
+    if side is not None:
+        fields["side"] = side
+    with pytest.raises(led.LedgerError):
+        ledger.append(event, **fields)
+    ledger.append(event, **{**fields, "side": "BUY"})
+
+
+def test_alarm_is_no_lifecycle_event_and_keeps_the_entry_open(tmp_path):
+    assert led.ALARM in led.EVENTS and led.ALARM not in led.LIFECYCLE_EVENTS
+    ledger = _open(tmp_path / "l.jsonl", mode="live")
+    ledger.append("intent", **_intent("K1"))
+    ledger.append("placed", decision_key="K1")
+    ledger.append("alarm", decision_key="K1", state="fill-timeout")
+    assert [e["decision_key"] for e in ledger.unresolved()] == ["K1"]
+
+
+def test_ledger_tables_know_rating_jev_and_place_rejected():
+    assert led.reason_for_state("rating-jev") == "review"
+    assert "place-rejected" in led.REJECTED_STATES
+    assert not (set(led.REASON_BY_STATE) & led.REJECTED_STATES)
+
+
+def test_signed_filled_quantity_buy_then_sell_nets_to_zero(tmp_path):
+    ledger = _open(tmp_path / "l.jsonl", mode="live")
+    ledger.append("filled", decision_key="B", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.01")
+    ledger.append("filled", decision_key="S", con_id=1, side="SELL", filled_qty=2, exec_id="B.01.01")
+    assert ledger.filled_quantity(1) == 0.0
+    unsigned = sum(float(r.get("filled_qty") or 0) for r in ledger.records if r["event"] == "filled")
+    assert unsigned == 4.0  # negative control: the old unsigned sum
+
+
+def test_signed_filled_quantity_counts_a_correction_once(tmp_path):
+    ledger = _open(tmp_path / "l.jsonl", mode="live")
+    ledger.append("partial", decision_key="K", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.01")
+    ledger.append("filled", decision_key="K", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.02")
+    assert ledger.filled_quantity(1) == 2.0
+
+
+def test_signed_filled_quantity_exec_rows_beat_the_aggregate_row(tmp_path):
+    ledger = _open(tmp_path / "l.jsonl", mode="live")
+    ledger.append("filled", decision_key="K", con_id=1, side="BUY", filled_qty=2)
+    ledger.append("filled", decision_key="K", con_id=1, side="BUY", filled_qty=2, exec_id="A.01.01")
+    assert ledger.filled_quantity(1) == 2.0
+    only_aggregate = _open(tmp_path / "m.jsonl", mode="live")
+    only_aggregate.append("filled", decision_key="K", con_id=1, side="BUY", filled_qty=2)
+    assert only_aggregate.filled_quantity(1) == 2.0

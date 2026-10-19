@@ -42,6 +42,9 @@ REJECTED = "rejected"
 SKIPPED = "skipped"
 KILL_CANCEL = "kill_cancel"
 RUN_END = "run_end"
+#: Run alarm after the order (D-08 fill timeout, D-09 mismatch): no lifecycle event, the
+#: entry stays open for the reconciliation of the next run.
+ALARM = "alarm"
 
 EVENTS = frozenset(
     {
@@ -57,6 +60,7 @@ EVENTS = frozenset(
         SKIPPED,
         KILL_CANCEL,
         RUN_END,
+        ALARM,
     }
 )
 #: Only these events move the state of a decision key; reconcile, switch_check, skipped
@@ -90,6 +94,8 @@ REASON_BY_STATE: Mapping[str, str] = MappingProxyType(
         **dict.fromkeys(
             (
                 "rating-review",
+                # Jev-sourced rating (D-05/D-06): skipped, never an order; state lives in 06-02.
+                "rating-jev",
                 "run-not-ok",
                 "signal-null",
                 "signal-divergence",
@@ -156,6 +162,8 @@ REJECTED_STATES = frozenset(
         "tif-overridden",
         "tif-unconfirmed",
         "currency-mismatch",
+        # Definitive IBKR rejection after sending (06-06).
+        "place-rejected",
     }
 )
 
@@ -225,7 +233,16 @@ def _schema_problem(record: dict) -> str | None:
         order_ref = record.get("order_ref")
         if order_ref is not None and not _is_text(order_ref):
             return f"is an intent with order_ref {order_ref!r}"
+    if event == ALARM and not _is_text(record.get("state")):
+        return f"is an alarm with state {record.get('state')!r}"
     if event in (FILLED, PARTIAL):
+        if record.get("side") not in SIDES:
+            return f"has side {record.get('side')!r}, expected BUY or SELL"
+        if "exec_id" in record and not _is_text(record["exec_id"]):
+            return f"has exec_id {record['exec_id']!r}, expected text"
+        price = record.get("price")
+        if price is not None and (not _is_number(price) or price < 0):
+            return f"has price {price!r}"
         filled = record.get("filled_qty")
         if filled is not None and (not _is_number(filled) or filled < 0):
             return f"has filled_qty {filled!r}"
@@ -348,6 +365,11 @@ class Ledger:
             "event": event,
             **fields,
         }
+        if event in (FILLED, PARTIAL, ALARM):
+            # Refuse a fill or alarm line the next open would reject, before it is written.
+            problem = _schema_problem(record)
+            if problem:
+                raise LedgerError(f"{event} record {problem}")
         if self._torn_line is not None:
             record[SEALS_LINE] = self._torn_line
         line = (
@@ -438,13 +460,35 @@ class Ledger:
         return open_intents
 
     def filled_quantity(self, con_id: int) -> float:
-        return float(
-            sum(
-                float(r.get("filled_qty") or 0)
-                for r in self.records
-                if r["event"] in (FILLED, PARTIAL) and r.get("con_id") == con_id
-            )
-        )
+        """Signed, correction-aware filled pieces for ``con_id`` (WR-07, REQ-47).
+
+        BUY counts plus, SELL minus. Per decision key only the rows with an ``exec_id``
+        count, one per execId family (the highest correction wins); a key with aggregate
+        rows only (no ``exec_id``) counts those (Pitfall 5).
+        """
+        by_key: dict[str, list[dict]] = {}
+        for r in self.records:
+            if r["event"] in (FILLED, PARTIAL) and r.get("con_id") == con_id:
+                by_key.setdefault(r.get("decision_key"), []).append(r)
+        total = 0.0
+        for rows in by_key.values():
+            with_id = [r for r in rows if r.get("exec_id")]
+            if with_id:
+                best: dict[str, dict] = {}
+                for r in with_id:
+                    fam = exec_family(r["exec_id"])
+                    kept = best.get(fam)
+                    if kept is None or correction_rank(r["exec_id"]) >= correction_rank(
+                        kept["exec_id"]
+                    ):
+                        best[fam] = r
+                counted = list(best.values())
+            else:
+                counted = rows
+            for r in counted:
+                qty = float(r.get("filled_qty") or 0)
+                total += qty if r.get("side") == "BUY" else -qty
+        return total
 
 
 def intent_record(
@@ -461,7 +505,7 @@ def intent_record(
     weekend_gap: bool,
     rating_source: str | None = None,
 ) -> dict:
-    """Fields for ``append(INTENT, **...)``; ``rating_source`` stays ``None`` (D-23)."""
+    """Fields for ``append(INTENT, **...)``; ``rating_source`` is ``engine`` or ``jev`` from summary.json (D-07)."""
     return {
         "decision_key": decision_key,
         "ticker": ticker,
@@ -493,6 +537,74 @@ UNRESOLVABLE = frozenset({NO_TRACE, COLLISION, CONTRADICTION})
 
 _CANCELLED = frozenset({"Cancelled", "ApiCancelled", "Inactive"})
 _DONE = frozenset({"Filled", *_CANCELLED})
+
+
+def exec_family(exec_id: str) -> str:
+    """The execId without a trailing all-digit correction suffix (``...01.02`` -> ``...01``)."""
+    head, dot, tail = exec_id.rpartition(".")
+    if dot and head and tail.isdigit():
+        return head
+    return exec_id
+
+
+def correction_rank(exec_id: str) -> int:
+    """The numeric correction suffix of an execId; 0 without one."""
+    _, dot, tail = exec_id.rpartition(".")
+    return int(tail) if dot and tail.isdigit() else 0
+
+
+def effective_executions(executions) -> list:
+    """One execution per execId family: the highest correction, the later one on a tie.
+
+    A correction (``.02`` after ``.01``) replaces the earlier one and is not added (REQ-47).
+    The result keeps the order in which each family first appeared.
+    """
+    chosen: dict[str, object] = {}
+    for execution in executions:
+        family = exec_family(execution.exec_id)
+        kept = chosen.get(family)
+        if kept is None or correction_rank(execution.exec_id) >= correction_rank(kept.exec_id):
+            chosen[family] = execution
+    return list(chosen.values())
+
+
+def fill_records(
+    entry: dict, executions, *, known_exec_ids: frozenset | set = frozenset()
+) -> list[tuple[str, dict]]:
+    """Ledger ``(event, fields)`` pairs, one per effective execution (D-10, one code path).
+
+    ``filled`` once the cumulative pieces reach the intent quantity, else ``partial``.
+    Executions whose execId is in ``known_exec_ids`` are not written again. The caller
+    adds ``source`` and any detail.
+    """
+    quantity = float(entry["quantity"])
+    cumulative = 0.0
+    records: list[tuple[str, dict]] = []
+    for execution in effective_executions(executions):
+        cumulative += float(execution.shares)
+        if execution.exec_id in known_exec_ids:
+            continue
+        event = FILLED if cumulative >= quantity else PARTIAL
+        records.append(
+            (
+                event,
+                {
+                    "decision_key": entry["decision_key"],
+                    "ticker": entry.get("ticker"),
+                    "con_id": entry["con_id"],
+                    "side": entry["side"],
+                    "order_ref": getattr(execution, "order_ref", None)
+                    or entry.get("order_ref"),
+                    "exec_id": execution.exec_id,
+                    "filled_qty": float(execution.shares),
+                    "price": getattr(execution, "price", None),
+                    "perm_id": getattr(execution, "perm_id", None),
+                    "order_id": getattr(execution, "order_id", None),
+                    "exec_time": getattr(execution, "time", None),
+                },
+            )
+        )
+    return records
 
 
 @dataclass(frozen=True)
@@ -551,7 +663,7 @@ def resolve_entry(entry: dict, history: object, *, dry: bool = False) -> Resolut
         return result(CONTRADICTION, "order is both open and completed")
     if opened:
         return result(OPEN, "order is still open")
-    shares = sum(float(e.shares) for e in executions)
+    shares = sum(float(e.shares) for e in effective_executions(executions))
     if shares > quantity:
         return result(CONTRADICTION, "executions exceed the ordered quantity")
     if executions:
