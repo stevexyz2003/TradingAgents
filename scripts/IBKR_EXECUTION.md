@@ -485,6 +485,11 @@ and Sell = 0. `block_qty` sits per ticker in the contract table
 the operator's fixed choice and never derived from a price; changing it is a
 commit.
 
+**Budget per ticker (accepted, D-17).** Every ticker of a run is checked against the
+same measurement of `AvailableFunds`; the margin changes of several buys in one run are
+not summed. With `MAX_QTY_PER_ORDER = 2` and the paper account balance this is
+accepted on purpose and not changed in phase 6.
+
 ## RELEASE and KILL
 
 Two plain files in the state folder (`%LOCALAPPDATA%\TradingEngineX\ibkr\`, never
@@ -587,7 +592,7 @@ Order of the chain, per run and per ticker:
     placer; nothing after the `intent` can refuse the order. The dry placer writes
     `dry_complete`. The live placer, one market order per ticker:
     1. sends the order and writes `placed` (`order_id`, `perm_id`)
-    2. waits up to 60 s for the fill (timeout and rejection: plan 06-06)
+    2. waits up to 60 s for the fill (outcomes: see "After the order is sent")
     3. reads the completed order and the executions at the broker (a few reads,
        the three broker sources are not read atomically)
     4. compares them with the `intent`: status, quantity, side, `orderRef`, `conId`
@@ -618,8 +623,39 @@ whole run (exit 8), the others stop only that ticker.
 | account | paper guard (`managedAccounts`) | `RELEASE.account`; the echo on the whatIf is optional |
 | position | broker positions | fills in the ledger (D-18, narrow rule: a conflict only counts when the ledger holds own fills) |
 | already executed | ledger | `orderRef` in open orders, completed orders and executions |
-| tradable now | exchange calendar | `liquidHours`; the order status 399 joins in phase 6 |
+| tradable now | exchange calendar | `liquidHours`; 399 (order parked until the market opens) counts as `fill-timeout` with `parked (399)`; it is covered by a fake test only and not measured at the gateway (gap, like `halted`, REQ-67; D-16) |
 | order reference | the `orderRef` sent (the decision key) | the `orderRef` echo on the whatIf; optional, but a different one stops the ticker as `source-conflict` before any `intent` |
+
+### After the order is sent
+
+The live placer waits up to 60 s for the fill. The outcome decides what the ledger
+and the exit code say:
+
+- `order-filled` (exit 0): filled and equal to the `intent`; the fills are written.
+- `place-rejected` (exit 5): a definite rejection after sending (error 321 or any
+  other code except 399, or the status `Cancelled`, `ApiCancelled` or `Inactive`
+  without a fill). The key is closed with a `rejected` line, so the next run does not
+  stop with exit 6. The run goes on with the next ticker.
+- `fill-timeout` (exit 9): no fill within 60 s, a link event during the wait, or 399
+  ("parked"). An `alarm` is written, the `placed` entry stays open and the run stops;
+  no further ticker is sent.
+- `post-order-mismatch` (exit 10): the broker shows something other than the `intent`,
+  also a partial fill that was cancelled afterwards (the fills that are certain are
+  written first, as `partial`). The run stops.
+
+Nothing is ever cancelled by `execute --live` except through `KILL`. A `fill-timeout`
+leaves the order working at the broker; the operator decides in TWS whether to cancel.
+
+The next run after a `fill-timeout` with the order still open ends in one of exactly
+two ways:
+
+- the same trading day with the same decision: the key is used up, the ticker ends as
+  `already-attempted` (exit 2);
+- a later trading day with a new decision: the own open order counts as foreign (no
+  netting, Pitfall 9) and the ticker ends as `foreign-open-order` (exit 2).
+
+Neither case sends a second order or ends with exit 6. If the order has been filled
+in the meantime, the reconciliation writes the fills with `source: reconcile`.
 
 ## Ledger and reconciliation
 
