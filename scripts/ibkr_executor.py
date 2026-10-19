@@ -1489,8 +1489,27 @@ class LivePlacer:
             problems.append(f"executions add up to {shares}, expected {want}")
         return problems
 
+    @staticmethod
+    def _fills_are_final(ledger_mod, order, trusted: list) -> bool:
+        """Whether the trusted executions are all the broker will ever report (WR-02).
+
+        True only if the broker shows the order done (terminal status) and its reported
+        filled quantity equals the effective trusted executions. Anything else may still
+        grow (a late execution), so no fill row may close the entry yet.
+        """
+        if order is None or order.status not in ledger_mod._DONE or order.filled is None:
+            return False
+        shares = sum(float(e.shares) for e in ledger_mod.effective_executions(trusted))
+        return shares > 0 and shares == float(order.filled)
+
     def _deviation(self, ctx, intent: dict, result, order, mine: list, detail: str) -> None:
-        """Alarm and stop the whole run (D-09); the fills that are certain are kept first."""
+        """Alarm and stop the whole run (D-09).
+
+        Fill rows are written only when the broker confirms they are final (order done,
+        effective trusted executions == its filled quantity). Otherwise the entry stays open
+        (last lifecycle event ``placed``) and the next run's reconciliation books the fills
+        from the broker; the trusted executions are kept in the alarm's ``seen`` (WR-02).
+        """
         guards = ctx.mods.guards
         ledger_mod = ctx.mods.ledger
         key = intent["decision_key"]
@@ -1500,10 +1519,12 @@ class LivePlacer:
             for e in mine
             if e.side == intent["side"] and e.con_id == intent["con_id"] and e.order_ref == ref
         ]
-        for event, fields in ledger_mod.fill_records(intent, trusted):
-            fields = {**fields, "source": "placer", "order_id": result.order_id}
-            fields["perm_id"] = result.perm_id
-            ctx.ledger.append(event, **fields)
+        booked = self._fills_are_final(ledger_mod, order, trusted)
+        if booked:
+            for event, fields in ledger_mod.fill_records(intent, trusted):
+                fields = {**fields, "source": "placer", "order_id": result.order_id}
+                fields["perm_id"] = result.perm_id
+                ctx.ledger.append(event, **fields)
         ctx.ledger.append(
             ledger_mod.ALARM,
             state=guards.POST_ORDER_MISMATCH,
@@ -1522,7 +1543,9 @@ class LivePlacer:
                 "order_ref": order.order_ref if order is not None else None,
                 "perm_id": result.perm_id,
                 "executions": [_execution_view(e) for e in mine],
+                "trusted": [_execution_view(e) for e in trusted],
             },
+            fills_booked=booked,
         )
         ctx.logger.error(
             'ibkr-state=POST_ORDER_MISMATCH ticker=%s key=%s detail="%s"',

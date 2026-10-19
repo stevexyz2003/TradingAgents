@@ -646,8 +646,14 @@ and the exit code say:
   post-send failure best-effort; the exit is 9 even if the alarm write fails), the
   `placed` entry stays open and the run stops; no further ticker is sent.
 - `post-order-mismatch` (exit 10): the broker shows something other than the `intent`,
-  also a partial fill that was cancelled afterwards (the fills that are certain are
-  written first, as `partial`). The run stops.
+  also a partial fill that was cancelled afterwards. The run stops. Fill lines are
+  written in this run only when they are final: the broker lists the order as done
+  (`Filled`, `Cancelled`, `ApiCancelled` or `Inactive`) and the effective executions
+  equal the filled quantity it reports (for example a confirmed partial fill, written as
+  `partial`; the alarm says `fills_booked: true`). Otherwise no fill line is written:
+  the executions seen are kept in the alarm (`seen.trusted`), the entry stays open
+  after `placed`, and the next run's reconciliation writes the fills from the broker,
+  once per `exec_id` (WR-02).
 
 `ValidationError` is not a rejection. The client library sets this status for every order
 *warning* (for example 321, 399, 404 and the 2100-2199 range) while the order is still

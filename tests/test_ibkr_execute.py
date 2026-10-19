@@ -2625,6 +2625,76 @@ class TestLivePlacer:
         assert len(fake.placed_orders) == 1
         assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
 
+    def _half_visible_run(self, tmp_path, loop):
+        """Filled 2, but only one of the two executions shows within the read-back."""
+        first = _own_fill(shares=1, exec_id=EXEC_ID)
+        fake = _filling_fake(executions=[first])
+        code, records = _live_run(tmp_path, loop, fake)
+        return code, records
+
+    def test_mismatch_with_executions_missing_books_no_fill_and_keeps_the_entry_open(
+        self, tmp_path, loop
+    ):
+        # WR-02: the second execution may still arrive; no fill row may close the entry.
+        code, records = self._half_visible_run(tmp_path, loop)
+        assert code == executor.EXIT_POST_ORDER
+        assert _events(records, "filled") == [] and _events(records, "partial") == []
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "post-order-mismatch"
+        assert alarm["fills_booked"] is False
+        assert [e["exec_id"] for e in alarm["seen"]["trusted"]] == [EXEC_ID]
+        assert records[-1]["exit"] == executor.EXIT_POST_ORDER
+        ledger = ledger_mod.Ledger.open(
+            executor.default_ledger_file(),
+            mode=ledger_mod.MODE_LIVE,
+            clock=lambda: OPEN_NOW,
+            run_id="check",
+        )
+        assert ledger.last_event(KEY)["event"] == "placed"
+        assert [e["decision_key"] for e in ledger.unresolved()] == [KEY]
+
+    @pytest.mark.parametrize("next_day", [False, True], ids=["same-day", "next-day"])
+    def test_mismatch_fills_are_booked_once_by_the_next_reconciliation(
+        self, tmp_path, loop, next_day
+    ):
+        code, _records = self._half_visible_run(tmp_path, loop)
+        assert code == executor.EXIT_POST_ORDER
+        second_id = "0000e0d5.6710a3c6.01.01"
+        history = {
+            "positions": [_aapl_position(2)],
+            "executions": [
+                _own_fill(shares=1, exec_id=EXEC_ID),
+                _own_fill(shares=1, exec_id=second_id),
+            ],
+            "completed_orders": [_own_completed()],
+        }
+        kwargs = {}
+        if next_day:
+            kwargs = {"paper": _next_day_paper(tmp_path), "clock": NEXT_NOW}
+            again = _fake_for(liquid_hours=NEXT_HOURS, **history)
+        else:
+            again = _fake_for(**history)
+        code, records = _live_run(tmp_path, loop, again, **kwargs)
+        assert code != executor.EXIT_RECONCILE
+        assert again.placed_orders == []
+        assert not any(r.get("state") == "source-conflict" for r in records)
+        fills = [r for r in records if r["event"] in ("filled", "partial")]
+        assert sorted(r["exec_id"] for r in fills) == sorted([EXEC_ID, second_id])
+        assert all(r["source"] == "reconcile" for r in fills)
+        # A further run books nothing again: the entry is closed.
+        again = _fake_for(liquid_hours=NEXT_HOURS if next_day else OPEN_HOURS, **history)
+        _code, records = _live_run(tmp_path, loop, again, **kwargs)
+        fills = [r for r in records if r["event"] in ("filled", "partial")]
+        assert len(fills) == 2
+        ledger = ledger_mod.Ledger.open(
+            executor.default_ledger_file(),
+            mode=ledger_mod.MODE_LIVE,
+            clock=lambda: OPEN_NOW,
+            run_id="check",
+        )
+        assert ledger.filled_quantity(CON_IDS["AAPL"]) == 2
+        assert ledger.unresolved() == []
+
     def test_executions_that_appear_on_the_second_read_raise_no_alarm(self, tmp_path, loop):
         fake = _filling_fake(executions=[])
         real = fake.reqExecutionsAsync
@@ -3003,6 +3073,9 @@ class TestLiveOutcomes:
         (alarm,) = _events(records, "alarm")
         assert alarm["state"] == "post-order-mismatch"
         assert "partial fill" in alarm["detail"]
+        # Confirmed partial (Cancelled, filled 1 == executions 1): booked, entry closed.
+        assert alarm["fills_booked"] is True
+        assert _chain(records)[-3:] == ["placed", "partial", "alarm"]
         assert _events(records, "rejected") == []
 
     def test_live_link_event_during_the_wait_is_a_fill_timeout(self, tmp_path, loop):

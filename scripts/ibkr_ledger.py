@@ -42,8 +42,11 @@ REJECTED = "rejected"
 SKIPPED = "skipped"
 KILL_CANCEL = "kill_cancel"
 RUN_END = "run_end"
-#: Run alarm after the order (D-08 fill timeout, D-09 mismatch): no lifecycle event, the
-#: entry stays open for the reconciliation of the next run.
+#: Run alarm after the order (D-08 fill timeout, D-09 mismatch): no lifecycle event, so the
+#: entry stays open (last lifecycle event ``placed``) and the next run's reconciliation books
+#: its fills from the broker. Only exception: a mismatch whose fills the broker confirms as
+#: final (order done, effective executions == its filled quantity) books them in the same
+#: run (``fills_booked: true``), which closes the entry (WR-02).
 ALARM = "alarm"
 #: Closes an open live entry by hand (D-14, phase-5 D-19); never changes a line; the key
 #: stays used up (``attempt_of`` still finds the intent).
