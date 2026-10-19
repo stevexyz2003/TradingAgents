@@ -553,6 +553,13 @@ What the switch does:
   "Gateway Read-Only switch"); with it on, the cancel is refused and `remaining`
   stays above zero.
 * A kill that shows up between two orders stops the second one (no `intent`).
+* During a `--live` run, a `KILL` that appears after an earlier ticker was placed
+  (and that order filled or was rejected, so the run went on) still sends the global
+  cancel at the end of the run (D-17). If that earlier order is still working at the
+  broker, the cancel takes it back too. "The live path never cancels" holds for the
+  live placer only (D-08), not for a `--live` run that sees `KILL`. Before the first
+  order: lay `KILL` only when you want every open order of the account cancelled
+  (IN-03).
 * Known limit: if a run already stopped on a release failure and `KILL` appears
   only afterwards, that run does not cancel; the next run does.
 
