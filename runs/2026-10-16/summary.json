@@ -11,11 +11,11 @@
   "commit": "23b4a4b2f964ad35561fc6b0e006c77d343fcb3a",
   "status": "ok",
   "totals": {
-    "tickers": 10,
+    "tickers": 11,
     "cost_usd": 2.158382,
     "tokens_in": 1453129,
     "tokens_out": 387053,
-    "ok": 10,
+    "ok": 11,
     "failed": 0,
     "budget_aborted": 0,
     "skipped": 0
@@ -520,6 +520,15 @@
         }
       },
       "rating_source": "engine"
+    },
+    {
+      "ticker": "AAPL",
+      "status": "ok",
+      "signal": "Overweight",
+      "cost_usd": 0.0,
+      "error": null,
+      "rating_source": "engine",
+      "pipeline_test": "operator-approved, D-03 relaxed 2026-10-19; not an engine decision"
     }
   ]
 }

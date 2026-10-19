@@ -1291,3 +1291,14 @@ What would change the view:
 
 <!-- ENTRY_END -->
 
+[2026-10-16 | AAPL | Overweight | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Overweight
+
+**Executive Summary**: OPERATOR-APPROVED PIPELINE TEST, NOT AN ENGINE DECISION. D-03 relaxed by the operator on 2026-10-19 after 20 of 20 engine decisions for 2026-10-16 came back without a buy (AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, AVGO, AMD, JPM, LLY, UNH, XOM, COST, WMT, KO, CAT, V, NFLX, ORCL). The engine rating for AAPL on 2026-10-16 is Hold (entry above). This entry exists only on the branch paper-log-pipeline-test, to send the first live order (one block, 1 share) through the full order path in phase 6. Never merge it into paper-log.
+
+<!-- ENTRY_END -->
+
