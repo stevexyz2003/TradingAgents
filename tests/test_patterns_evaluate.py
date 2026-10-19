@@ -279,3 +279,16 @@ def test_markdown_shows_denominators_and_reference_groups():
     text = ev.render_markdown(evaluate([_entry("2024-12-02")], _loader()))
     assert "den a/r" in text and "status a" in text and "status r" in text
     assert "independent cases" in text and "undirected" in text
+
+
+def test_log_text_to_entries_reads_old_and_pinned_terms_entries_alike():
+    sep = "\n\n<!-- ENTRY_END -->\n\n"
+    old = "[2026-10-12 | AAPL | Hold | pending]\n\nDECISION:\n**Rating**: Hold"
+    new = ("[2026-10-13 | MSFT | Buy | pending]\n\n"
+           "SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close\n\n"
+           "DECISION:\n**Rating**: Buy")
+
+    entries = ev.log_text_to_entries(old + sep + new + sep)
+
+    assert [(e["ticker"], e["rating"], e["pending"]) for e in entries] == [
+        ("AAPL", "Hold", True), ("MSFT", "Buy", True)]
