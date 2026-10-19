@@ -579,3 +579,100 @@ Folgen:
 - Der Read-Only-Schalter wirkt am whatIf über das Gateway (zweiter unabhängiger
   Beleg nach Phase 4).
 - State-Ordner nachher: kein `RELEASE`, kein `KILL`, kein `ledger.jsonl`.
+### Versuch 2026-10-19, zweiter Anlauf: Pipeline-Test mit gelockertem D-03
+
+**D-03 gelockert (Operator, 2026-10-19):** Nach 20 von 20 Engine-Entscheidungen
+ohne BUY für trade_date 2026-10-16 hat der Operator entschieden, D-03 zu lockern.
+Gelaufen waren AAPL, MSFT und NVDA im Lauf vom 17.10. sowie zwei zusätzliche
+Paper-Runs am 19.10. per `workflow_dispatch`:
+
+- Run 39270361112: AMZN, GOOGL, AVGO, AMD, JPM Hold; META, TSLA Underweight;
+  $1.59.
+- Run 39273689753: LLY, UNH, XOM, COST, WMT, KO, CAT, V Hold; NFLX, ORCL
+  Underweight; $2.16.
+
+Die erste Order läuft deshalb als **Pipeline-Test** über den eigenen Branch
+`fork/paper-log-pipeline-test` (`8453e76`, Basis `paper-log` @ `1d53d29`). Er
+enthält genau einen zusätzlichen, im Text als „OPERATOR-APPROVED PIPELINE TEST,
+NOT AN ENGINE DECISION“ markierten Eintrag `[2026-10-16 | AAPL | Overweight |
+pending]` und die passende Zeile in `runs/2026-10-16/summary.json` (mit dem Feld
+`pipeline_test`). Overweight ergibt genau 1 Block, also 1 Aktie. Die
+Engine-Entscheidung für AAPL am 2026-10-16 bleibt Hold. Der echte `paper-log`
+ist unverändert.
+
+Der Executor-Code bleibt unverändert, der Branch kommt über eine eigene
+Env-Datei mit `--env-file`: nur `IBKR_HOST`, `IBKR_PORT`, `IBKR_ACCOUNT_ID`,
+`IBKR_TRADING_MODE` aus `.env` plus `IBKR_PAPER_LOG_BRANCH=paper-log-pipeline-test`.
+Die Umgebungsvariable allein greift nicht: Der Executor liest nur `.env` oder
+`--env-file`, und ohne Datei las er `paper-log`, Ergebnis `summary-missing`
+(fail-closed).
+
+**Bekannte Unschärfe:** Das Ledger schreibt beim `intent` `rating_source: engine`,
+weil die Testzeile in `summary.json` `engine` tragen muss (nur `engine` wird
+gehandelt). Die Herkunft belegen `preview.json` (`paper_log.branch`, `sha`) und
+dieser Befund.
+
+Trockenlauf mit Schalter aus (15:27:24 UTC):
+`preview: AAPL preview-ok BUY 1 (trade_date 2026-10-16, weekend_gap 3d)`, Exit 0;
+MKT, DAY, `init_margin_change` 100.97, Freshness `fresh`, Sitzung `ok`,
+`sent: false`.
+
+#### Read-Only-Beleg vor RELEASE
+
+„Read-Only API“ laut Operator an um 17:28 MESZ. Die Sonde
+`--whatif AAPL --quantity 1 --order-ref readonly-proof-2` lief um 15:28:37 UTC
+mit Exit 0 und `state` `READ_ONLY_API`, `errors` `[[321, "… Die API befindet sich im
+schreibgeschützten Modus."]]`. Die maschinelle Prüfung endete mit **Exit 0**.
+
+`preview AAPL` (Pipeline-Test-Branch, 15:28:56 UTC), Exit 5:
+
+```text
+preview: AAPL preview-read-only BUY 1 (trade_date 2026-10-16, weekend_gap 3d)
+```
+
+`--history` (15:29:19 und 15:29:35 UTC) endete beide Male mit Exit 3:
+`ibkr-state=REQUEST_TIMEOUT detail="reqCompletedOrders did not answer within 10.0s"`.
+
+#### Messung 1: 321 im scharfen Pfad (D-11, D-15)
+
+`RELEASE` angelegt um 15:30:11 UTC (`valid_until` 2026-11-18), danach
+`execute AAPL --live --env-file pipeline-test.env` (genau ein Ticker), **Exit 3**:
+
+```text
+17:30:13,379 ibkr-state=SWITCHES release=release-ok kill=kill-absent valid_until=2026-11-18
+17:30:14,345 ibkr-state=CONNECTED account=DUQ634065 clientId=20001 readonly=True (...)
+17:30:14,509 ibkr-account AvailableFunds=1006271.92 EUR
+17:30:14,513 Warning 321, reqId -1: ... Die API befindet sich im schreibgeschützten Modus.
+17:30:14,513 WARNING ibkr-state=READ_ONLY_API code=321 detail="... schreibgeschützten Modus."
+17:30:24,528 ERROR ibkr-state=REQUEST_TIMEOUT code=- detail="reqCompletedOrders did not answer within 10.0s"
+```
+
+Ledger (`ledger.jsonl`, neu angelegt):
+
+```json
+{"command":"execute","event":"run_start","kill":"kill-absent","mode":"live","release":"release-ok","release_account":"DUQ634065","run_id":"0158062ab0ed42bcb0893dc8b153030c","seq":1,"tickers":["AAPL"],"ts":"2026-10-19T15:30:13.380136+00:00","v":1,"valid_until":"2026-11-18"}
+{"error":"GatewayUnavailable","event":"run_end","mode":"live","outcome":"error","run_id":"0158062ab0ed42bcb0893dc8b153030c","seq":2,"ts":"2026-10-19T15:30:24.526502+00:00","v":1}
+```
+
+Kein `intent`, kein `placed`, kein `ORDER_SENT`, keine `alarm`-Zeile. `RELEASE`
+wurde um 15:30:33 UTC entfernt.
+
+**Abweichung von der Erwartung (D-15):** Die Sperre greift im scharfen Pfad
+**früher** als erwartet. Sie trifft nicht erst den whatIf (`preview-read-only`,
+Exit 5), sondern schon das Lesen der Orderhistorie: `reqCompletedOrders` bekommt im
+Read-Only-Modus eine 321 ohne Request-Bezug (`reqId -1`) und keine Antwort. Das
+Lesefenster läuft nach 10 s ab, der Lauf endet fail-closed mit
+`REQUEST_TIMEOUT`, Exit 3. `placeOrder` wird nicht erreicht. Die 321 steht im
+Log des `--live`-Laufs. Der gesperrte Zustand ist damit belegt, Exit-Code und
+State weichen aber vom Wortlaut von D-15 ab.
+
+Folgen:
+
+- (a) **Lücke für die Verifikation:** Eine 321 mit `reqId -1` während eines
+  Lesefensters wird nicht als `READ_ONLY_API` (Exit 5) zugeordnet, sondern
+  endet als Timeout (Exit 3). Das ist sicher, aber die Diagnose ist ungenau.
+  Laut Plan keine Codeänderung am Messtag.
+- (b) Im Handbuch ist zu ergänzen, dass `--history` und `execute --live` bei
+  eingeschaltetem Schalter mit `REQUEST_TIMEOUT` enden.
+- (c) Ob `reqCompletedOrders` über das Gateway bei ausgeschaltetem Schalter
+  antwortet, prüft 06-10 Task 1. In Phase 5 lief die Historie über TWS.
