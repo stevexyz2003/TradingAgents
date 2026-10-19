@@ -1,0 +1,47 @@
+name: Security audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a newly published advisory shows up even without a push.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pip-audit:
+    name: pip-audit (known vulnerabilities, blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install the project with every optional extra into its own venv
+        # The ci extra covers dev plus the optional execution tooling; bedrock is the
+        # other optional extra users can install. Auditing the resolved set catches
+        # transitive dependencies, not just the ones pyproject.toml names.
+        run: |
+          python -m venv /tmp/target
+          /tmp/target/bin/python -m pip install --upgrade pip
+          /tmp/target/bin/python -m pip install ".[ci,bedrock]"
+          /tmp/target/bin/python -m pip freeze --exclude-editable \
+            | grep -vi '^tradingagents' > audit-requirements.txt
+          wc -l audit-requirements.txt
+      - name: Audit the resolved dependencies
+        # pip-audit runs from a separate venv, so its own dependencies are not
+        # audited as if they were ours. Fails the job on any known vulnerability.
+        run: |
+          python -m venv /tmp/audit
+          /tmp/audit/bin/python -m pip install "pip-audit==2.9.0"
+          /tmp/audit/bin/pip-audit -r audit-requirements.txt --no-deps --disable-pip \
+            --progress-spinner off --desc on
