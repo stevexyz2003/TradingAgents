@@ -576,3 +576,11 @@ def test_market_data_client_id_is_documented_and_distinct():
     assert md.MARKET_DATA_CLIENT_ID != broker.EXECUTOR_CLIENT_ID
     assert md.MARKET_DATA_CLIENT_ID > 9999
     assert str(md.MARKET_DATA_CLIENT_ID) in _handbook_text()
+
+
+@pytest.mark.unit
+def test_handbook_documents_resolve_never_sent():
+    text = _handbook_text()
+    for needle in ("--resolve", "never_sent", "--note", "resolved"):
+        assert needle in text, needle
+    assert "comes with phase 6" not in text

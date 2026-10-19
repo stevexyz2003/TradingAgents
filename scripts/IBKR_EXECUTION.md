@@ -666,7 +666,8 @@ Files in the state folder: `ledger-dryrun.jsonl` (what phase 5 writes),
 The ledger is JSONL, one line per event, appended and never rewritten. Events:
 `run_start`, `switch_check`, `reconcile`, `intent`, `dry_complete`, `placed`,
 `filled`, `partial`, `rejected`, `skipped` (always with a `reason`), `kill_cancel`,
-`alarm` (no lifecycle event: it leaves the entry open), `run_end`. A fill line (`filled` or `partial`) exists per `exec_id` and carries the
+`alarm` (no lifecycle event: it leaves the entry open), `resolved` (an operator closed a live
+`intent` by hand, see below), `run_end`. A fill line (`filled` or `partial`) exists per `exec_id` and carries the
 `side`; a correction (`.02`) replaces its `.01`, and the position is the signed sum
 (BUY plus, SELL minus) of the effective fills. An attempt is the `intent`: per decision key (`trade_date|ticker`) there
 is at most one, and the first version wins. A second run of the same key is
@@ -722,7 +723,16 @@ collision or contradiction stays exit 6 in both ledgers.
 3. In dry mode, once you know the dry intent can be discarded, rename
    `ledger-dryrun.jsonl` (for instance to `ledger-dryrun.jsonl.bak`). Never edit or
    delete lines inside it.
-4. A `--resolve` flag that records a `resolved` event comes with phase 6.
+4. In the live ledger, when the console names `no_trace` and the three sources plus TWS show
+   no order for the key, close the entry by hand:
+   `python scripts/ibkr_executor.py execute --resolve "2026-10-09|AAPL=never_sent" --note "why"`.
+   The flag only appends one `resolved` event (D-14) and never changes a line. It works
+   only on an open `intent` without a `placed`, and only when the broker history shows no
+   trace (a fresh read at that moment); a trace is exit 6, an unknown, closed or `placed`
+   key is exit 2, bad arguments are exit 1, a held lock is exit 7. `--note` is required
+   (1-500 printable characters), and the line is marked `source: operator`. Afterwards the
+   key stays used up (`already_attempted`): the decision is not sent again. `collision`
+   and `contradiction` stay manual work.
 
 ### States (phase 5)
 
@@ -763,6 +773,9 @@ step with it. The run exit is the worst of these by the rank under "Exit codes".
 ## Commands
 
 ```
+:: close a live intent that never reached the broker (no trace anywhere); appends one resolved line
+python scripts/ibkr_executor.py execute --resolve "2026-10-09|AAPL=never_sent" --note "crash before send"
+
 :: dry run: decision from paper-log to a whatIf preview, sends nothing
 python scripts/ibkr_executor.py preview AAPL
 
