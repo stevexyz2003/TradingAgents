@@ -1097,12 +1097,18 @@ def _execution_view(execution) -> dict:
     }
 
 
+# D-16: an order parked until the market opens (399) is not a rejection. Not measurable at the
+# gateway, covered by a fake test only (gap like ``halted``, REQ-67).
+PARKED_CODES = frozenset({399})
+REJECT_STATUSES = frozenset({"ValidationError", "Cancelled", "ApiCancelled", "Inactive"})
+
+
 class LivePlacer:
     """The phase-6 placer: sends one market order per intent, waits for the fill, checks the
     result against the intent (REQ-65) and writes the fills in the same run (REQ-47, REQ-48).
 
-    Every outcome other than a clean fill ends in the deviation path here; plan 06-06 splits
-    the fill timeout and a definite rejection off from it.
+    Outcomes: clean fill, fill timeout / link event / parked (alarm, order stays open, run
+    stops), definite rejection (key closed), partial fill (deviation path).
     """
 
     dry = False
@@ -1143,13 +1149,33 @@ class LivePlacer:
             result.perm_id,
             result.status,
         )
-        if result.status != "Filled" or result.timed_out or result.link_event:
-            detail = (
-                f"order status {result.status!r} (timed_out={result.timed_out}, "
-                f"link_event={result.link_event}, codes={list(result.error_codes)}, "
-                f"texts={list(result.error_texts)})"
+        kind = self._classify(result)
+        codes = f"codes={list(result.error_codes)}, texts={list(result.error_texts)}"
+        if kind == "link":
+            self._fill_timeout(
+                ctx,
+                intent,
+                result,
+                f"link event during the wait (status {result.status!r}); {codes}",
             )
-            self._deviation(ctx, intent, result, None, [], detail)
+        if kind == "parked":
+            self._fill_timeout(ctx, intent, result, f"parked (399): {codes}")
+        if kind == "timeout":
+            self._fill_timeout(
+                ctx,
+                intent,
+                result,
+                f"no fill within {FILL_TIMEOUT_S:g} s (status {result.status!r})",
+            )
+        if kind == "rejected":
+            return self._rejected(ctx, intent, result)
+        if kind == "partial":
+            order, mine = self._read_back(ctx, intent, result)
+            detail = (
+                f"partial fill {result.filled:g} of {intent['quantity']} "
+                f"then {result.status!r}; {codes}"
+            )
+            self._deviation(ctx, intent, result, order, mine, detail)
         order, mine = self._read_back(ctx, intent, result)
         problems = self._compare(ledger_mod, intent, result, order, mine)
         if problems:
@@ -1172,6 +1198,71 @@ class LivePlacer:
             result.avg_fill_price,
         )
         return guards.ORDER_FILLED
+
+    @staticmethod
+    def _classify(result) -> str:
+        """Sort the outcome of a send: link, parked, timeout, rejected, partial or filled."""
+        if result.link_event and result.status != "Filled":
+            return "link"
+        if PARKED_CODES & set(result.error_codes) and not result.filled:
+            return "parked"
+        if result.timed_out:
+            return "timeout"
+        if result.status in REJECT_STATUSES:
+            return "partial" if result.filled else "rejected"
+        return "filled"
+
+    @staticmethod
+    def _fill_timeout(ctx, intent: dict, result, detail: str) -> None:
+        """An unclear outcome: the order stays open, nothing is cancelled (D-08); stop the run."""
+        guards = ctx.mods.guards
+        ctx.ledger.append(
+            ctx.mods.ledger.ALARM,
+            state=guards.FILL_TIMEOUT,
+            decision_key=intent["decision_key"],
+            ticker=intent["ticker"],
+            detail=detail,
+            order_id=result.order_id,
+            perm_id=result.perm_id,
+            status=result.status,
+            filled=result.filled,
+        )
+        ctx.logger.error(
+            'ibkr-state=FILL_TIMEOUT ticker=%s key=%s detail="%s"',
+            intent["ticker"],
+            intent["decision_key"],
+            detail,
+        )
+        print(
+            f"execute: {guards.FILL_TIMEOUT} ({intent['ticker']}: {detail}); the order stays "
+            "open, nothing was cancelled - the next run reconciles"
+        )
+        raise _ExecuteStop(EXIT_FILL_TIMEOUT, guards.FILL_TIMEOUT, detail)
+
+    @staticmethod
+    def _rejected(ctx, intent: dict, result) -> str:
+        """A definite rejection closes the key, so the next run has nothing to reconcile."""
+        guards = ctx.mods.guards
+        ctx.ledger.append(
+            ctx.mods.ledger.REJECTED,
+            decision_key=intent["decision_key"],
+            ticker=intent["ticker"],
+            state=guards.PLACE_REJECTED,
+            status=result.status,
+            error_codes=list(result.error_codes),
+            error_texts=list(result.error_texts),
+            order_id=result.order_id,
+            perm_id=result.perm_id,
+            source="placer",
+        )
+        ctx.logger.warning(
+            "ibkr-state=PLACE_REJECTED ticker=%s key=%s status=%s codes=%s",
+            intent["ticker"],
+            intent["decision_key"],
+            result.status,
+            list(result.error_codes),
+        )
+        return guards.PLACE_REJECTED
 
     @staticmethod
     def _own(history, intent: dict, result):

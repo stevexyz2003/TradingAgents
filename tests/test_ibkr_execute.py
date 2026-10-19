@@ -2625,18 +2625,6 @@ class TestLivePlacer:
         assert len(fake.placed_orders) == 1
         assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
 
-    def test_a_status_other_than_filled_ends_in_the_deviation_path(
-        self, tmp_path, loop, monkeypatch
-    ):
-        monkeypatch.setattr(executor, "FILL_TIMEOUT_S", 0.3)
-        fake = _fake_for(place_outcome="Submitted")
-        code, records = _live_run(tmp_path, loop, fake)
-        assert code == executor.EXIT_POST_ORDER
-        assert [r["event"] for r in records if r.get("decision_key") == KEY][-2:] == [
-            "placed",
-            "alarm",
-        ]
-
     def test_executions_that_appear_on_the_second_read_raise_no_alarm(self, tmp_path, loop):
         fake = _filling_fake(executions=[])
         real = fake.reqExecutionsAsync
@@ -2698,3 +2686,224 @@ class TestLivePlacer:
 
         walk(tree, (None, None))
         assert sites == [("LivePlacer", "complete")]
+
+
+NEXT_NOW = datetime(2026, 10, 13, 17, 20, tzinfo=UTC)
+NEXT_HOURS = "20261013:0930-20261013:1600"
+
+
+def _next_day_paper(tmp_path):
+    """One Buy decision dated Monday 2026-10-12, for a run on Tuesday."""
+    root = write_paper_log(
+        tmp_path / "pl-next",
+        [("2026-10-12", "AAPL", "Buy")],
+        {"2026-10-12": _summary("2026-10-12", ("AAPL", "ok", "Buy"))},
+    )
+    return FixturePaperLog(root, SHA)
+
+
+def _chain(records, key=KEY):
+    return [
+        r["event"]
+        for r in records
+        if r.get("decision_key") == key and r["event"] not in ("switch_check", "run_end")
+    ]
+
+
+def _own_open(**overrides):
+    args = {"order_ref": KEY, "quantity": 2, "perm_id": 777, "order_id": 5}
+    args.update(overrides)
+    return ibkr_fakes.open_trade(CON_IDS["AAPL"], **args)
+
+
+class TestLiveOutcomes:
+    """Outcomes of a send other than a clean fill (D-08, D-16, Pitfalls 2, 7, 9)."""
+
+    @pytest.fixture(autouse=True)
+    def _fast(self, monkeypatch):
+        monkeypatch.setattr(executor, "POST_ORDER_RETRY_S", 0)
+        monkeypatch.setattr(executor, "FILL_TIMEOUT_S", 0.2)
+
+    def _timeout_run(self, tmp_path, loop, **kwargs):
+        fake = _fake_for(("AAPL", "MSFT"), place_outcome="Submitted", **kwargs)
+        code, records = _live_run(
+            tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
+        )
+        return fake, code, records
+
+    def test_live_fill_timeout_leaves_the_order_open_and_stops_the_run(
+        self, tmp_path, loop, capsys
+    ):
+        fake, code, records = self._timeout_run(tmp_path, loop)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        assert records[-1]["event"] == "run_end"
+        assert records[-1]["state"] == "fill-timeout"
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "fill-timeout"
+        assert alarm["order_id"] == 5
+        assert alarm["perm_id"] == fake.place_perm_id
+        assert _chain(records)[-2:] == ["placed", "alarm"]
+        assert "cancelOrder" not in fake.calls
+        assert "reqGlobalCancel" not in fake.calls
+        assert len(fake.placed_orders) == 1
+        assert [r["ticker"] for r in _events(records, "intent")] == ["AAPL"]
+        assert "nothing was cancelled" in capsys.readouterr().out
+        assert "ibkr-state=FILL_TIMEOUT" in _log_text(tmp_path)
+
+    def test_live_fill_timeout_reconcile_same_day_is_already_attempted(self, tmp_path, loop):
+        _fake, code, _records = self._timeout_run(tmp_path, loop)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        again = _fake_for(open_orders=[_own_open()])
+        code, records = _live_run(tmp_path, loop, again)
+        assert code == executor.EXIT_PRECONDITION
+        assert code != executor.EXIT_RECONCILE
+        assert any(r.get("state") == "already-attempted" for r in records[-6:])
+        assert again.placed_orders == []
+        assert "placeOrder" not in again.calls
+
+    def test_live_fill_timeout_reconcile_next_day_is_foreign_open_order(self, tmp_path, loop):
+        _fake, code, _records = self._timeout_run(tmp_path, loop)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        again = _fake_for(liquid_hours=NEXT_HOURS, open_orders=[_own_open()])
+        code, records = _live_run(
+            tmp_path, loop, again, paper=_next_day_paper(tmp_path), clock=NEXT_NOW
+        )
+        assert code == executor.EXIT_PRECONDITION
+        assert any(r.get("state") == "foreign-open-order" for r in records[-6:])
+        assert not any(r.get("state") == "already-attempted" for r in records[-6:])
+        assert again.placed_orders == []
+        assert again.whatif_calls == []
+        assert "placeOrder" not in again.calls
+
+    def test_live_fill_timeout_reconcile_fills_later(self, tmp_path, loop):
+        first, code, _records = self._timeout_run(tmp_path, loop)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        again = _fake_for(
+            executions=[_own_fill(perm_id=first.place_perm_id)],
+            completed_orders=[_own_completed(perm_id=first.place_perm_id)],
+        )
+        code, records = _live_run(tmp_path, loop, again)
+        assert code != executor.EXIT_RECONCILE
+        filled = _events(records, "filled")
+        assert [r["exec_id"] for r in filled] == [EXEC_ID]
+        assert filled[0]["source"] == "reconcile"
+        assert again.placed_orders == []
+
+    def test_live_place_rejected_on_validation_error_closes_the_key(self, tmp_path, loop):
+        fake = _fake_for(
+            ("AAPL", "MSFT"),
+            place_outcome="ValidationError",
+            place_errors=[(321, "Error validating request")],
+        )
+        code, records = _live_run(
+            tmp_path, loop, fake, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
+        )
+        # The rejection ends the ticker, not the run: MSFT goes on (and is rejected too).
+        assert code == executor.EXIT_REJECTED
+        rejected = [r for r in _events(records, "rejected") if r["state"] == "place-rejected"]
+        assert [r["ticker"] for r in rejected] == ["AAPL", "MSFT"]
+        assert rejected[0]["status"] == "ValidationError"
+        assert 321 in rejected[0]["error_codes"]
+        assert _events(records, "alarm") == []
+        again = _fake_for(("AAPL", "MSFT"))
+        code, records = _live_run(
+            tmp_path, loop, again, tickers=("AAPL", "MSFT"), paper=_two_buys(tmp_path)
+        )
+        assert code != executor.EXIT_RECONCILE
+        assert again.placed_orders == []
+
+    def test_live_place_rejected_on_cancelled_without_fill(self, tmp_path, loop):
+        fake = _fake_for(place_outcome="Cancelled")
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_REJECTED
+        (rejected,) = _events(records, "rejected")
+        assert rejected["state"] == "place-rejected"
+        assert rejected["status"] == "Cancelled"
+        assert "cancelOrder" not in fake.calls
+
+    def test_live_parked_399_is_a_fill_timeout_not_a_rejection(self, tmp_path, loop):
+        fake = _fake_for(
+            place_outcome="ValidationError", place_errors=[(399, "Order parked until open")]
+        )
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "fill-timeout"
+        assert "parked (399)" in alarm["detail"]
+        assert _events(records, "rejected") == []
+        assert _chain(records)[-2:] == ["placed", "alarm"]
+
+    def test_live_partial_then_cancelled_keeps_the_fill_and_alarms(self, tmp_path, loop):
+        fake = _fake_for(place_outcome="Cancelled")
+        real = fake.placeOrder
+
+        def partial(contract, order):
+            trade = real(contract, order)
+            if not getattr(order, "whatIf", False):
+                # One share filled, then the order was cancelled: history shows it afterwards.
+                trade.orderStatus.filled = 1.0
+                fake.executions = [_own_fill(shares=1)]
+                fake.completed_orders = [_own_completed(status="Cancelled", filled=1)]
+            return trade
+
+        fake.placeOrder = partial
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_POST_ORDER
+        (partial_row,) = _events(records, "partial")
+        assert partial_row["filled_qty"] == 1
+        (alarm,) = _events(records, "alarm")
+        assert alarm["state"] == "post-order-mismatch"
+        assert "partial fill" in alarm["detail"]
+        assert _events(records, "rejected") == []
+
+    def test_live_link_event_during_the_wait_is_a_fill_timeout(self, tmp_path, loop):
+        fake = _fake_for(
+            place_outcome="Submitted", emit_during={"place": [(-1, 1100, "lost", None)]}
+        )
+        code, records = _live_run(tmp_path, loop, fake)
+        assert code == executor.EXIT_FILL_TIMEOUT
+        (alarm,) = _events(records, "alarm")
+        assert "link event during the wait" in alarm["detail"]
+        assert _events(records, "rejected") == []
+
+
+class TestSecondRun:
+    @pytest.fixture(autouse=True)
+    def _fast(self, monkeypatch):
+        monkeypatch.setattr(executor, "POST_ORDER_RETRY_S", 0)
+
+    def test_live_second_run_same_day_places_no_second_order(self, tmp_path, loop):
+        first = _filling_fake()
+        code, _records = _live_run(tmp_path, loop, first)
+        assert code == executor.EXIT_OK
+        second = _fake_for(
+            positions=[_aapl_position(2)],
+            executions=[_own_fill()],
+            completed_orders=[_own_completed()],
+        )
+        code, records = _live_run(tmp_path, loop, second)
+        assert code == executor.EXIT_PRECONDITION
+        assert any(r.get("state") == "already-attempted" for r in records[-6:])
+        assert len(first.placed_orders) + len(second.placed_orders) == 1
+        assert "placeOrder" not in second.calls
+
+    def test_live_second_run_next_day_is_within_tolerance(self, tmp_path, loop):
+        first = _filling_fake()
+        code, _records = _live_run(tmp_path, loop, first)
+        assert code == executor.EXIT_OK
+        third = _fake_for(liquid_hours=NEXT_HOURS, positions=[_aapl_position(2)])
+        code, records = _live_run(
+            tmp_path, loop, third, paper=_next_day_paper(tmp_path), clock=NEXT_NOW
+        )
+        assert code != executor.EXIT_RECONCILE
+        assert not any(r.get("state") == "source-conflict" for r in records)
+        assert any(r.get("state") == "within-tolerance" for r in records[-6:])
+        assert third.placed_orders == []
+        assert "placeOrder" not in third.calls
+
+
+def test_live_fill_timeout_source_never_cancels():
+    """D-08, T-06-31: the executor sends no cancel; only the kill path uses ``cancel_all``."""
+    lines = Path(executor.__file__).read_text(encoding="utf-8").splitlines()
+    code = [line for line in lines if not line.lstrip().startswith("#")]
+    assert not any("cancelOrder" in line or "reqGlobalCancel" in line for line in code)
