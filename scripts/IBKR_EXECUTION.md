@@ -45,6 +45,18 @@ repository. Its state is recorded here whenever it changes.
 | 2026-10-11 20:27 | off | operator | turned off again after the 321 proof (ibkr-konto-befund.md) |
 | 2026-10-12 08:45 | on | operator | before the first real Phase-2 run (D-02); paper user login confirmed |
 | 2026-10-12 | off | operator | after D-14 measurement 2: the switch blocks whatIf (321); phase 4 is protected by the socket barrier |
+| 2026-10-19 16:35 / 16:32 MESZ | on, then off | operator | first measuring attempt for the first live order; no buy decision, deferred (times as reported) |
+| 2026-10-19 17:28 MESZ | on | operator | before: off. Fresh 321 proof before the first live order, D-11 (probe whatIf `READ_ONLY_API`, then `execute AAPL --live` blocked) |
+| 2026-10-19 17:36 MESZ | off | operator | before: on. API write access enabled for the first live order (REQ-10); stays off afterwards, D-04 |
+
+On the live path the switch blocks the run before the order is reached: measured on
+2026-10-19, the first broker read of `execute --live` (`reqCompletedOrders` for the
+order history) gets error 321 without a request id and no answer, so the run ends
+with `REQUEST_TIMEOUT` (exit 3), before the whatIf. `preview` with the switch on
+ends at the whatIf with `preview-read-only` (exit 5), and `--history` of the probe
+ends with `REQUEST_TIMEOUT` too. This counts as the 321 proof (D-15); the deviation
+from the expected exit 5 is recorded in `ibkr-konto-befund.md`, section
+"Erste echte Order (Phase 6)".
 
 Localhost only: the gateway process listens on `:::7497`, i.e. on all
 interfaces, not only on `127.0.0.1`. That is expected - the gateway refuses
@@ -56,8 +68,9 @@ set. Keep the *Trusted IPs* list empty or at `127.0.0.1`.
 After the first live order (phase 6, D-04): the switch stays off after the
 release. What protects `execute --live` is `RELEASE` and `KILL`, not this switch.
 Whoever turns it on again does so on purpose and writes date and reason into the
-table above. With the switch on, `execute --live` ends at the preview with
-`preview-read-only` (exit 5) and never at the send (D-15).
+table above. With the switch on, `execute --live` never reaches the send (D-15): it
+ends at the order-history read with `REQUEST_TIMEOUT` (exit 3), see the measurement
+below the table.
 
 Phase 4 measurement (D-14, 2026-10-12, gateway 10.50.1, `ibkr-konto-befund.md`,
 section "whatIf-Vorschau und Read-Only-Schalter"): with the switch **off** the
