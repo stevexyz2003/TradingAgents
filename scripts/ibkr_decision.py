@@ -537,6 +537,27 @@ def _calendar_today(now_utc: datetime, calendar: SessionCalendar) -> date:
     return now_utc.astimezone(ZoneInfo(calendar.zone_name)).date()
 
 
+def second_last_close_utc(
+    now_utc: datetime, calendar: SessionCalendar, *, window_days: int = 14
+) -> datetime:
+    """Close of the second-to-last regular session that has already closed at ``now_utc``.
+
+    A published portfolio is valid when its as_of is later (D-06). Weekends and holidays
+    come from the calendar only; fewer than two closed sessions in the window raise
+    ``CalendarRangeError`` rather than yield an estimate.
+    """
+    today = _calendar_today(now_utc, calendar)
+    days = calendar.sessions_between(today - timedelta(days=window_days), today)
+    closes: list[datetime] = []
+    for day in reversed(days):
+        close = calendar.session_close_utc(day)
+        if close <= now_utc:
+            closes.append(close)
+            if len(closes) == 2:
+                return closes[1]
+    raise CalendarRangeError(f"fewer than two closed sessions in the last {window_days} days")
+
+
 def execution_session(now_utc: datetime, calendar: SessionCalendar) -> tuple[date, bool]:
     """Return the execution session E and whether it is today's still-open session (D-08).
 
