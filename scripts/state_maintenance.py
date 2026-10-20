@@ -12,6 +12,7 @@ Operating manual: ``scripts/STATE_OPERATIONS.md``.
     state_maintenance.py prune  [--cache-dir P] [--results-dir P]
                                 [--checkpoint-days 7] [--report-days 90] [--apply]
     state_maintenance.py backup --out DIR --state-dir DIR [--memory-log P]
+                                [--ibkr-dir DIR] [--dry-run]
 
 ``prune`` is a dry run by default; nothing is deleted without ``--apply``.
 
@@ -29,6 +30,7 @@ Exit codes:
 """
 
 import argparse
+import os
 import re
 import shutil
 import sqlite3
@@ -66,6 +68,20 @@ REPORT_DIR_RE = re.compile(r"^[A-Za-z0-9._\-\^=+]+_(\d{8})_(\d{6})$")
 
 #: Sidecars and scratch files never belong in a backup.
 BACKUP_EXCLUDED_SUFFIXES = (".lock", ".tmp", ".db")
+
+#: The IBKR executor files a backup carries, as an explicit name list (never a
+#: sweep of the folder). Left out on purpose: ``RELEASE`` and ``KILL`` (a
+#: restore must never silently re-arm the release), ``portfolio.json``,
+#: ``preview.json`` and ``resolve.json`` (derived and short-lived), ``logs/`` and
+#: the ``publish/`` clone. ``contracts-history.jsonl`` is in because
+#: ``resolve --init`` refuses to run without ``contracts.json`` while a history
+#: exists.
+IBKR_BACKUP_FILES = (
+    "ledger.jsonl",
+    "ledger-dryrun.jsonl",
+    "contracts.json",
+    "contracts-history.jsonl",
+)
 
 DEFAULT_CHECKPOINT_DAYS = 7
 DEFAULT_REPORT_DAYS = 90
@@ -351,7 +367,26 @@ def _backup_included(path: Path) -> bool:
     return path.suffix not in BACKUP_EXCLUDED_SUFFIXES
 
 
-def backup(out: str | None, state_dir: str | None, memory_log: str) -> int:
+def default_ibkr_dir(environ=None) -> Path:
+    """The executor's state folder (same rule as ``ibkr_executor._ibkr_base``).
+
+    Kept in step with ``ibkr_executor._ibkr_base`` by a test; no import, the
+    executor loads this module.
+    """
+    environ = os.environ if environ is None else environ
+    base = environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base) / "TradingEngineX" / "ibkr"
+    return Path.home() / ".tradingenginex" / "ibkr"
+
+
+def backup(
+    out: str | None,
+    state_dir: str | None,
+    memory_log: str,
+    ibkr_dir: str | None = None,
+    dry_run: bool = False,
+) -> int:
     """Pack the track record into ``<out>/tex-state-<stamp>.tar.gz``.
 
     An explicit allow-list, never a directory sweep: the state directory of a
@@ -363,7 +398,7 @@ def backup(out: str | None, state_dir: str | None, memory_log: str) -> int:
     state dir is an ephemeral ``$RUNNER_TEMP/paper-state``. There is no default
     that would not be a guess.
     """
-    if not out:
+    if not out and not dry_run:
         print("backup needs --out <dir>: where the archive is written")
         return EXIT_CONFIG
     if not state_dir:
@@ -392,9 +427,26 @@ def backup(out: str | None, state_dir: str | None, memory_log: str) -> int:
     if cli_log is not None and cli_log.is_file() and _backup_included(cli_log):
         members.append((cli_log, f"cli/{cli_log.name}"))
 
+    # The IBKR files are read without their lock: the ledger is append-only with
+    # fsync, and a torn last line is tolerated by ``Ledger.open``.
+    ibkr = Path(ibkr_dir).expanduser() if ibkr_dir else default_ibkr_dir()
+    if not ibkr.is_dir():
+        print(f"ibkr: no state directory at {ibkr} - nothing added")
+    else:
+        for name in IBKR_BACKUP_FILES:
+            path = ibkr / name
+            if path.is_file() and _backup_included(path):
+                members.append((path, f"ibkr/{name}"))
+
     if not members:
         print(f"FAIL: nothing on the allow-list found under {state}")
         return EXIT_CONFIG
+
+    if dry_run:
+        print(f"backup (dry run): {len(members)} member(s) would be packed - nothing was written")
+        for _, arcname in members:
+            print(f"  {arcname}")
+        return EXIT_OK
 
     top = f"tex-state-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
     out_dir = Path(out).expanduser()
@@ -440,6 +492,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--state-dir", default=None, help="the paper run's state directory (required)"
     )
     backup_parser.add_argument("--memory-log", default=DEFAULT_CONFIG["memory_log_path"])
+    backup_parser.add_argument(
+        "--ibkr-dir",
+        default=None,
+        help="IBKR state directory (default: the executor's, under LOCALAPPDATA)",
+    )
+    backup_parser.add_argument(
+        "--dry-run", action="store_true", help="list what would be packed, write nothing"
+    )
 
     return parser
 
@@ -468,7 +528,7 @@ def main(argv: list[str] | None = None) -> int:
             args.apply,
         )
     if args.command == "backup":
-        return backup(args.out, args.state_dir, args.memory_log)
+        return backup(args.out, args.state_dir, args.memory_log, args.ibkr_dir, args.dry_run)
     print(f"unknown subcommand: {args.command}")
     return EXIT_CONFIG
 
