@@ -11,6 +11,7 @@ estimates a value the ledger does not hold: target and actual position come from
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import math
 import sys
@@ -513,3 +514,125 @@ def render_markdown(
     out += ["## Notes", ""]
     out += [f"{i}. {n}" for i, n in enumerate(footnotes, 1)] or ["None."]
     return "\n".join(out) + "\n"
+
+
+# --- CLI -----------------------------------------------------------------------------------
+
+EXIT_OK = 0
+EXIT_USAGE = 1
+EXIT_SOURCE = 2
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Read-only target/actual report from the paper-log and ibkr-log branches."
+    )
+    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--remote", default="fork")
+    parser.add_argument("--paper-log-branch", default="paper-log")
+    parser.add_argument("--published-branch", default="ibkr-log")
+    parser.add_argument("--since")
+    parser.add_argument("--until")
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--no-prices", action="store_true")
+    return parser
+
+
+def _iso(value: str | None, flag: str) -> date | None:
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"{flag} is not an ISO date: {value!r}") from None
+
+
+def _emit(markdown: str, stdout) -> None:
+    if stdout is not None:
+        stdout.write(markdown)
+        return
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(markdown.encode("utf-8"))
+        buffer.flush()
+    else:
+        sys.stdout.write(markdown)
+
+
+def main(argv=None, *, reader_factory=None, stdout=None) -> int:
+    try:
+        args = build_parser().parse_args(argv)
+    except SystemExit as exc:
+        # argparse exits 2 on usage errors; 2 means "source unreadable" here.
+        return EXIT_OK if exc.code in (0, None) else EXIT_USAGE
+    pl = _paperlog()
+    try:
+        remote = pl.validate_ref_name(args.remote, "remote")
+        log_branch = pl.validate_ref_name(args.paper_log_branch, "branch")
+        pub_branch = pl.validate_ref_name(args.published_branch, "branch")
+        since = _iso(args.since, "--since")
+        until = _iso(args.until, "--until")
+        if since and until and since > until:
+            raise ValueError("--since is after --until")
+        if args.out is not None and not args.out.resolve().parent.is_dir():
+            raise ValueError(f"--out directory does not exist: {args.out.parent}")
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+
+    factory = reader_factory or (lambda repo, rem, branch: pl.GitPaperLog(repo, rem, branch))
+    try:
+        log_reader = factory(args.repo, remote, log_branch)
+        log_sha = log_reader.fetch()
+        text = pl.decode_utf8(log_reader.read(pl.DECISION_LOG_PATH), pl.DECISION_LOG_PATH)
+    except (pl.PaperLogUnavailable, pl.BlobMissing) as exc:
+        print(f"error: paper-log branch {remote}/{log_branch} not readable: {exc}", file=sys.stderr)
+        return EXIT_SOURCE
+    try:
+        pub_reader = factory(args.repo, remote, pub_branch)
+        pub_sha = pub_reader.fetch()
+        blob = pub_reader.read("ledger.jsonl")
+    except (pl.PaperLogUnavailable, pl.BlobMissing) as exc:
+        print(f"error: published branch {remote}/{pub_branch} not readable: {exc}", file=sys.stderr)
+        return EXIT_SOURCE
+    try:
+        records = read_ledger(blob)
+    except (_ledger().LedgerError, UnicodeDecodeError) as exc:
+        print(f"error: ledger on {remote}/{pub_branch} is not valid: {exc}", file=sys.stderr)
+        return EXIT_SOURCE
+    sources = {
+        f"Decision log {remote}/{log_branch}": f"@ {str(log_sha)[:12]}",
+        f"Ledger {remote}/{pub_branch}": f"@ {str(pub_sha)[:12]}",
+    }
+
+    lo = since.isoformat() if since else None
+    hi = until.isoformat() if until else None
+
+    def in_period(trade_date: str) -> bool:
+        return (lo is None or trade_date >= lo) and (hi is None or trade_date <= hi)
+
+    decisions, unparsed, duplicates = parse_decisions(text)
+    decisions = [d for d in decisions if in_period(d.trade_date)]
+    table = _contracts().CONTRACT_TABLE
+    rows, ledger_only = build_rows(
+        decisions, records, block_qty_of=lambda t: getattr(table.get(t), "block_qty", None)
+    )
+    ledger_only = [k for k in ledger_only if in_period(k.split(KEY_SEPARATOR)[0])]
+    markdown = render_markdown(
+        rows,
+        decisions,
+        sources=sources,
+        period=(args.since, args.until),
+        prices=None if args.no_prices else CloseFetcher(),
+        unparsed=unparsed,
+        duplicates=duplicates,
+        ledger_only=ledger_only,
+    )
+    _emit(markdown, stdout)
+    if args.out is not None:
+        args.out.write_bytes(markdown.encode("utf-8"))
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())

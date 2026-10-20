@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
+import io
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -505,3 +509,235 @@ def test_footnote_sources_and_pipes():
     assert "2026-10-01|XYZ" in text
     assert "a|b" in text
     assert text.endswith("\n")
+
+
+# --- CLI ---------------------------------------------------------------------------------
+
+
+class _FakeReader:
+    def __init__(self, files, error=None):
+        self._files = files
+        self._error = error
+
+    def fetch(self):
+        if self._error:
+            raise self._error
+        return "a" * 40
+
+    def read(self, path):
+        if path not in self._files:
+            raise report._paperlog().BlobMissing(path)
+        return self._files[path]
+
+
+def _factory(log_text, ledger_blob, *, ledger_error=None):
+    def make(_repo, _remote, branch):
+        if branch == "paper-log":
+            return _FakeReader({"decision-log.md": log_text.encode("utf-8")})
+        files = {} if ledger_blob is None else {"ledger.jsonl": ledger_blob}
+        return _FakeReader(files, ledger_error)
+
+    return make
+
+
+def _cli_data():
+    key = "2026-10-16|AAPL"
+    log = _log(
+        _entry("2026-10-09", "MSFT", "Hold"),
+        _entry("2026-10-16", "AAPL", "Overweight"),
+        _entry("2026-10-20", "NVDA", "Hold"),
+    )
+    blob = _blob(
+        [
+            _intent(1, key),
+            _rec(2, "placed", decision_key=key),
+            _fill(3, key, "0001.01", 1, 270.5),
+            _rec(4, "run_end"),
+        ]
+    )
+    return log, blob
+
+
+def _run(args, factory):
+    out = io.StringIO()
+    code = report.main(args, reader_factory=factory, stdout=out)
+    return code, out.getvalue()
+
+
+def test_cli_since_until_filters():
+    log, blob = _cli_data()
+    code, text = _run(
+        ["--no-prices", "--since", "2026-10-10", "--until", "2026-10-16"], _factory(log, blob)
+    )
+    assert code == 0
+    assert "AAPL" in text
+    assert "MSFT" not in text
+    assert "NVDA" not in text
+
+
+def test_cli_prices_patched(monkeypatch):
+    _patch_closes(monkeypatch, lambda *a: _Series([270.0]))
+    log, blob = _cli_data()
+    code, text = _run([], _factory(log, blob))
+    assert code == 0
+    assert "18.5" in text  # (270.5 - 270) / 270 * 1e4
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--since", "2026-10-16", "--until", "2026-10-10"],
+        ["--since", "not-a-date"],
+        ["--until", "2026-13-01"],
+    ],
+)
+def test_cli_bad_dates_exit_1(args, capsys):
+    log, blob = _cli_data()
+    code, text = _run(["--no-prices", *args], _factory(log, blob))
+    assert code == 1
+    assert text == ""
+    assert capsys.readouterr().err
+
+
+def test_cli_missing_published_branch_exit_2(capsys):
+    log, _ = _cli_data()
+    err = report._paperlog().PaperLogUnavailable("git fetch failed")
+    code, text = _run(["--no-prices"], _factory(log, None, ledger_error=err))
+    assert code == 2
+    assert text == ""
+    assert "published branch fork/ibkr-log not readable" in capsys.readouterr().err
+
+
+def test_cli_missing_ledger_blob_exit_2(capsys):
+    log, _ = _cli_data()
+    code, text = _run(["--no-prices"], _factory(log, None))
+    assert code == 2
+    assert text == ""
+    assert "ledger.jsonl" in capsys.readouterr().err
+
+
+def test_cli_corrupt_ledger_exit_2_no_partial_report(capsys):
+    log, _ = _cli_data()
+    bad = _blob([_rec(1, "run_start")]) + b"not json\n" + _blob([_rec(3, "run_end")])
+    code, text = _run(["--no-prices"], _factory(log, bad))
+    assert code == 2
+    assert text == ""
+    assert capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--remote", "-x"],
+        ["--paper-log-branch", "a..b"],
+        ["--published-branch", "bad name"],
+    ],
+)
+def test_cli_rejects_bad_ref_names(args):
+    called = []
+
+    def factory(*a):
+        called.append(a)
+        raise AssertionError("no reader may be built")
+
+    code, _ = _run(["--no-prices", *args], factory)
+    assert code == 1
+    assert called == []
+
+
+def test_cli_out_dir_must_exist(tmp_path):
+    log, blob = _cli_data()
+    code, _ = _run(["--no-prices", "--out", str(tmp_path / "nope" / "r.md")], _factory(log, blob))
+    assert code == 1
+
+
+def _git(cwd, *args):
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.autocrlf=false", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _make_remote(tmp_path):
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+    log, blob = _cli_data()
+    bare, work, seed = tmp_path / "bare.git", tmp_path / "work", tmp_path / "seed"
+    for d in (bare, work, seed):
+        d.mkdir()
+    _git(bare, "init", "-q", "--bare")
+    _git(seed, "init", "-q", "-b", "paper-log")
+    (seed / "decision-log.md").write_bytes(log.encode("utf-8"))
+    _git(seed, "add", "decision-log.md")
+    _git(seed, "commit", "-q", "-m", "log")
+    _git(seed, "checkout", "-q", "-b", "ibkr-log")
+    _git(seed, "rm", "-q", "decision-log.md")
+    (seed / "ledger.jsonl").write_bytes(blob)
+    _git(seed, "add", "ledger.jsonl")
+    _git(seed, "commit", "-q", "-m", "ledger")
+    _git(seed, "remote", "add", "bare", str(bare))
+    _git(seed, "push", "-q", "bare", "paper-log", "ibkr-log")
+    _git(work, "init", "-q")
+    _git(work, "remote", "add", "fork", str(bare))
+    return bare, work
+
+
+def _tips(bare):
+    return _git(bare, "for-each-ref", "refs/heads").stdout
+
+
+def test_real_git_reads_two_branches_without_checkout(tmp_path, capsys):
+    bare, work = _make_remote(tmp_path)
+    tips_before = _tips(bare)
+    code = report.main(["--repo", str(work), "--no-prices"])
+    assert code == 0
+    text = capsys.readouterr().out
+    assert "## Execution" in text and "## Decision" in text
+    assert "270.50" in text
+    tip = _git(bare, "rev-parse", "ibkr-log").stdout.decode().strip()[:12]
+    assert tip in text
+    assert _git(work, "status", "--porcelain").stdout == b""
+    assert sorted(p.name for p in work.iterdir()) == [".git"]
+    assert _git(work, "for-each-ref", "refs/tengx").stdout == b""
+    assert _tips(bare) == tips_before
+
+
+def test_real_git_out_file_matches_stdout(tmp_path, capsys):
+    _, work = _make_remote(tmp_path)
+    out = tmp_path / "bericht.md"
+    code = report.main(["--repo", str(work), "--no-prices", "--out", str(out)])
+    assert code == 0
+    stdout = capsys.readouterr().out
+    assert out.read_bytes() == stdout.encode("utf-8")
+    assert b"\r" not in out.read_bytes()
+
+
+def test_real_git_missing_published_branch_exit_2(tmp_path, capsys):
+    bare, work = _make_remote(tmp_path)
+    _git(bare, "branch", "-q", "-D", "ibkr-log")
+    code = report.main(["--repo", str(work), "--no-prices"])
+    assert code == 2
+    assert "published branch fork/ibkr-log not readable" in capsys.readouterr().err
+
+
+def test_report_module_is_library_free_and_clockless():
+    path = ROOT / "scripts" / "ibkr_report.py"
+    source = path.read_text(encoding="utf-8")
+    top_level = {
+        name.split(".")[0]
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for name in (
+            [a.name for a in node.names]
+            if isinstance(node, ast.Import)
+            else ([node.module] if node.module and not node.level else [])
+        )
+    }
+    for forbidden in ("ib_async", "tradingagents", "pandas", "exchange_calendars"):
+        assert forbidden not in top_level
+    for forbidden in ("datetime.now", "time.time(", "date.today"):
+        assert forbidden not in source
+    for verb in ('"push"', '"checkout"', '"commit"'):
+        assert verb not in source
