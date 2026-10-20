@@ -162,12 +162,13 @@ Identical to the table in the docstring of `scripts/ibkr_executor.py`; a test
 | 8 | `EXIT_ACCOUNT_GUARD` | account guard violated (managedAccounts != ["DUQ634065"]) |
 | 9 | `EXIT_FILL_TIMEOUT` | the order is placed but not filled within the wait; it stays open and nothing is cancelled (D-08) |
 | 10 | `EXIT_POST_ORDER` | the state at IBKR after the order differs from the intent (D-09, REQ-65) |
+| 11 | `EXIT_PUBLISH` | publish failed: git, network or a rejected push (one writer per branch); nothing was forced, `execute` never returns it (D-21) |
 | 20 | `EXIT_NO_CREDENTIALS` | IBKR settings missing or unreadable - same meaning as `EXIT_NO_CREDENTIALS` in `daily_paper_run.py` |
 
-Exits 4, 6 and 7 are active since phase 5 (`execute`). When several things go
+Exit 11 belongs to `publish` only. Exits 4, 6 and 7 are active since phase 5 (`execute`). When several things go
 wrong in one run, the run exit is the worst by this rank: `4 > 7 > 6 > 10 > 9 >
 8 > 3 > 1 > 5 > 2 > 0`. The rank combines the ticker ends and run-level stops of a run that
-got past the lock; it does not make 4 win everywhere. A lock that is held or fails
+got past the lock; it does not make 4 win everywhere. The rank applies to `execute`; `publish` is a separate command and has no rank. A lock that is held or fails
 ends the run with 7 before the switches are read, a wrong account at connect
 (`managedAccounts`) ends it with 8 even with `KILL` present (that run never cancels),
 and an unexpected error is 1 or 3.
@@ -856,6 +857,9 @@ python scripts/ibkr_executor.py preview AAPL
 :: one real market order on the paper account (needs a valid RELEASE); without --live the run is dry
 python scripts/ibkr_executor.py execute AAPL --live
 
+:: copy the live ledger, portfolio.json and contracts.json to fork/ibkr-log; no gateway, no .env
+python scripts/ibkr_executor.py publish
+
 :: first build of contracts.json, anchor AAPL (Windows cmd)
 python scripts/ibkr_executor.py resolve --init AAPL MSFT NVDA
 
@@ -1050,6 +1054,61 @@ Observed gateway states: `FARM_OK` 2104 (eufarm) and 2158 (secdefeu) at INFO,
 
 Not covered by this run: the Saturday run (`closed`, D-24 against D-29) is an
 open verification item.
+
+## Publishing to ibkr-log (phase 7)
+
+**Invariant: one writer per branch.** `paper-log` is written only by the CI run,
+`ibkr-log` only by `ibkr_executor.py publish` on this machine. This is an invariant,
+not a habit (REQ-IBKR-52). The reason: the CI commit step does `fetch --depth=1`,
+`reset --hard` and a push without retry, so a second writer on its branch costs a whole
+decision day. The executor therefore never writes `paper-log`, and CI never writes
+`ibkr-log`.
+
+`publish` copies the live ledger, `portfolio.json` and `contracts.json` from the state
+folder to the branch `ibkr-log` on the remote `fork`. It needs no gateway and reads no
+`.env` (there is no `--env-file`). It is separate from `execute` (D-03).
+
+What the branch holds (D-02): `ledger.jsonl` (live ledger, byte-exact), `portfolio.json`,
+`contracts.json` and a `.gitattributes` that switches line-ending conversion off. No
+dry-run ledger, no history of other files, no derived view.
+
+The work happens in a throwaway one-branch clone at
+`%LOCALAPPDATA%\TradingEngineX\ibkr\publish\`. It can be deleted at any time and is never a
+worktree of the code repository (D-04). The push goes to `fork` only, never to `origin`,
+and never with `--force`; the commit identity is fixed.
+
+Operating sequence (D-19; phase 8 puts it on a schedule):
+
+```
+python scripts/ibkr_executor.py execute AAPL --live
+python scripts/ibkr_executor.py account --out "%LOCALAPPDATA%\TradingEngineX\ibkr\portfolio.json"
+python scripts/ibkr_executor.py publish
+```
+
+Behaviour:
+
+* The ledger lock is held only while the three files are read, and released before any
+  Git call. A held lock ends `publish` with exit 7 and nothing is copied; repeat later.
+* The ledger snapshot is opened as a live ledger first. A broken ledger ends with exit 6
+  and nothing is published.
+* No ledger yet, no `fork` remote, or `fork` pointing at the same URL as `origin`: exit 1.
+* An empty diff creates no commit (`nothing to publish`). The first publish creates the
+  branch.
+* A push that is not a fast-forward ends with exit 11. Find the cause (who else wrote
+  `ibkr-log`?) and never force it.
+* A commit by another author at the remote tip is reported as `PUBLISH_FOREIGN_COMMIT`
+  and does not stop the run.
+* The fork is public. Ledger and portfolio go out unchanged: account number, prices,
+  permIds, cash and positions. This is a deliberate decision for the paper account (D-17).
+
+Log states of the command:
+
+* `PUBLISHED` and `PUBLISH_UNCHANGED` (exit 0)
+* `PUBLISH_NO_PORTFOLIO`, `PUBLISH_PORTFOLIO_UNDATED`, `PUBLISH_PORTFOLIO_OLDER_THAN_LEDGER`,
+  `PUBLISH_FOREIGN_COMMIT` (warnings, exit 0)
+* `PUBLISH_NO_LEDGER`, `PUBLISH_REMOTE_MISSING`, `PUBLISH_REMOTE_IS_ORIGIN` (exit 1)
+* `LEDGER_CORRUPT` (exit 6), `LOCK_HELD` and `LOCK_ERROR` (exit 7)
+* `PUBLISH_FAILED reason=<reason>` (exit 11)
 
 ## See also
 

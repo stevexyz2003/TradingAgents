@@ -47,6 +47,7 @@ Operating manual: ``scripts/IBKR_EXECUTION.md``.
                              [--env-file PATH]
     ibkr_executor.py execute --resolve KEY=never_sent --note TEXT [--log-file PATH]
                              [--env-file PATH]
+    ibkr_executor.py publish [--portfolio PATH] [--contracts PATH] [--log-file PATH]
 
 Settings come from the ``.env`` at the repository root (a fixed path, not the
 current directory) or from ``--env-file``. Only IBKR_HOST, IBKR_PORT,
@@ -69,6 +70,7 @@ Exit codes:
     8   account guard violated (managedAccounts != ["DUQ634065"])
     9   fill timeout: the order is placed but not filled within the wait; it stays open (D-08)
     10  post-order mismatch: the state at IBKR after the order differs from the intent (D-09, REQ-65)
+    11  publish failed (git, network or a rejected push); nothing was forced
     20  IBKR settings missing or unreadable - same meaning as EXIT_NO_CREDENTIALS in daily_paper_run.py
 
 Code 3 means "gateway" here, unlike EXIT_RUN_FAILED (3) in the paper run.
@@ -81,6 +83,7 @@ import io
 import json
 import logging
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -106,6 +109,8 @@ EXIT_LOCKED = 7
 EXIT_ACCOUNT_GUARD = 8
 EXIT_FILL_TIMEOUT = 9
 EXIT_POST_ORDER = 10
+# publish to the executor's own branch failed (git or push, D-21); never used by execute
+EXIT_PUBLISH = 11
 EXIT_NO_CREDENTIALS = 20
 
 #: The settings the command needs (D-06). User name and password stay out:
@@ -136,6 +141,7 @@ _PAPERLOG_PATH = Path(__file__).with_name("ibkr_paperlog.py")
 _STATE_MAINTENANCE_PATH = Path(__file__).with_name("state_maintenance.py")
 _GUARDS_PATH = Path(__file__).with_name("ibkr_guards.py")
 _LEDGER_PATH = Path(__file__).with_name("ibkr_ledger.py")
+_PUBLISH_PATH = Path(__file__).with_name("ibkr_publish.py")
 
 #: How long the live placer waits for the fill of one market order (D-08). The deadline never
 #: cancels: a timeout is reported and the state is read again.
@@ -260,6 +266,11 @@ def load_ledger_module():
     return _load_script_module("ibkr_ledger", _LEDGER_PATH)
 
 
+def load_publish_module():
+    """The ibkr-log publisher, loaded once under the name ``ibkr_publish``."""
+    return _load_script_module("ibkr_publish", _PUBLISH_PATH)
+
+
 def _ibkr_base(environ=None) -> Path:
     environ = os.environ if environ is None else environ
     base = environ.get("LOCALAPPDATA")
@@ -286,6 +297,16 @@ def default_kill_file(environ=None) -> Path:
 def default_ledger_file(environ=None) -> Path:
     """The live ledger; a dry run never writes it."""
     return _ibkr_base(environ) / "ledger.jsonl"
+
+
+def default_publish_dir(environ=None) -> Path:
+    """The throwaway one-branch clone ``publish`` works in (never a worktree of the code repo)."""
+    return _ibkr_base(environ) / "publish"
+
+
+def default_portfolio_file(environ=None) -> Path:
+    """Written by ``account --out <this path>``, copied by ``publish`` (D-19)."""
+    return _ibkr_base(environ) / "portfolio.json"
 
 
 def default_dryrun_ledger_file(environ=None) -> Path:
@@ -774,6 +795,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "IBKR paper executor for DUQ634065 (read-only in phases 2-4; "
             "phase 4 previews with whatIf and sends nothing; "
+            "publish copies state to ibkr-log; "
             "execute is dry unless --live: guards, ledger, and with --live a market order)."
         ),
     )
@@ -826,6 +848,16 @@ def build_parser() -> argparse.ArgumentParser:
     execute.add_argument("--contracts", type=Path, default=None, help="contracts.json path")
     execute.add_argument("--log-file", type=Path, default=default_log_file())
     execute.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
+
+    # publish never reads IBKR settings, so there is deliberately no --env-file.
+    help_publish = (
+        "copy the live ledger, portfolio.json and contracts.json to the executor's own "
+        "branch ibkr-log on fork; no gateway"
+    )
+    publish = sub.add_parser("publish", help=help_publish)
+    publish.add_argument("--portfolio", type=Path, default=default_portfolio_file())
+    publish.add_argument("--contracts", type=Path, default=default_contracts_file())
+    publish.add_argument("--log-file", type=Path, default=default_log_file())
     return parser
 
 
@@ -871,6 +903,8 @@ def main(
     paper_log_factory=None,
     calendar=None,
     placer=None,
+    publish_repo: Path | None = None,
+    git_run=None,
 ) -> int:
     parser = build_parser()
     try:
@@ -883,7 +917,7 @@ def main(
     if not args.command:
         parser.print_usage(sys.stderr)
         print(
-            "error: ibkr_executor.py needs a subcommand: account, resolve, preview, execute",
+            "error: ibkr_executor.py needs a subcommand: account, resolve, preview, execute, publish",
             file=sys.stderr,
         )
         return EXIT_CONFIG
@@ -930,6 +964,10 @@ def main(
         print(f"error: log file not writable: {args.log_file} ({exc})", file=sys.stderr)
         return EXIT_CONFIG
     try:
+        if args.command == "publish":
+            return run_publish(
+                args, logger, clock, repo=publish_repo or REPO_ROOT, run=git_run or subprocess.run
+            )
         if args.command == "account":
             return _account(args, broker_factory, logger)
         if args.command == "preview":
@@ -1634,6 +1672,211 @@ def _execute(args, broker_factory, logger, clock, paper_log_factory, calendar, p
         ),
         "execute ledger",
     )
+
+
+def _publish_read_snapshot(args, logger):
+    """Read the three files as bytes under the ledger lock; the lock is gone before any git call.
+
+    Returns ``(code, files)``: ``code`` is None on success.
+    """
+    ledger_mod = load_ledger_module()
+    state_dir = default_ledger_file().parent
+    try:
+        ledger_mod.ensure_outside_git(state_dir)
+    except ledger_mod.StateInGitTree as exc:
+        code = _fail(
+            logger, EXIT_CONFIG, f"ibkr-state=STATE_IN_GIT_TREE {exc}", f"state folder: {exc}"
+        )
+        return code, None
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        code = _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=STATE_DIR_UNUSABLE {state_dir}: {type(exc).__name__}: {exc}",
+            f"state folder not usable: {state_dir} ({type(exc).__name__})",
+        )
+        return code, None
+    lock_stack = contextlib.ExitStack()
+    try:
+        held = lock_stack.enter_context(locked(default_ledger_file(), wait=False))
+    except OSError as exc:
+        lock_stack.close()
+        code = _fail(
+            logger,
+            EXIT_LOCKED,
+            f'ibkr-state=LOCK_ERROR detail="{type(exc).__name__}: {exc}"',
+            "publish: lock-error (nothing published)",
+        )
+        return code, None
+    if not held:
+        lock_stack.close()
+        code = _fail(
+            logger,
+            EXIT_LOCKED,
+            f'ibkr-state=LOCK_HELD detail="{default_ledger_file()}.lock"',
+            "publish: lock-held (another run holds the ledger lock)",
+        )
+        return code, None
+    ledger = portfolio = contracts = None
+    try:
+        with lock_stack:
+            ledger = _read_bytes_or_none(default_ledger_file())
+            portfolio = _read_bytes_or_none(Path(args.portfolio))
+            contracts = _read_bytes_or_none(Path(args.contracts))
+    except OSError as exc:
+        code = _fail(
+            logger,
+            EXIT_CONFIG,
+            f'ibkr-state=PUBLISH_READ_FAILED detail="{type(exc).__name__}: {exc}"',
+            f"publish: cannot read the state files ({type(exc).__name__})",
+        )
+        return code, None
+    if ledger is None:
+        code = _fail(
+            logger,
+            EXIT_CONFIG,
+            f"ibkr-state=PUBLISH_NO_LEDGER path={default_ledger_file()}",
+            "publish: there is no live ledger yet (nothing to publish)",
+        )
+        return code, None
+    return None, (ledger, portfolio, contracts)
+
+
+def _read_bytes_or_none(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def run_publish(args, logger, clock, *, repo, run) -> int:
+    """``publish``: copy ledger, portfolio.json and contracts.json to ``fork/ibkr-log``.
+
+    No gateway and no ``.env``. The ledger lock is held only while the files are read, never
+    across a git call, so a slow push cannot block ``execute`` (T-07-22).
+    """
+    ledger_mod = load_ledger_module()
+    pub = load_publish_module()
+    code, files = _publish_read_snapshot(args, logger)
+    if code is not None:
+        return code
+    ledger_bytes, portfolio_bytes, contracts_bytes = files
+
+    # The snapshot must be a valid ledger before anything leaves the machine (T-07-23).
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "ledger.jsonl"
+            copy.write_bytes(ledger_bytes)
+            checked = ledger_mod.Ledger.open(
+                copy, mode=ledger_mod.MODE_LIVE, clock=clock, run_id="publish"
+            )
+            records = list(checked.records)
+    except Exception as exc:  # noqa: BLE001 - an unreadable ledger is "corrupt"
+        detail = (
+            str(exc) if isinstance(exc, ledger_mod.LedgerError) else f"{type(exc).__name__}: {exc}"
+        )
+        return _fail(
+            logger,
+            EXIT_RECONCILE,
+            f'ibkr-state=LEDGER_CORRUPT detail="{detail}"',
+            f"publish: ledger-corrupt ({detail}); nothing published",
+        )
+    ledger_lines = len(records)
+    last_seq = max((r["seq"] for r in records), default=None)
+    last_ts = None
+    if records:
+        try:
+            last_ts = datetime.fromisoformat(records[-1]["ts"])
+        except (KeyError, TypeError, ValueError):
+            last_ts = None
+
+    # Portfolio freshness is only reported; the CI checks it again itself.
+    if portfolio_bytes is None:
+        logger.warning("ibkr-state=PUBLISH_NO_PORTFOLIO path=%s", args.portfolio)
+    else:
+        as_of_text = None
+        try:
+            as_of_text = json.loads(portfolio_bytes.decode("utf-8")).get(AS_OF_KEY)
+            as_of = datetime.fromisoformat(as_of_text)
+            if as_of.tzinfo is None:
+                raise ValueError("as_of has no time zone")
+        except (ValueError, TypeError, AttributeError):
+            as_of = None
+            logger.warning("ibkr-state=PUBLISH_PORTFOLIO_UNDATED path=%s", args.portfolio)
+        if as_of is not None:
+            if last_ts is not None and last_ts.tzinfo is not None and as_of < last_ts:
+                logger.warning(
+                    "ibkr-state=PUBLISH_PORTFOLIO_OLDER_THAN_LEDGER as_of=%s last_ledger_ts=%s",
+                    as_of_text,
+                    last_ts.isoformat(),
+                )
+            logger.info("publish portfolio as_of=%s", as_of_text)
+
+    try:
+        url = pub.resolve_remote_url(Path(repo), run=run)
+    except pub.PublishError as exc:
+        state = {
+            "remote-missing": "PUBLISH_REMOTE_MISSING",
+            "remote-is-origin": "PUBLISH_REMOTE_IS_ORIGIN",
+        }.get(exc.reason)
+        if state is None:
+            return _fail(
+                logger,
+                EXIT_PUBLISH,
+                f'ibkr-state=PUBLISH_FAILED reason={exc.reason} detail="{exc.detail}"',
+                f"publish: failed ({exc.reason}) - nothing was forced",
+            )
+        return _fail(
+            logger,
+            EXIT_CONFIG,
+            f'ibkr-state={state} detail="{exc.detail}"',
+            f"publish: {exc.reason} ({exc.detail})",
+        )
+
+    snapshot = pub.Snapshot(
+        ledger=ledger_bytes, portfolio=portfolio_bytes, contracts=contracts_bytes
+    )
+    try:
+        result = pub.publish(
+            snapshot,
+            default_publish_dir(),
+            url,
+            now_utc=clock(),
+            ledger_lines=ledger_lines,
+            last_seq=last_seq,
+            run=run,
+        )
+    except pub.PublishError as exc:
+        # Only the remote name goes to the log, never the URL (it may carry a token).
+        extra = "; ibkr-log moved; one writer per branch" if exc.reason == "push-rejected" else ""
+        detail = exc.detail.replace(url, pub.PUBLISH_REMOTE)
+        return _fail(
+            logger,
+            EXIT_PUBLISH,
+            f"ibkr-state=PUBLISH_FAILED reason={exc.reason} remote={pub.PUBLISH_REMOTE} "
+            f'detail="{detail}"',
+            f"publish: failed ({exc.reason}) - nothing was forced{extra}",
+        )
+    if result.foreign_author:
+        logger.warning("ibkr-state=PUBLISH_FOREIGN_COMMIT author=%s", result.foreign_author)
+    if result.outcome == "unchanged":
+        logger.info("ibkr-state=PUBLISH_UNCHANGED remote=%s", pub.PUBLISH_REMOTE)
+        print("publish: nothing to publish")
+        return EXIT_OK
+    logger.info(
+        "ibkr-state=PUBLISHED commit=%s remote=%s first_publish=%s",
+        result.commit,
+        pub.PUBLISH_REMOTE,
+        result.first_publish,
+    )
+    suffix = " (first publish)" if result.first_publish else ""
+    print(
+        f"publish: published {result.commit[:12]} to "
+        f"{pub.PUBLISH_REMOTE}/{pub.PUBLISH_BRANCH}{suffix}"
+    )
+    return EXIT_OK
 
 
 def run_resolve_entry(args, mods, broker_factory, logger, progress, clock) -> int:

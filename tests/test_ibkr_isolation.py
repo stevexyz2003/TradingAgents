@@ -188,7 +188,7 @@ def test_handbook_exit_table_matches_executor():
         for name in dir(executor)
         if name.startswith("EXIT_") and isinstance(getattr(executor, name), int)
     }
-    assert len(codes) == 12
+    assert len(codes) == 13
     for name, value in codes.items():
         assert re.search(rf"^\| {value} \| `{name}` \|", text, re.M), f"{name}={value} not in table"
 
@@ -292,6 +292,7 @@ def test_resolver_takes_the_clock_as_a_parameter():
 
 DECISION = ROOT / "scripts" / "ibkr_decision.py"
 PAPERLOG = ROOT / "scripts" / "ibkr_paperlog.py"
+PUBLISH = ROOT / "scripts" / "ibkr_publish.py"
 
 
 def _load_decision():
@@ -523,7 +524,7 @@ def test_handbook_state_table_matches_decision_module():
 
 @pytest.mark.unit
 def test_decision_modules_are_library_free():
-    for path in (DECISION, PAPERLOG):
+    for path in (DECISION, PAPERLOG, PUBLISH):
         top_level = {
             name.split(".")[0]
             for node in ast.parse(path.read_text(encoding="utf-8")).body
@@ -540,10 +541,56 @@ def test_decision_modules_are_library_free():
 
 @pytest.mark.unit
 def test_decision_module_takes_the_clock_as_a_parameter():
-    for path in (DECISION, PAPERLOG):
+    for path in (DECISION, PAPERLOG, PUBLISH):
         source = path.read_text(encoding="utf-8")
         for forbidden in ("datetime.now", "time.time(", "date.today"):
             assert forbidden not in source, f"{forbidden} reads the clock in {path.name}"
+
+
+@pytest.mark.unit
+def test_handbook_names_one_writer_per_branch_as_invariant():
+    text = _handbook_text()
+    for needle in (
+        "one writer per branch",
+        "invariant",
+        "ibkr-log",
+        "paper-log",
+        "publish",
+        "EXIT_PUBLISH",
+    ):
+        assert needle in text, f"handbook lacks {needle!r}"
+
+
+def _non_docstring_strings(tree: ast.AST) -> list[str]:
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                docstrings.add(id(body[0].value))
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    ]
+
+
+@pytest.mark.unit
+def test_publish_module_never_forces_or_names_paper_log():
+    tree = ast.parse(PUBLISH.read_text(encoding="utf-8"))
+    strings = _non_docstring_strings(tree)
+    assert strings, "the check would look at nothing"
+    for value in strings:
+        assert "--force" not in value, value
+        assert "paper-log" not in value, value
+        assert not value.startswith("+refs/heads/ibkr-log:refs/heads"), value
 
 
 @pytest.mark.unit
