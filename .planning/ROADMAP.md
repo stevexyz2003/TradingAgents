@@ -373,7 +373,7 @@ Plans:
 - Keine Alpha-/Backtest-Auswertung aus Fills.
 - Kein Alarm — der Bericht ist eine Lesefunktion, die Alarmierung ist Phase 8.
 
-**Plans:** 7/9 plans executed
+**Plans:** 8/9 plans executed
 
 Plans:
 **Wave 1**
@@ -391,7 +391,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 07-08-PLAN.md — Handbuch: Bericht, Backup, CI-Rückkanal (D-17/D-18); Reinheit `ibkr_report.py` (Welle 3)
+- [x] 07-08-PLAN.md — Handbuch: Bericht, Backup, CI-Rückkanal (D-17/D-18); Reinheit `ibkr_report.py` (Welle 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
