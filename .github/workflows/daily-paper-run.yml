@@ -121,6 +121,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install .
 
+      - name: Install the session calendar
+        # Needed to judge the published portfolio snapshot by the exchange calendar;
+        # without it the run continues without a portfolio.
+        run: pip install "exchange_calendars>=4.13,<5"
+
       - name: Preflight (config + credentials, no LLM call)
         id: preflight
         run: |
@@ -178,6 +183,7 @@ jobs:
             --date "$TRADE_DATE" \
             --max-cost "$MAX_COST" \
             --out "$OUT_DIR" \
+            --portfolio-from-published \
             --state "$STATE_DIR"
           rc=$?
           set -e
