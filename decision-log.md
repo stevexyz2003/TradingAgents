@@ -1291,3 +1291,105 @@ What would change the view:
 
 <!-- ENTRY_END -->
 
+[2026-10-19 | AAPL | Hold | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold AAPL at your existing weight. Do not add at 343–346 or just ahead of the Oct 28 event, and do not trim now. If you want more exposure, add about a third of the intended increment on a pullback to roughly 337–340 while closes stay above 326.29. Cut back toward Underweight on a close below 326.29 on expanding volume. Size the position so a gap through the stop is survivable.
+
+**Investment Thesis**: The evidence is balanced after weighing, so Hold is warranted.
+
+**What favors holding.** The trend is intact. The Research Manager's data shows the close of 342.94 above the 10 EMA (340.41), 50 SMA (326.29) and 200 SMA (292.50). Fundamentals are strong: revenue grew about 16% for three quarters, net income grew 27%, and gross margin rose from 46.5% to 50.1%. Operating margin rose from 27.0% to 32.6%. The Aggressive analyst is right that this does not support selling or shorting. The Barron's 27% downside call, the Reddit sale and the 11-message StockTwits sample are thin evidence, as both the Conservative and Neutral analysts conceded.
+
+**Why not add.**
+- The Aggressive analyst's case for a breakout add at 346 depends on a stop at 326.29. That stop sits about 5.7% or roughly 3 ATR below 346, which breaks his own 1.5–2 ATR framework. The Neutral analyst showed that only an entry near 337.62 fits that framework, at about 1.7 ATR.
+- Momentum is fading. The MACD histogram fell from 1.60 to 0.15, and RSI made lower highs. Price was rejected at 348.15 on Oct 13 and 347.82 on Oct 16, with no close above the 346.33 upper band. The Oct 16 session traded about 59.9M shares.
+- The Neutral analyst is right that one rejected breakout is informative but not decisive.
+- The valuation read is unverified. There is no sourced P/E or market cap, only a StockTwits "about 40x" figure. The 38x estimate rests on a missing September-quarter EPS. Strong growth at an unknown price does not make adding at the top of the range attractive.
+- The Oct 28 event is unverified (the date comes from a user post) and could be a sell-the-news risk.
+- Macro headlines lean negative for a high-multiple stock, but FRED data is missing, so I cannot measure them.
+
+**Why not trim.** The trend and earnings are intact, and the Conservative analyst's concerns are mostly unproven. Divergence is plausible but not confirmed. The prior Hold on 2026-10-09 scored +4.0% alpha over 5 days, which supports the trend leg. It did not test the momentum or gap-risk legs. In line with that reflection, I expect a range of roughly 330–348 over the next 2–4 weeks. I will check the MACD histogram within 2–3 sessions.
+
+**Plan.**
+- Add only in the 337–340 zone, in tranches of about a third.
+- Allow a second, smaller add only after a close above 346.33 holds for a couple of sessions with volume above the ~37M average and an expanding MACD histogram. Do not pre-authorize it.
+- A close below 337.62 means stop adding.
+- A close below 326.29 on expanding volume means cut a third to a half of the position.
+- A stop alone will not protect against gaps. The stock fell about 7.3% on 07-31 and gapped lower on 10-09, so position size is the main control.
+
+**What would change the view.**
+- Toward Overweight: a confirmed breakout with expanding momentum, plus confirmation of the margin drivers and a reasonable forward multiple.
+- Toward Underweight: a break of the 50 SMA, decelerating guidance, gross margin slipping toward the mid-40s, or weak China commentary.
+
+**Data gaps.** Missing items are September-quarter EPS and P/E, forward estimates, the driver of the margin expansion, debt and cash detail, and macro data.
+
+**Price Target**: 345.0
+
+**Time Horizon**: 2-6 weeks; reassess after the Oct 28 event and on any close below 337.62 or above 346.33
+
+<!-- ENTRY_END -->
+
+[2026-10-19 | MSFT | Hold | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold MSFT at your standard weight. Don't add at about 533 before the fiscal Q1 print. If you are above target, trim about 10-25% of the overweight portion into 543-551. For new money, use a limit order for a quarter tranche near 521.8, and a second quarter tranche only on a close above 543-551 on heavy volume or after a clean print. The 506 stop (50 SMA) does not protect against an earnings gap, so manage that risk by position size.
+
+**Investment Thesis**: The Hold wins on the evidence, but only narrowly. The Aggressive analyst's best points are real. The trend is intact: price is above the 10 EMA (531), the 50 SMA (506) and the 200 SMA (434), all rising. Revenue growth is steady at about 17-18%, and operating cash flow was $46.7B. His case for adding half a tranche now is weaker. It relies on a 506 stop that an earnings gap can bypass, and the gap risk is the key issue. A 10% gap would open near 480, below the lower Bollinger band, for a loss about twice the planned 27 points. The first target at 551 is only about 17.6 points above the close, against about 27.5 points of stop distance, so the near-term reward-to-risk is under 1:1. His upside case also leans on one analyst's $662 target (Bernstein) and on headline-only Morgan Stanley commentary. Neither is consensus, and neither has been read in full.\n\nThe Conservative analyst's evidence is stronger on timing and sizing. Free cash flow fell from $20.3B to $15.8B year over year and was only $5.9B in December. Capex is up 84% and is about 37% of revenue. Gross margin slipped from 69.0% to 67.6%, and operating margin from 48.9% to 46.3%. RSI fell from 70.8 to 59.6 and MACD has ticked below its signal line, although the -0.17 histogram is too small to call a reversal. Volume is light on the advance. The stock is up about 37% from the July 29 close and about 51% from the June low, with no verified valuation, Azure growth, debt or lease data. Even so, he shows no actual fundamental break, and the trend is intact. That argues against cutting a core holding ahead of the catalyst.\n\nThe Neutral analyst's point settles it. Gap risk is already in any existing position, so the decision is about sizing, not whether to own the stock. A core holding, a patient limit near 521.8 (about 1.1 ATR below the close), and a confirmation-based second add give a reasonable result either way. The Aggressive analyst's fear of missing out is a real cost, but it is smaller than the cost of adding full risk at a stretched price into a binary event. This is a balanced call, so Hold is justified, with a slight cautious tilt on new money.\n\nMissing inputs: P/E and market cap against FY27 consensus, debt and lease commitments, the Azure growth figure, the cause of the July 30 gap, the earnings date and options pricing. FRED rate data was also unavailable. Pull these before any size change. Skip options hedges unless you have checked the chain, because event premium makes both call spreads and puts expensive.\n\nWhat would change the view:\n- Upgrade toward Overweight: the print shows Azure acceleration, rising sequential operating income and FCF recovering toward $20B or more. A close above 551 on heavy volume with verified Azure strength would also qualify. A pullback to 521-531 that holds would also do it.\n- Downgrade toward Underweight: a close below about 506 on volume, Azure deceleration alongside higher capex guidance, or sequentially falling operating income while revenue rises. A bearish RSI divergence on a new high would add to the case.\n\nCheck the MACD histogram and the price range within the first 2-3 sessions. Expect a range of roughly 506-551 before the print.
+
+**Price Target**: 551.0
+
+**Time Horizon**: Through the fiscal Q1 earnings report, then reassess (about 1-3 months)
+
+<!-- ENTRY_END -->
+
+[2026-10-19 | NVDA | Hold | pending]
+
+SETTLEMENT: holding=5d | benchmark=SPY | entry=next_close
+
+DECISION:
+**Rating**: Hold
+
+**Executive Summary**: Hold the existing NVDA position at standard allocation and do not add at about $217. Cut to roughly half of standard on a daily close below $210.96, the 9/14 low. Add in one-third steps only after a close above about $223 with MACD turning up and a 10-Q that clears the cash-flow and earnings gaps. Horizon is 4–8 weeks to the next decision point, inside a multi-quarter holding view.
+
+**Investment Thesis**: The debate ends in a Hold because the evidence is still balanced after weighing it. The fundamentals favor the bulls and the near-term evidence favors the bears.
+
+**What favors holding rather than trimming.** Q2 FY27 revenue was $96.2B, up about 106% year over year and about 18% sequentially. Gross margin stayed near 75% and operating margin near 66% through a step-up of roughly $15B in revenue. The 200-day SMA is rising, from 194.86 to 202.81, and the stock is about 7% above it. The Aggressive analyst is right that this is not a business to sell on a 9% pullback. None of the three analysts showed fundamental deterioration, so Underweight or Sell is not justified.
+
+**What argues against adding now.**
+- The trend is negative. The close of $217.09 is below the 10-day EMA ($223.01) and the 50-day SMA ($222.83). The MACD histogram swung from +1.37 in early October to -2.39. RSI is 41.5, so there is no capitulation signal.
+- The cash and earnings gaps are unexplained. Net income rose about 2% against about 19% operating income growth. Implied operating cash flow fell from about $50B to about $24B. Liabilities rose about 43% in one quarter, and their composition is unknown. The Aggressive "working-capital timing" explanation is plausible, but it is a hypothesis until the 10-Q confirms it. The Neutral and Conservative analysts were right that you should not size up before that answer arrives.
+- Valuation, customer concentration and macro are missing. There is no vendor-verified P/E or market cap, no FRED yield data, and no customer concentration data. Oil near $103, hot inflation and AI-financing worries are headwinds that cannot be sized from the evidence provided.
+- Sentiment is not usable. The Reddit sample is 11 posts with no engagement data. Aggressive and Conservative each over-read it, and the Neutral analyst correctly discounted both.
+
+**Why not the Aggressive one-third add.** The Aggressive case rests on the $210.96 stop being a small, defined loss. The Conservative and Neutral analysts showed that the stop is only about one ATR (5.93) below entry. It is a close-based stop, and the 9/14 intraday low of $208.93 shows price can trade below it. The cost of waiting is bounded at about 3% (roughly $6) and buys the 10-Q and a technical confirmation. That is a better trade than adding into unresolved cash-flow questions.
+
+**Stop and sizing.** Treat $210.96 as the thesis-break line, not a volatility stop. Hold the standard size through noise above it. Below it, the next supports are about $207 and the 200-day near $203.
+
+**Triggers.**
+- Upgrade to Overweight, scaling in one-third at a time, if all three hold:
+  - A close above about $223 with MACD turning up.
+  - A 10-Q showing the net income gap came from a non-recurring or non-operating item.
+  - Receivables and inventory growing in line with revenue.
+- Downgrade to Underweight on any of these:
+  - A close below $210.96.
+  - Receivables or inventory growing materially faster than revenue.
+  - Operating margin compression.
+  - Sequential growth falling sharply below the roughly 18–20% pace.
+  - Financing or concentration stress among major GPU buyers.
+
+**Lesson applied.** Given the prior Hold lesson, I am stating an expected range for the holding period: about $211–$223 until one side breaks. Check the MACD histogram within the first two or three sessions. A narrowing histogram would support a later add. A widening one would raise the odds of a break below $210.96.
+
+**Price Target**: not provided
+
+**Time Horizon**: 4-8 weeks to the next decision point (10-Q review and 50-day reclaim test); multi-quarter underlying view
+
+<!-- ENTRY_END -->
+
