@@ -130,7 +130,14 @@ opt-in in code. That is a decision, not a gap.
 
 ```bash
 python scripts/state_maintenance.py backup \
-  --out ~/backups --state-dir ~/.tradingagents/paper-state
+  --out ~/backups --state-dir ~/.tradingagents/paper-state   [--ibkr-dir DIR]
+```
+
+`--dry-run` lists what would be packed and writes nothing (no archive, `--out`
+is not created and may be omitted):
+
+```bash
+python scripts/state_maintenance.py backup --dry-run   --state-dir ~/.tradingagents/paper-state
 ```
 
 It writes `<out>/tex-state-<YYYYmmddTHHMMSSZ>.tar.gz`, all members under one
@@ -140,6 +147,18 @@ top-level directory, from an **explicit allow-list**:
 * `<state-dir>/index.md`
 * `<state-dir>/runs/**`
 * the CLI log `--memory-log` (default `~/.tradingagents/memory/trading_memory.md`)
+* from the IBKR state folder (`--ibkr-dir`, default `%LOCALAPPDATA%\TradingEngineX\ibkr`,
+  the same folder the executor uses), stored under `ibkr/`: `ledger.jsonl`,
+  `ledger-dryrun.jsonl`, `contracts.json`, `contracts-history.jsonl`
+
+The IBKR members are an explicit name list too. `RELEASE` and `KILL` are left
+out on purpose (a restore must never silently re-arm the release);
+`portfolio.json`, `preview.json` and `resolve.json` are derived and short-lived;
+`logs/` and the `publish/` clone are not state. `contracts-history.jsonl` is
+included because `resolve --init` refuses to run without `contracts.json` while a
+history exists. A missing folder or file is a note, not an error. The files are
+read without their lock: the ledger is append-only, and a truncated last record
+is tolerated when the ledger is opened.
 
 `*.lock`, `*.tmp` and `*.db` are excluded. There is **no directory sweep**: a
 state directory in a real deployment sits next to `.env` files and keys, and a
@@ -166,6 +185,10 @@ tradingagents --clear-checkpoints
 ```
 
 Then run again. The loss is exactly one resume point.
+
+**The IBKR files.** Unpack the `ibkr/` members into
+`%LOCALAPPDATA%\TradingEngineX\ibkr\`. `RELEASE` is not in the archive and has
+to be created again deliberately.
 
 **Not `.recover`.** `.recover` is a command of the `sqlite3` *shell*, not of
 Python's `sqlite3` module, and that binary is present neither on this
@@ -233,7 +256,10 @@ What is missing, and must be known before running two things at once:
 3. **The paper run is serialized only by the GitHub `concurrency` group**
    (`daily-paper-run.yml:58-59`). There is no lock on `paper-log` itself. A
    second writer from another workflow would fail at the non-fast-forward
-   `push`, so the failure mode is a *lost* run, not a corrupted log.
+   `push`, so the failure mode is a *lost* run, not a corrupted log. Since
+   phase 7 the executor never writes `paper-log`: it writes only the branch
+   `ibkr-log` (`ibkr_executor.py publish`, REQ-IBKR-52; invariant
+   "one writer per branch" in `scripts/IBKR_EXECUTION.md`), and CI only reads `ibkr-log`.
 4. `get_pending_entries()` is read **outside** any lock in `settle_all_pending`
    (`settlement.py:165`). Harmless — the pass re-reads under the lock — but
    worth knowing when reading the code.
