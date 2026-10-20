@@ -45,6 +45,7 @@ EXIT_NAMES = (
     "EXIT_ACCOUNT_GUARD",
     "EXIT_FILL_TIMEOUT",
     "EXIT_POST_ORDER",
+    "EXIT_PUBLISH",
     "EXIT_NO_CREDENTIALS",
 )
 
@@ -148,7 +149,7 @@ def _own_file_handlers():
 class TestExitCodes:
     def test_exit_codes_are_disjoint_and_complete(self):
         values = [getattr(executor, name) for name in EXIT_NAMES]
-        assert values == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20]
+        assert values == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 20]
         assert len(set(values)) == len(values)
 
     def test_exit_codes_match_the_docstring_table(self):
