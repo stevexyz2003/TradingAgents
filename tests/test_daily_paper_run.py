@@ -540,3 +540,195 @@ class TestPortfolio:
         exit_code = _run_main(monkeypatch, tmp_path, graph, extra_args=("--portfolio", str(path)))
         assert exit_code == runner.EXIT_OK
         assert "as_of" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# --portfolio-from-published (phase 7): fail-open reader of the published book
+# --------------------------------------------------------------------------
+
+from tests.calendar_stub import WeekdayCalendar  # noqa: E402
+
+_FEED_NOW = datetime(2026, 10, 20, 6, 30, tzinfo=UTC)  # Tuesday morning
+_FEED_FRESH = "2026-10-19T21:00:00+00:00"  # Monday evening, after the Friday close
+_FEED_SHA = "a" * 40
+
+
+class _FakeReader:
+    def __init__(self, blob=None, *, fetch_error=None, read_error=None):
+        self.blob = blob
+        self.fetch_error = fetch_error
+        self.read_error = read_error
+        self.reads = []
+
+    def fetch(self):
+        if self.fetch_error:
+            raise self.fetch_error
+        return _FEED_SHA
+
+    def read(self, path):
+        self.reads.append(path)
+        if self.read_error:
+            raise self.read_error
+        return self.blob
+
+
+def _feed_blob(**overrides) -> bytes:
+    book = {"cash": 1000.0, "currency": "EUR", "positions": [], "as_of": _FEED_FRESH}
+    book.update(overrides)
+    return json.dumps({k: v for k, v in book.items() if v is not None}).encode("utf-8")
+
+
+def _feed(blob=None, *, calendar_loader=None, **reader_kwargs):
+    reader = _FakeReader(blob, **reader_kwargs)
+    decision = runner._load_sibling("ibkr_decision")
+    loader = calendar_loader or (lambda: WeekdayCalendar(range_error=decision.CalendarRangeError))
+    result = runner.load_published_portfolio(
+        Path("."),
+        _FEED_NOW,
+        reader_factory=lambda repo, remote, branch: reader,
+        calendar_loader=loader,
+    )
+    return result, reader
+
+
+@pytest.mark.unit
+class TestPublishedFeed:
+    def test_published_valid_snapshot_is_used(self):
+        position = {"ticker": "AAPL", "quantity": 1, "average_price": 100.0}
+        (portfolio, note), reader = _feed(_feed_blob(positions=[position]))
+        assert isinstance(portfolio, PortfolioContext)
+        assert note == {
+            "status": "used",
+            "as_of": _FEED_FRESH,
+            "cutoff": "2026-10-16T20:00:00+00:00",
+            "sha": _FEED_SHA,
+            "positions": 1,
+        }
+        assert reader.reads == ["portfolio.json"]
+
+    def test_published_note_carries_no_amounts(self):
+        (_, note), _ = _feed(_feed_blob(cash=12345.67))
+        assert "12345" not in json.dumps(note)
+
+    @pytest.mark.parametrize(
+        ("kwargs", "reason"),
+        [
+            pytest.param({"fetch_error": "unavailable"}, "branch-unavailable", id="branch"),
+            pytest.param({"read_error": "missing"}, "file-missing", id="missing"),
+            pytest.param({"blob": b"x" * 1_000_001}, "too-large", id="large"),
+            pytest.param({"blob": b"{not json"}, "invalid-json", id="json"),
+            pytest.param({"blob": b"\xff\xfe"}, "invalid-json", id="utf8"),
+            pytest.param({"blob": b'{"cash": "many"}'}, "invalid-schema", id="schema"),
+            pytest.param({"blob": _feed_blob(as_of=None)}, "as-of-missing", id="no-as-of"),
+            pytest.param({"blob": _feed_blob(as_of="yesterday")}, "as-of-invalid", id="bad-as-of"),
+            pytest.param(
+                {"blob": _feed_blob(as_of="2026-10-19T21:00:00")}, "as-of-invalid", id="naive"
+            ),
+            pytest.param(
+                {"blob": _feed_blob(as_of="2026-10-20T07:00:00+00:00")},
+                "as-of-in-future",
+                id="future",
+            ),
+            pytest.param(
+                {"blob": _feed_blob(as_of="2026-10-15T21:00:00+00:00")}, "stale", id="stale"
+            ),
+            pytest.param(
+                {"blob": _feed_blob(as_of="2026-10-16T20:00:00+00:00")}, "stale", id="at-cutoff"
+            ),
+        ],
+    )
+    def test_published_problem_skips_with_reason(self, kwargs, reason):
+        paperlog = runner._load_sibling("ibkr_paperlog")
+        kwargs = dict(kwargs)
+        if kwargs.get("fetch_error") == "unavailable":
+            kwargs["fetch_error"] = paperlog.PaperLogUnavailable("no branch")
+        if kwargs.get("read_error") == "missing":
+            kwargs["read_error"] = paperlog.BlobMissing("portfolio.json")
+        (portfolio, note), _ = _feed(**kwargs)
+        assert portfolio is None
+        assert note["status"] == "skipped"
+        assert note["reason"] == reason
+
+    def test_published_missing_calendar_package_skips(self):
+        def loader():
+            raise ImportError("exchange_calendars")
+
+        (portfolio, note), _ = _feed(_feed_blob(), calendar_loader=loader)
+        assert portfolio is None
+        assert note["reason"] == "calendar-unavailable"
+
+    def test_published_calendar_range_error_skips(self):
+        decision = runner._load_sibling("ibkr_decision")
+
+        def loader():
+            raise decision.CalendarRangeError("out of range")
+
+        (_, note), _ = _feed(_feed_blob(), calendar_loader=loader)
+        assert note["reason"] == "calendar-unavailable"
+
+    def test_published_unexpected_error_skips(self):
+        (portfolio, note), _ = _feed(read_error=RuntimeError("boom"))
+        assert portfolio is None
+        assert note["reason"] == "unexpected-error"
+        assert "RuntimeError" in note["detail"]
+
+
+def _feed_main(monkeypatch, tmp_path, graph, result, extra_args=()):
+    calls = []
+
+    def fake(repo, now, **kwargs):
+        calls.append(repo)
+        return result
+
+    monkeypatch.setattr(runner, "load_published_portfolio", fake)
+    args = ("--portfolio-from-published", *extra_args)
+    return _run_main(monkeypatch, tmp_path, graph, extra_args=args), calls
+
+
+@pytest.mark.unit
+class TestPublishedFeedMain:
+    def test_published_feed_used_reaches_propagate_and_summary(self, monkeypatch, tmp_path):
+        book = PortfolioContext(cash=5.0, currency="EUR", positions=[])
+        note = {"status": "used", "as_of": _FEED_FRESH, "cutoff": "c", "sha": "s", "positions": 0}
+        graph = _FakeGraph()
+        code, calls = _feed_main(monkeypatch, tmp_path, graph, (book, note))
+        assert code == runner.EXIT_OK
+        assert len(calls) == 1
+        assert graph.portfolios == [book]
+        summary = json.loads((tmp_path / "out" / "summary.json").read_text(encoding="utf-8"))
+        assert summary["portfolio_feed"] == note
+        assert summary["schema_version"] == 1
+
+    def test_published_feed_skipped_runs_like_today(self, monkeypatch, tmp_path):
+        note = {"status": "skipped", "reason": "stale", "detail": ""}
+        graph = _FakeGraph()
+        code, _ = _feed_main(monkeypatch, tmp_path, graph, (None, note))
+        assert code == runner.EXIT_OK
+        assert graph.portfolios == ["<absent>"]
+        summary = json.loads((tmp_path / "out" / "summary.json").read_text(encoding="utf-8"))
+        assert summary["portfolio_feed"]["reason"] == "stale"
+
+    def test_published_without_flag_has_no_feed_key_and_no_read(self, monkeypatch, tmp_path):
+        def boom(*args, **kwargs):
+            raise AssertionError("must not be called")
+
+        monkeypatch.setattr(runner, "load_published_portfolio", boom)
+        graph = _FakeGraph()
+        assert _run_main(monkeypatch, tmp_path, graph) == runner.EXIT_OK
+        summary = json.loads((tmp_path / "out" / "summary.json").read_text(encoding="utf-8"))
+        assert "portfolio_feed" not in summary
+
+    def test_published_conflicts_with_local_portfolio(self, monkeypatch, tmp_path):
+        path = _portfolio_file(tmp_path, _book())
+        graph = _FakeGraph()
+        code, calls = _feed_main(
+            monkeypatch, tmp_path, graph, (None, {}), extra_args=("--portfolio", str(path))
+        )
+        assert code == runner.EXIT_CONFIG
+        assert calls == []
+        assert graph.calls == []
+
+    def test_published_preflight_makes_no_read(self, monkeypatch, tmp_path):
+        graph = _FakeGraph()
+        _, calls = _feed_main(monkeypatch, tmp_path, graph, (None, {}), extra_args=("--preflight",))
+        assert calls == []

@@ -16,9 +16,13 @@ Exit codes:
     3   at least one ticker failed with a runtime error
     4   the cost budget aborted or skipped at least one ticker
     20  --preflight only: the provider's credentials are not configured
+
+--portfolio-from-published (CI only) reads the latest published portfolio snapshot
+read-only and fail-open: any problem runs without a portfolio, noted in summary.json.
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -53,6 +57,16 @@ PORTFOLIO_AS_OF_KEY = "as_of"
 DEFAULT_PORTFOLIO_MAX_AGE = timedelta(minutes=60)
 #: Clock skew tolerated before an ``as_of`` counts as being in the future.
 PORTFOLIO_CLOCK_SKEW = timedelta(minutes=5)
+
+#: Where --portfolio-from-published reads from (D-05, D-22). In the CI checkout ``origin``
+#: is the fork repository; the branch name lives here and never in the workflow file.
+PUBLISHED_STATE_REMOTE = "origin"
+PUBLISHED_STATE_BRANCH = "ibkr-log"
+PUBLISHED_PORTFOLIO_PATH = "portfolio.json"
+PUBLISHED_PORTFOLIO_MAX_BYTES = 1_000_000
+#: Additive summary.json key describing what --portfolio-from-published did.
+PORTFOLIO_FEED_KEY = "portfolio_feed"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Azure needs all four; the key alone is not enough to reach a deployment.
 AZURE_REQUIRED_ENV = (
@@ -174,6 +188,102 @@ def load_fresh_portfolio(
             "scripts/ibkr_executor.py account"
         )
     return portfolio
+
+
+def _load_sibling(name: str):
+    """Load ``scripts/<name>.py`` lazily; reuse an already registered module."""
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+class _FeedSkip(Exception):
+    """The published portfolio is not used; ``reason`` is the summary.json code."""
+
+    def __init__(self, reason: str, detail: str = ""):
+        super().__init__(detail or reason)
+        self.reason = reason
+
+
+def _skipped(reason: str, detail: str = "") -> dict:
+    return {"status": "skipped", "reason": reason, "detail": detail[:200]}
+
+
+def load_published_portfolio(
+    repo: Path, now: datetime, *, reader_factory=None, calendar_loader=None
+) -> tuple[PortfolioContext | None, dict]:
+    """The latest published portfolio snapshot, or ``(None, skip note)`` (D-05..D-07).
+
+    Read-only and fail-open: whatever goes wrong, the run continues exactly as it would
+    without the flag. The note carries status, reason, timestamps, sha and a position
+    count only - never amounts, because summary.json is published.
+    """
+    try:
+        paperlog = _load_sibling("ibkr_paperlog")
+        decision = _load_sibling("ibkr_decision")
+        if reader_factory is None:
+
+            def reader_factory(repo_, remote, branch):
+                return paperlog.GitPaperLog(repo_, remote, branch, fetch_depth=1)
+
+        reader = reader_factory(repo, PUBLISHED_STATE_REMOTE, PUBLISHED_STATE_BRANCH)
+        try:
+            sha = reader.fetch()
+        except paperlog.PaperLogUnavailable as exc:
+            raise _FeedSkip("branch-unavailable", str(exc)) from exc
+        try:
+            blob = reader.read(PUBLISHED_PORTFOLIO_PATH)
+        except paperlog.BlobMissing as exc:
+            raise _FeedSkip("file-missing", str(exc)) from exc
+        except paperlog.PaperLogUnavailable as exc:
+            raise _FeedSkip("branch-unavailable", str(exc)) from exc
+        if len(blob) > PUBLISHED_PORTFOLIO_MAX_BYTES:
+            raise _FeedSkip("too-large", f"{len(blob)} bytes")
+        try:
+            data = json.loads(blob.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise _FeedSkip("invalid-json", str(exc)) from exc
+        try:
+            portfolio = PortfolioContext.model_validate(data)
+        except ValidationError as exc:
+            raise _FeedSkip("invalid-schema", str(exc)) from exc
+        raw = data.get(PORTFOLIO_AS_OF_KEY) if isinstance(data, dict) else None
+        if not isinstance(raw, str):
+            raise _FeedSkip("as-of-missing")
+        try:
+            as_of = datetime.fromisoformat(raw)
+        except ValueError as exc:
+            raise _FeedSkip("as-of-invalid", str(exc)) from exc
+        if as_of.tzinfo is None:
+            raise _FeedSkip("as-of-invalid", "no time zone")
+        if as_of - now > PORTFOLIO_CLOCK_SKEW:
+            raise _FeedSkip("as-of-in-future")
+        try:
+            calendar = (calendar_loader or decision.load_xnys_calendar)()
+            cutoff = decision.second_last_close_utc(now, calendar)
+        except (ImportError, decision.CalendarRangeError) as exc:
+            raise _FeedSkip("calendar-unavailable", f"{type(exc).__name__}: {exc}") from exc
+        if as_of <= cutoff:
+            raise _FeedSkip("stale", f"as_of is not after {cutoff.isoformat()}")
+        return portfolio, {
+            "status": "used",
+            "as_of": as_of.isoformat(),
+            "cutoff": cutoff.isoformat(),
+            "sha": sha,
+            "positions": len(portfolio.positions),
+        }
+    except _FeedSkip as skip:
+        return None, _skipped(skip.reason, str(skip))
+    except Exception as exc:  # no new failure in the production path (D-07)
+        return None, _skipped("unexpected-error", f"{type(exc).__name__}: {exc}")
 
 
 def load_rates(path: Path) -> dict[str, dict[str, float]]:
@@ -431,6 +541,13 @@ def parse_args(argv=None) -> argparse.Namespace:
         default=DEFAULT_PORTFOLIO_MAX_AGE.total_seconds() / 60,
         help="Oldest --portfolio snapshot (by its as_of) the run accepts, in minutes.",
     )
+    parser.add_argument(
+        "--portfolio-from-published",
+        action="store_true",
+        help="Read the latest published portfolio snapshot from the executor's own state "
+        "branch (read-only, fail-open: any problem runs without a portfolio and is noted "
+        "in summary.json).",
+    )
     parser.add_argument("--out", type=Path, required=True, help="Per-run output directory.")
     parser.add_argument(
         "--state", type=Path, required=True, help="Persistent directory (decision log, index)."
@@ -451,6 +568,8 @@ def main(argv=None) -> int:
         trade_date = resolve_trade_date(args.date)
         rates = load_rates(args.rates)
         portfolio = None
+        if args.portfolio is not None and args.portfolio_from_published:
+            raise ConfigError("--portfolio and --portfolio-from-published are mutually exclusive.")
         if args.portfolio is not None:
             if not args.portfolio_max_age_minutes > 0:
                 raise ConfigError("--portfolio-max-age-minutes must be greater than 0.")
@@ -506,6 +625,14 @@ def main(argv=None) -> int:
             file=sys.stderr,
         )
         return EXIT_CONFIG
+
+    feed = None
+    if args.portfolio_from_published:
+        portfolio, feed = load_published_portfolio(REPO_ROOT, datetime.now(UTC))
+        if feed["status"] == "used":
+            print(f"portfolio-feed: used (as_of {feed['as_of']}, {feed['positions']} position(s))")
+        else:
+            print(f"portfolio-feed: skipped ({feed['reason']})")
 
     started_at = datetime.now(UTC)
     summary = {
@@ -568,6 +695,8 @@ def main(argv=None) -> int:
         "tokens_out": sum(r["tokens_out"] for r in summary["runs"]),
         **counts,
     }
+    if args.portfolio_from_published:
+        summary[PORTFOLIO_FEED_KEY] = feed
     if counts["failed"]:
         summary["status"] = "failed"
     elif counts["budget_aborted"] or counts["skipped"]:
