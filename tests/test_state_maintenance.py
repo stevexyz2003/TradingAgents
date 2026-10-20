@@ -20,6 +20,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.graph.checkpointer import get_checkpointer
 from tradingagents.memory.log import TradingMemoryLog
@@ -37,6 +39,14 @@ def _load_tool():
 tool = _load_tool()
 
 _DAY = 86400.0
+
+
+@pytest.fixture(autouse=True)
+def _isolated_ibkr_home(tmp_path, monkeypatch):
+    """No test may reach the developer's real IBKR state folder."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
 
 def _make_checkpoint_db(cache_dir: Path, ticker: str) -> Path:
@@ -70,9 +80,7 @@ def _write_log(path: Path, blocks: list[str], trailing_separator: bool = True) -
 
 
 def _verify(cache_dir: Path, memory_log: Path) -> int:
-    return tool.main(
-        ["verify", "--cache-dir", str(cache_dir), "--memory-log", str(memory_log)]
-    )
+    return tool.main(["verify", "--cache-dir", str(cache_dir), "--memory-log", str(memory_log)])
 
 
 # --- verify: checkpoint databases ---
@@ -118,7 +126,7 @@ def test_verify_flags_a_file_that_is_not_a_database(tmp_path, capsys):
 
 
 def test_verify_flags_a_db_with_a_missing_table(tmp_path, capsys):
-    """"I can query it" is not an integrity check: the same corrupt file
+    """ "I can query it" is not an integrity check: the same corrupt file
 
     answered ``select count(*) from checkpoints`` with 1 during research. So the
     schema is checked too.
@@ -586,6 +594,158 @@ def test_backup_packs_the_allow_list_and_nothing_else(tmp_path, capsys):
     # One top-level directory, so unpacking cannot litter the cwd.
     assert len({m.split("/")[0] for m in members}) == 1
     assert str(archives[0].name) in printed
+
+
+_IBKR_PACKED = (
+    "ledger.jsonl",
+    "ledger-dryrun.jsonl",
+    "contracts.json",
+    "contracts-history.jsonl",
+)
+_IBKR_LEFT_OUT = ("RELEASE", "KILL", "portfolio.json", "preview.json", "resolve.json")
+
+
+def _make_ibkr_dir(root: Path) -> Path:
+    ibkr = root / "ibkr"
+    (ibkr / "logs").mkdir(parents=True)
+    (ibkr / "publish" / ".git").mkdir(parents=True)
+    for name in _IBKR_PACKED + _IBKR_LEFT_OUT + ("ledger.jsonl.lock",):
+        (ibkr / name).write_text(f"content of {name}\n", encoding="utf-8")
+    (ibkr / "logs" / "x.log").write_text("log\n", encoding="utf-8")
+    (ibkr / "publish" / ".git" / "HEAD").write_text("ref\n", encoding="utf-8")
+    return ibkr
+
+
+def _make_state(root: Path) -> Path:
+    state = root / "state"
+    state.mkdir()
+    (state / "index.md").write_text("# idx\n", encoding="utf-8")
+    return state
+
+
+def _backup_args(state, ibkr, out_dir=None, *extra):
+    args = ["backup", *extra, "--state-dir", str(state), "--ibkr-dir", str(ibkr)]
+    if out_dir is not None:
+        args += ["--out", str(out_dir)]
+    return [*args, "--memory-log", ""]
+
+
+def test_backup_dry_run_lists_ibkr_ledger_and_contracts(tmp_path, capsys):
+    state = _make_state(tmp_path)
+    ibkr = _make_ibkr_dir(tmp_path)
+
+    rc = tool.main(_backup_args(state, ibkr, tmp_path / "backups", "--dry-run"))
+
+    printed = capsys.readouterr().out
+    assert rc == 0
+    for name in _IBKR_PACKED:
+        assert f"  ibkr/{name}\n" in printed
+    assert "  index.md\n" in printed
+    for name in _IBKR_LEFT_OUT + ("ledger.jsonl.lock", "x.log", "HEAD"):
+        assert name not in printed
+
+
+def test_backup_dry_run_writes_nothing(tmp_path, capsys):
+    state = _make_state(tmp_path)
+    ibkr = _make_ibkr_dir(tmp_path)
+    out_dir = tmp_path / "backups"
+
+    rc = tool.main(_backup_args(state, ibkr, out_dir, "--dry-run"))
+
+    capsys.readouterr()
+    assert rc == 0
+    assert not out_dir.exists()
+
+
+def test_backup_dry_run_without_out_is_allowed(tmp_path, capsys):
+    state = _make_state(tmp_path)
+    rc = tool.main(_backup_args(state, tmp_path / "none", None, "--dry-run"))
+    capsys.readouterr()
+    assert rc == 0
+
+
+def test_backup_without_out_still_fails_when_not_dry_run(tmp_path, capsys):
+    state = _make_state(tmp_path)
+    rc = tool.main(_backup_args(state, tmp_path / "none"))
+    capsys.readouterr()
+    assert rc == 1
+
+
+def test_backup_packs_ibkr_files_under_ibkr(tmp_path, capsys):
+    state = _make_state(tmp_path)
+    ibkr = _make_ibkr_dir(tmp_path)
+    out_dir = tmp_path / "backups"
+
+    rc = tool.main(_backup_args(state, ibkr, out_dir))
+
+    capsys.readouterr()
+    assert rc == 0
+    (archive,) = out_dir.glob("tex-state-*.tar.gz")
+    with tarfile.open(archive) as tar:
+        top = tar.getnames()[0].split("/")[0]
+        for name in _IBKR_PACKED:
+            data = tar.extractfile(f"{top}/ibkr/{name}").read()
+            assert data == (ibkr / name).read_bytes()
+
+
+def test_backup_ibkr_excludes_release_kill_lock_logs_publish(tmp_path, capsys):
+    state = _make_state(tmp_path)
+    ibkr = _make_ibkr_dir(tmp_path)
+    out_dir = tmp_path / "backups"
+
+    tool.main(_backup_args(state, ibkr, out_dir))
+
+    capsys.readouterr()
+    (archive,) = out_dir.glob("tex-state-*.tar.gz")
+    with tarfile.open(archive) as tar:
+        members = tar.getnames()
+    ibkr_members = {m.split("/", 1)[1] for m in members if "/ibkr/" in m}
+    assert ibkr_members == {f"ibkr/{n}" for n in _IBKR_PACKED}
+    for name in _IBKR_LEFT_OUT:
+        assert not any(m.endswith(name) for m in members)
+    assert not any(".lock" in m or "logs" in m or "publish" in m for m in members)
+
+
+def test_backup_missing_ibkr_dir_is_a_note(tmp_path, capsys):
+    state = _make_state(tmp_path)
+    missing = tmp_path / "nope"
+    out_dir = tmp_path / "backups"
+
+    rc = tool.main(_backup_args(state, missing, out_dir))
+
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert f"ibkr: no state directory at {missing} - nothing added" in printed
+    (archive,) = out_dir.glob("tex-state-*.tar.gz")
+    with tarfile.open(archive) as tar:
+        assert any(m.endswith("index.md") for m in tar.getnames())
+
+
+def test_backup_default_ibkr_dir_uses_isolated_localappdata(tmp_path, capsys):
+    state = _make_state(tmp_path)
+    default = tool.default_ibkr_dir()
+    default.mkdir(parents=True)
+    (default / "ledger.jsonl").write_text("{}\n", encoding="utf-8")
+
+    rc = tool.main(["backup", "--dry-run", "--state-dir", str(state), "--memory-log", ""])
+
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert "  ibkr/ledger.jsonl\n" in printed
+    assert str(tmp_path) in str(default)
+
+
+def test_default_ibkr_dir_matches_executor():
+    spec = importlib.util.spec_from_file_location(
+        "ibkr_executor_for_dir_test",
+        Path(__file__).resolve().parents[1] / "scripts" / "ibkr_executor.py",
+    )
+    executor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(executor)
+
+    assert executor.default_ledger_file().parent == tool.default_ibkr_dir()
+    assert tool.default_ibkr_dir({"LOCALAPPDATA": "X"}) == Path("X") / "TradingEngineX" / "ibkr"
+    assert tool.default_ibkr_dir({}) == Path.home() / ".tradingenginex" / "ibkr"
 
 
 # --- usage errors return 1, not SystemExit ---
