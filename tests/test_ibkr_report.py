@@ -335,3 +335,173 @@ def test_join_ledger_only_keys_are_reported():
     )
     assert [r.key for r in rows] == ["2026-10-09|AAPL"]
     assert extra == ["2026-10-02|NVDA"]
+
+
+# --- metrics, slippage, footnotes, render ---------------------------------------------------
+
+
+def _row(**kw) -> report.ReportRow:
+    base = {
+        "key": "2026-10-16|AAPL",
+        "trade_date": "2026-10-16",
+        "ticker": "AAPL",
+        "log_rating": "Hold",
+        "ledger_rating": "Overweight",
+        "state": "filled",
+        "side": "BUY",
+        "target": 1.0,
+        "held_before": 0.0,
+        "held_after": 1.0,
+        "order_qty": 1.0,
+        "filled_qty": 1.0,
+        "avg_price": 101.0,
+        "deviation": 0.0,
+        "weekend_gap": False,
+        "notes": (),
+    }
+    base.update(kw)
+    return report.ReportRow(**base)
+
+
+def test_slippage_sign_buy_and_sell():
+    assert report.slippage_bp("BUY", 101.0, 100.0) == pytest.approx(100.0)
+    assert report.slippage_bp("SELL", 99.0, 100.0) == pytest.approx(100.0)
+    assert report.slippage_bp("BUY", 99.0, 100.0) == pytest.approx(-100.0)
+    assert report.slippage_bp("SELL", 101.0, 100.0) == pytest.approx(-100.0)
+
+
+def test_slippage_missing_or_bad_close_is_none():
+    assert report.slippage_bp("BUY", 101.0, None) is None
+    assert report.slippage_bp("BUY", 101.0, 0.0) is None
+    assert report.slippage_bp("BUY", 101.0, -5.0) is None
+    assert report.slippage_bp("BUY", None, 100.0) is None
+
+
+def test_metrics_fill_ratio_cases():
+    assert report.fill_ratio(_row(order_qty=None, filled_qty=None)) is None
+    assert report.fill_ratio(_row(order_qty=4.0, filled_qty=3.0, state="partial")) == 0.75
+    assert report.fill_ratio(_row(state="fill-timeout", filled_qty=0.0)) == 0.0
+    assert report.fill_ratio(_row(state="place-rejected", filled_qty=None)) == 0.0
+
+
+def test_metrics_total_fill_ratio():
+    rows = [
+        _row(order_qty=2.0, filled_qty=2.0),
+        _row(order_qty=2.0, filled_qty=0.0, state="fill-timeout"),
+        _row(order_qty=None, filled_qty=None),
+    ]
+    assert report.total_fill_ratio(rows) == 0.5
+    assert report.total_fill_ratio([_row(order_qty=None)]) is None
+
+
+class _Series(list):
+    @property
+    def iloc(self):
+        return self
+
+
+def _patch_closes(monkeypatch, fake):
+    from tradingagents.memory import settlement
+
+    monkeypatch.setattr(settlement, "get_closes", fake)
+
+
+def test_metrics_close_fetcher_value_and_cache(monkeypatch):
+    calls = []
+
+    def fake(symbol, start, end):
+        calls.append((symbol, start, end))
+        return _Series([100.0])
+
+    _patch_closes(monkeypatch, fake)
+    fetcher = report.CloseFetcher()
+    assert fetcher.get("AAPL", "2026-10-16") == (100.0, None)
+    assert fetcher.get("AAPL", "2026-10-16") == (100.0, None)
+    assert calls == [("AAPL", "2026-10-16", "2026-10-17")]
+
+
+def _raise_down(*_a):
+    raise ConnectionError("down")
+
+
+@pytest.mark.parametrize(
+    "fake, suffix",
+    [
+        (lambda *a: _Series([]), ""),
+        (lambda *a: _Series([0.0]), "unusable"),
+        (lambda *a: _Series([float("nan")]), "unusable"),
+        (_raise_down, "ConnectionError"),
+    ],
+)
+def test_footnote_close_failures(monkeypatch, fake, suffix):
+    _patch_closes(monkeypatch, fake)
+    value, reason = report.CloseFetcher().get("AAPL", "2026-10-16")
+    assert value is None
+    assert reason.startswith("no close for AAPL on 2026-10-16 from the price source")
+    assert suffix in reason
+
+
+def _render(rows, *, prices, decisions=None, **kw):
+    args = {
+        "sources": {"Decision log fork/paper-log": "@ abc", "Ledger fork/ibkr-log": "@ def"},
+        "period": (None, None),
+        "prices": prices,
+        "unparsed": 0,
+        "duplicates": 0,
+        "ledger_only": [],
+    }
+    args.update(kw)
+    decs = decisions if decisions is not None else [_dec("2026-10-16", "AAPL", "Hold")]
+    return report.render_markdown(rows, decs, **args)
+
+
+def test_footnote_on_price_error(monkeypatch):
+    _patch_closes(monkeypatch, lambda *a: _Series([]))
+    text = _render([_row()], prices=report.CloseFetcher())
+    assert "1. no close for AAPL on 2026-10-16 from the price source" in text
+
+
+def test_render_slippage_value(monkeypatch):
+    _patch_closes(monkeypatch, lambda *a: _Series([100.0]))
+    text = _render([_row(avg_price=101.0)], prices=report.CloseFetcher())
+    assert "| 100.0 |" in text
+
+
+def test_render_no_prices_never_calls_source(monkeypatch):
+    def boom(*a):
+        raise AssertionError("price source must not be called")
+
+    _patch_closes(monkeypatch, boom)
+    text = _render([_row()], prices=None)
+    assert "prices skipped (--no-prices)" in text
+
+
+def test_render_two_separate_tables_and_notice_first():
+    text = _render([_row()], prices=None)
+    assert text.count("## Execution") == 1
+    assert text.count("## Decision") == 1
+    assert text.index(report.PAPER_FILL_NOTICE) < text.index("## Execution")
+    execution, rest = text.split("## Decision")
+    decision = rest.split("## Notes")[0]
+    for header in (
+        "Fill ratio",
+        report.SLIPPAGE_HEADER,
+        "Avg price",
+        "weekend_gap",
+        "Target - held",
+    ):
+        assert header in execution
+        assert header not in decision
+    for header in ("Realized return", "Alpha", "Holding", "Status"):
+        assert header in decision
+        assert header not in execution
+
+
+def test_footnote_sources_and_pipes():
+    row = _row(notes=("a|b",))
+    text = _render([row], prices=None, unparsed=2, duplicates=1, ledger_only=["2026-10-01|XYZ"])
+    assert "2 unreadable decision-log block(s)" in text
+    assert "1 duplicate decision(s)" in text
+    assert "2026-10-01|XYZ" in text
+    assert "a|b" in text
+    assert text.endswith("\n")

@@ -1,4 +1,6 @@
-"""Read-only target/actual (Soll/Ist) report: data layer (REQ-IBKR-49, REQ-IBKR-50).
+"""Read-only target/actual (Soll/Ist) report: data layer, metrics, markdown, CLI.
+
+REQ-IBKR-49 / REQ-IBKR-50. Exit codes: 0 ok, 1 usage error, 2 a source is not readable.
 
 Takes the raw ``decision-log.md`` text and the raw ``ledger.jsonl`` bytes and returns one
 row per decision. The join happens at read time over ``(trade_date, ticker)`` against the
@@ -10,10 +12,12 @@ estimates a value the ledger does not hold: target and actual position come from
 from __future__ import annotations
 
 import importlib.util
+import math
 import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,6 +53,14 @@ def _ledger():
 
 def _decision():
     return _load("ibkr_decision", "ibkr_decision.py")
+
+
+def _contracts():
+    return _load("ibkr_contracts", "ibkr_contracts.py")
+
+
+def _paperlog():
+    return _load("ibkr_paperlog", "ibkr_paperlog.py")
 
 
 @dataclass(frozen=True)
@@ -290,3 +302,214 @@ def build_rows(
     rows = [_build_row(d, by_key.get(d.key, []), block_qty_of) for d in decisions]
     known = {d.key for d in decisions}
     return rows, sorted(k for k in by_key if k not in known)
+
+
+# --- metrics -------------------------------------------------------------------------------
+
+PAPER_FILL_NOTICE = (
+    "Paper fills are simulated from the top of the book, and the rest of a partially filled "
+    "exchange-directed market order is rejected. Fill ratios from the paper account are "
+    "therefore systematically biased upward. This report tests the mechanics; it does not "
+    "measure execution quality (REQ-IBKR-50)."
+)
+
+SLIPPAGE_HEADER = "Decision price -> fill (incl. gap), bp"
+
+SLIPPAGE_EXPLANATION = (
+    "Slippage reference is the close on the trade date, so the overnight gap is included "
+    "(D-14). Positive means worse for both BUY and SELL."
+)
+
+_ZERO_FILL_STATES = frozenset({_FILL_TIMEOUT, "place-rejected"})
+
+
+def slippage_bp(side: str | None, avg_fill: float | None, close: float | None) -> float | None:
+    """Basis points from the decision price to the fill; positive = worse (D-14)."""
+    if side not in ("BUY", "SELL") or avg_fill is None or close is None:
+        return None
+    if not close > 0:
+        return None
+    sign = 1 if side == "BUY" else -1
+    return sign * (avg_fill - close) / close * 1e4
+
+
+def _filled_or_zero(row: ReportRow) -> float:
+    return 0.0 if row.state in _ZERO_FILL_STATES else (row.filled_qty or 0.0)
+
+
+def fill_ratio(row: ReportRow) -> float | None:
+    if row.order_qty is None or row.order_qty <= 0:
+        return None
+    return _filled_or_zero(row) / row.order_qty
+
+
+def total_fill_ratio(rows: list[ReportRow]) -> float | None:
+    with_intent = [r for r in rows if r.order_qty is not None]
+    ordered = sum(r.order_qty for r in with_intent)
+    if not with_intent or ordered <= 0:
+        return None
+    return sum(_filled_or_zero(r) for r in with_intent) / ordered
+
+
+class CloseFetcher:
+    """Close on a trade date from the settlement price source; fail-soft (D-16)."""
+
+    def __init__(self) -> None:
+        self._cache: dict[tuple[str, str], tuple[float | None, str | None]] = {}
+
+    def get(self, ticker: str, trade_date: str) -> tuple[float | None, str | None]:
+        key = (ticker, trade_date)
+        if key not in self._cache:
+            self._cache[key] = self._fetch(ticker, trade_date)
+        return self._cache[key]
+
+    @staticmethod
+    def _fetch(ticker: str, trade_date: str) -> tuple[float | None, str | None]:
+        reason = f"no close for {ticker} on {trade_date} from the price source"
+        try:
+            from tradingagents.memory import settlement
+
+            end = (date.fromisoformat(trade_date) + timedelta(days=1)).isoformat()
+            series = settlement.get_closes(ticker, trade_date, end)
+            if series is None or len(series) == 0:
+                return None, reason
+            value = float(series.iloc[-1])
+        except Exception as exc:  # noqa: BLE001 - the report never fails on the price source
+            return None, f"{reason} ({type(exc).__name__})"
+        if math.isnan(value) or value <= 0:
+            return None, f"{reason} (unusable value)"
+        return value, None
+
+
+# --- rendering -----------------------------------------------------------------------------
+
+
+def _cell(text: object) -> str:
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def _num(value: float | None, fmt: str = "g") -> str:
+    return "" if value is None else format(value, fmt)
+
+
+def _table(headers: list[str], body: list[list[str]]) -> list[str]:
+    lines = ["| " + " | ".join(headers) + " |", "|" + "|".join(" --- " for _ in headers) + "|"]
+    lines += ["| " + " | ".join(_cell(c) for c in row) + " |" for row in body]
+    return lines
+
+
+EXECUTION_HEADERS = [
+    "Trade date",
+    "Ticker",
+    "Rating",
+    "State",
+    "Target",
+    "Held",
+    "Order",
+    "Filled",
+    "Avg price",
+    "Target - held",
+    "weekend_gap",
+    "Fill ratio",
+    SLIPPAGE_HEADER,
+]
+DECISION_HEADERS = [
+    "Trade date",
+    "Ticker",
+    "Rating",
+    "Realized return",
+    "Alpha",
+    "Holding",
+    "Status",
+]
+
+
+def render_markdown(
+    rows: list[ReportRow],
+    decisions: list[Decision],
+    *,
+    sources: dict[str, str],
+    period: tuple[str | None, str | None],
+    prices: CloseFetcher | None,
+    unparsed: int,
+    duplicates: int,
+    ledger_only: list[str],
+) -> str:
+    footnotes: list[str] = []
+
+    def note(text: str) -> str:
+        if text not in footnotes:
+            footnotes.append(text)
+        return f"[{footnotes.index(text) + 1}]"
+
+    skipped_ref = note("prices skipped (--no-prices)") if prices is None else ""
+
+    body: list[list[str]] = []
+    for r in rows:
+        refs = "".join(note(n) for n in r.notes)
+        held = ""
+        if r.held_before is not None and r.held_after is not None:
+            held = f"{r.held_before:g} -> {r.held_after:g}"
+        slip_cell = ""
+        if r.avg_price is not None and r.side is not None:
+            if prices is None:
+                slip_cell = skipped_ref
+            else:
+                close, reason = prices.get(r.ticker, r.trade_date)
+                if close is None:
+                    slip_cell = note(reason or "no close from the price source")
+                else:
+                    bp = slippage_bp(r.side, r.avg_price, close)
+                    slip_cell = "" if bp is None else f"{bp:.1f}"
+        ratio = fill_ratio(r)
+        body.append(
+            [
+                r.trade_date,
+                r.ticker,
+                r.ledger_rating or r.log_rating,
+                f"{r.state} {refs}".strip(),
+                _num(r.target) if r.target is not None else "—",
+                held,
+                "" if r.order_qty is None or r.side is None else f"{r.side} {r.order_qty:g}",
+                _num(r.filled_qty),
+                _num(r.avg_price, ".2f"),
+                _num(r.deviation),
+                "" if r.weekend_gap is None else str(r.weekend_gap).lower(),
+                "" if ratio is None else f"{ratio:.2f}",
+                slip_cell,
+            ]
+        )
+
+    decision_body = [
+        [
+            d.trade_date,
+            d.ticker,
+            d.rating,
+            d.raw or "",
+            d.alpha or "",
+            d.holding or "",
+            "pending" if d.pending else f"resolved {d.resolved or ''}".strip(),
+        ]
+        for d in decisions
+    ]
+
+    if unparsed:
+        note(f"{unparsed} unreadable decision-log block(s) were skipped")
+    if duplicates:
+        note(f"{duplicates} duplicate decision(s) dropped, first version kept (D-12)")
+    if ledger_only:
+        note("ledger keys without a decision-log entry: " + ", ".join(ledger_only))
+
+    total = total_fill_ratio(rows)
+    since, until = period
+    total_text = "n/a" if total is None else f"{total:.2f}"
+    out = ["# Target/actual report", ""]
+    out += [f"- {name}: {ref}" for name, ref in sources.items()]
+    out.append(f"- Period: {since or 'start'} .. {until or 'end'}")
+    out.append(f"- Fill ratio (sum filled / sum ordered): {total_text}")
+    out += ["", f"> {PAPER_FILL_NOTICE}", "", SLIPPAGE_EXPLANATION, ""]
+    out += ["## Execution", ""] + _table(EXECUTION_HEADERS, body) + [""]
+    out += ["## Decision", ""] + _table(DECISION_HEADERS, decision_body) + [""]
+    out += ["## Notes", ""]
+    out += [f"{i}. {n}" for i, n in enumerate(footnotes, 1)] or ["None."]
+    return "\n".join(out) + "\n"
