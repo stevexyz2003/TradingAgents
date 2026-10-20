@@ -860,6 +860,12 @@ python scripts/ibkr_executor.py execute AAPL --live
 :: copy the live ledger, portfolio.json and contracts.json to fork/ibkr-log; no gateway, no .env
 python scripts/ibkr_executor.py publish
 
+:: read-only Soll/Ist report from fork/paper-log and fork/ibkr-log
+python scripts/ibkr_report.py --since 2026-10-01 --out report.md
+
+:: list what the backup would pack, writes nothing
+python scripts/state_maintenance.py backup --dry-run --state-dir paper-state
+
 :: first build of contracts.json, anchor AAPL (Windows cmd)
 python scripts/ibkr_executor.py resolve --init AAPL MSFT NVDA
 
@@ -894,6 +900,8 @@ the CI run never passes it. The paper run picks its LLM provider from the
 environment: without `TRADINGAGENTS_LLM_PROVIDER=anthropic` and the two model
 variables in `.env` it falls back to `openai` instead of the CI's Anthropic
 setup (see "Running it locally" in `scripts/PAPER_RUN.md`).
+
+(The CI side of the portfolio is described under "Portfolio for the CI run" below.)
 
 With `--portfolio` the reports, the archived copies under
 `paper-state/runs/<date>/`, the decision log and the summaries carry cash,
@@ -1109,6 +1117,56 @@ Log states of the command:
 * `PUBLISH_NO_LEDGER`, `PUBLISH_REMOTE_MISSING`, `PUBLISH_REMOTE_IS_ORIGIN` (exit 1)
 * `LEDGER_CORRUPT` (exit 6), `LOCK_HELD` and `LOCK_ERROR` (exit 7)
 * `PUBLISH_FAILED reason=<reason>` (exit 11)
+
+### Soll/Ist report
+
+```
+python scripts/ibkr_report.py [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--out report.md] [--no-prices] [--paper-log-branch paper-log]
+```
+
+* Reads `fork/paper-log:decision-log.md` and `fork/ibkr-log:ledger.jsonl` with fetch and
+  `cat-file`. No checkout, no write to any branch; it runs locally only (D-11).
+* One row per decision; the first version of a decision wins (D-12). `index.md` is not read.
+  Historical rows are shown with today's `block_qty`.
+* Target and actual position come from the `intent` record only (D-20); without an intent the
+  cell is empty and carries a footnote.
+* Two separate tables, Execution and Decision (D-13). Both carry a state column.
+* Slippage is measured against the close at the `trade_date`, including the overnight gap
+  (`weekend_gap` marks gaps over a weekend); positive means worse (D-14).
+* Fill ratio is per order; a timeout or a rejection counts as 0 (D-15).
+* A missing price gives an empty cell and a footnote; nothing is estimated (D-16).
+  `--no-prices` skips the price lookup altogether.
+* The report prints the paper-fill notice before the first table: paper fills are simulated
+  from the top of the book, so fill ratios are biased upward. It tests the mechanics, not
+  the execution quality.
+* Exit codes: 0 ok, 1 usage error, 2 a source is not readable.
+
+### Backup of the IBKR state
+
+```
+python scripts/state_maintenance.py backup --dry-run --state-dir paper-state
+```
+
+`--dry-run` lists the members and writes no archive. The IBKR members are
+`ibkr/ledger.jsonl`, `ibkr/ledger-dryrun.jsonl`, `ibkr/contracts.json` and
+`ibkr/contracts-history.jsonl`. `RELEASE` and `KILL` are deliberately not included. See
+`scripts/STATE_OPERATIONS.md` for the recovery path.
+
+### Portfolio for the CI run
+
+The CI run reads `portfolio.json` from `ibkr-log` read-only with
+`daily_paper_run.py --portfolio-from-published` (D-05 to D-07). The file is valid until the
+close of the second-last session. The read is fail-open: on any problem the analysis runs
+without a portfolio and `summary.json` carries a `portfolio_feed` entry with the reason.
+Run `account --out "%LOCALAPPDATA%\TradingEngineX\ibkr\portfolio.json"` before `publish`,
+otherwise the published portfolio is old or missing.
+
+**Consequences accepted (D-18):** with a valid portfolio the CI run drops the Jev check, and
+the reports archived on `paper-log` carry cash and positions. `jev/hooks.py` and the reports
+stay unchanged.
+
+**Public (D-17):** the fork is public. Account number, prices, permIds, cash and positions
+of the paper account are therefore public, deliberately without masking.
 
 ## See also
 
