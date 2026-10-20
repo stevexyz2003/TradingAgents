@@ -186,6 +186,33 @@ Add `--preflight` to validate everything without spending anything. Point
 `--state` at the same directory every time or the track record will not build
 up. `--date auto` is the previous weekday; pass `YYYY-MM-DD` for a backfill.
 
+## Published portfolio (CI)
+
+The scheduled run passes `--portfolio-from-published`. The portfolio comes from
+the latest `portfolio.json` on the branch `ibkr-log`, which only the executor
+writes (one writer per branch; see "One writer only" below). It is read-only
+and is fetched flat from `origin` of the CI checkout.
+
+- **Valid when** its `as_of` is later than the close of the second-to-last
+  regular session (judged by the exchange calendar, not by an hour count) and
+  not in the future (5 minutes of clock skew tolerated). The calendar needs
+  the `exchange_calendars` package, which the workflow installs in its own step.
+- **Any problem** (branch or file missing, unreadable JSON or schema, bad or
+  stale `as_of`, calendar unavailable, any unexpected error) runs the analysis
+  exactly as before, without a portfolio. The reason is recorded in
+  `summary.json` under `portfolio_feed` (`status` is `used` or `skipped`):
+  `branch-unavailable`, `file-missing`, `too-large`, `invalid-json`,
+  `invalid-schema`, `as-of-missing`, `as-of-invalid`, `as-of-in-future`,
+  `stale`, `calendar-unavailable`, `unexpected-error`. The field holds status,
+  reason, timestamps, the commit sha and the position count, never amounts.
+- Without the flag nothing changes and `portfolio_feed` is absent. Local runs
+  keep using `--portfolio` (fail-closed, 60 minutes); the two flags exclude
+  each other.
+
+Accepted consequences (D-18): with a valid portfolio the Jev check is skipped
+(`tradingagents/jev/hooks.py`), and the archived reports on the public
+`paper-log` branch carry the paper account's cash and positions.
+
 ## Known limitations
 
 - **A decision is scored once its holding window has traded.** An entry stays
@@ -209,4 +236,5 @@ up. `--date auto` is the previous weekday; pass `YYYY-MM-DD` for a backfill.
 - **LLM output is not deterministic.** Two runs on the same date can disagree.
   That is a property of the framework, not a bug in the schedule.
 - **One writer only.** The `concurrency` group serializes runs; a second
-  concurrent writer to `paper-log` would lose a day's log.
+  concurrent writer to `paper-log` would lose a day's log. The same holds for
+  the published portfolio branch: only the executor writes it.

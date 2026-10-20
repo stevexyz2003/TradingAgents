@@ -732,3 +732,87 @@ class TestPublishedFeedMain:
         graph = _FakeGraph()
         _, calls = _feed_main(monkeypatch, tmp_path, graph, (None, {}), extra_args=("--preflight",))
         assert calls == []
+
+
+_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "daily-paper-run.yml"
+
+# Literal copies of the two steps that must stay untouched (phase 7, T-07-30).
+_RESTORE_STEP = """\
+      - name: Restore the paper-log state branch
+        if: steps.preflight.outputs.skip == 'false' && !inputs.preflight_only
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$STATE_DIR"
+          cd "$STATE_DIR"
+          git init -q -b "$STATE_BRANCH"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add origin \\
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch -q --depth=1 origin "$STATE_BRANCH"; then
+            git reset -q --hard FETCH_HEAD
+            echo "state: restored $STATE_BRANCH ($(git rev-parse --short HEAD))"
+          else
+            echo "state: $STATE_BRANCH does not exist yet - starting a fresh log"
+          fi
+"""
+
+_COMMIT_STEP = """\
+      - name: Commit the decision log
+        # Runs even when the analysis exited non-zero: a partial day still
+        # produced decisions worth keeping, and dropping them would also drop
+        # the pending entries whose realized return resolves on a later run.
+        if: always() && steps.run.outcome != 'skipped'
+        run: |
+          cd "$STATE_DIR"
+          # Isolated state checkout under RUNNER_TEMP - it holds only files
+          # this workflow generates, so staging everything is the right scope.
+          git add -A .
+          if git diff --cached --quiet; then
+            echo "state: nothing to commit"
+            exit 0
+          fi
+          git commit -q -m "paper-run: ${TRADE_DATE} (${TICKERS})" \\
+            -m "Run ${GITHUB_RUN_ID} on ${GITHUB_SHA}."
+          git push -q origin "HEAD:$STATE_BRANCH"
+          echo "state: pushed $(git rev-parse --short HEAD) to $STATE_BRANCH"
+"""
+
+
+def _workflow_step(text: str, name: str) -> str:
+    start = text.index(f"      - name: {name}")
+    nxt = text.find("\n      - name:", start + 1)
+    block = text[start:] if nxt == -1 else text[start : nxt + 1]
+    return block.rstrip("\n") + "\n"
+
+
+@pytest.mark.unit
+class TestWorkflowFeed:
+    def test_workflow_calendar_pin_matches_pyproject(self):
+        pyproject = (_WORKFLOW.parents[2] / "pyproject.toml").read_text(encoding="utf-8")
+        pin = re.search(r'"(exchange_calendars>=[^"]+)"', pyproject).group(1)
+        text = _WORKFLOW.read_text(encoding="utf-8")
+        assert f'pip install "{pin}"' in text
+
+    def test_workflow_flag_only_in_the_analysis_step(self):
+        text = _WORKFLOW.read_text(encoding="utf-8")
+        assert text.count("--portfolio-from-published") == 1
+        assert "--portfolio-from-published" in _workflow_step(text, "Run the analysis")
+        assert "--portfolio-from-published" not in _workflow_step(text, "Preflight")
+
+    def test_workflow_restore_step_is_unchanged(self):
+        text = _WORKFLOW.read_text(encoding="utf-8")
+        assert _workflow_step(text, "Restore the paper-log state branch") == _RESTORE_STEP
+
+    def test_workflow_commit_step_is_unchanged(self):
+        text = _WORKFLOW.read_text(encoding="utf-8")
+        assert _workflow_step(text, "Commit the decision log") == _COMMIT_STEP
+
+    def test_workflow_still_pushes_and_fetches_the_state_branch(self):
+        text = _WORKFLOW.read_text(encoding="utf-8")
+        assert 'git push -q origin "HEAD:$STATE_BRANCH"' in text
+        assert 'git fetch -q --depth=1 origin "$STATE_BRANCH"' in text
+
+    def test_workflow_never_names_the_broker(self):
+        assert "IBKR" not in _WORKFLOW.read_text(encoding="utf-8").upper()
