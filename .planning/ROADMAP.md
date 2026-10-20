@@ -373,15 +373,15 @@ Plans:
 - Keine Alpha-/Backtest-Auswertung aus Fills.
 - Kein Alarm — der Bericht ist eine Lesefunktion, die Alarmierung ist Phase 8.
 
-**Plans:** 9 plans
+**Plans:** 4/9 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 07-01-PLAN.md — Reines Modul `ibkr_publish.py`: Ein-Branch-Klon, Commit nur bei Diff, Push ohne Force nur auf `fork/ibkr-log` (Welle 1)
-- [ ] 07-02-PLAN.md — `state_maintenance.py backup --ibkr-dir --dry-run`, IBKR-Allow-Liste, Runbook (REQ-51) (Welle 1)
-- [ ] 07-03-PLAN.md — `second_last_close_utc` (D-06) und `fetch_depth` in `GitPaperLog` (Welle 1)
-- [ ] 07-04-PLAN.md — Bericht, Datenschicht: Decision-Log-Dedup, Ledger lesen, Join je `decision_key` (REQ-49, SC5) (Welle 1)
+- [x] 07-01-PLAN.md — Reines Modul `ibkr_publish.py`: Ein-Branch-Klon, Commit nur bei Diff, Push ohne Force nur auf `fork/ibkr-log` (Welle 1)
+- [x] 07-02-PLAN.md — `state_maintenance.py backup --ibkr-dir --dry-run`, IBKR-Allow-Liste, Runbook (REQ-51) (Welle 1)
+- [x] 07-03-PLAN.md — `second_last_close_utc` (D-06) und `fetch_depth` in `GitPaperLog` (Welle 1)
+- [x] 07-04-PLAN.md — Bericht, Datenschicht: Decision-Log-Dedup, Ledger lesen, Join je `decision_key` (REQ-49, SC5) (Welle 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

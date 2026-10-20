@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: M2
 milestone_name: IBKR Paper Execution
 status: ready_to_plan
-last_updated: "2026-10-19T07:34:44.633Z"
-last_activity: 2026-10-19
+last_updated: "2026-10-20T10:21:30.756Z"
+last_activity: 2026-10-20 -- Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 4
-  total_plans: 41
-  completed_plans: 39
+  total_plans: 50
+  completed_plans: 40
   percent: 50
 ---
 
@@ -21,8 +21,8 @@ progress:
 
 ## Current Position
 
-Phase: 06 (die-erste-echte-order) — EXECUTING
-Plan: 9 of 10
+Phase: 07 (rueckkanal-und-soll-ist-zusammenfuehrung) — EXECUTING
+Plan: 1 of 9
 **Messtag 06-09/06-10 verschoben (2026-10-19):** Read-Only-Beleg per Sonde gelungen
 (321, `READ_ONLY_API`), aber `preview` zeigt AAPL/MSFT/NVDA alle Hold (trade_date
 2026-10-16), also nach D-03 keine erste Order. Kein RELEASE, kein `--live`; Schalter
@@ -43,7 +43,7 @@ Querschnitts-Fix d344433: Jede nicht als harmlos geführte System-Meldung
 z. B. 2157 (Sec-Def-Farm kaputt) still durch und konnte in `contracts.json` gelernt
 werden.
 
-Last activity: 2026-10-19
+Last activity: 2026-10-20 -- Phase 07 execution started
 
 Davor: 2026-10-11 - **Beide offenen P2-Punkte geschlossen** (Quick-Task 261011-k4s, 4 Commits a734955..86ac1ae): Docker-/CLI-Smoke mit Stub-LLM im `--internal`-Netz (kein echter LLM-Call, 9 Stub-Calls, Negativ-Kontrolle gegen unerreichbaren Endpunkt) als CI-Job `docker-smoke`, dazu `scripts/state_maintenance.py` (prune/backup/verify, dry-run per Default, `quick_check` in try/except, Sidecar-Glob) mit 18 Tests und das Runbook `scripts/STATE_OPERATIONS.md`. Gates selbst nachgefahren: 1374 passed / rc=0, ruff clean, Smoke lokal gruen ohne Reste. Retention: Decision-Log unbegrenzt, Checkpoints 7 Tage, Reports 90 Tage. Der CI-Job `docker-smoke` ist seit Run 38147084939 gruen (7/7 Jobs). Der erste CI-Lauf schlug fehl und deckte einen Fehler im Gate selbst auf: `printf | grep -q` liess grep beim ersten Treffer aussteigen, printf starb an SIGPIPE, und `pipefail` + `if !` drehten das um - die Assertion scheiterte also genau dann, wenn der Marker GEFUNDEN wurde (lokal unsichtbar, weil der kuerzere Traceback in den 64-KiB-Puffer passte). Behoben mit Here-String (67b815a). Danach Code-Review mit 2 Blockern + 15 Warnungen: `prune` loeschte per Glob-Injection das WAL einer behaltenen DB, und negative Tageswerte loeschten heutigen State; beide samt 5 weiterer Befunde gefixt (b0205f2..9d7391b, 8 neue Regressionstests, 1382 passed). Verifier: 10/10 must-haves, keine Luecke. Davor am selben Tag: erster erfolgreicher Paper-Lauf (AAPL Hold, $0.18), v0.6.0-Rebase promoviert, P3-Repo-Hygiene.
 
@@ -129,9 +129,11 @@ Betriebszweck statt nur Framework-Zulieferer zu sein.
 - **Phase 6 wartet auf eine BUY-Entscheidung** (2026-10-19): 06-09/06-10 brauchen einen
   Handelstag mit frischer BUY-Entscheidung im paper-log; am 2026-10-19 waren alle drei
   Ticker Hold.
+
 - Volle Suite unter Windows: 5 rote Tests ohne Phasenbezug neben dem bekannten
   `test_yfinance_…`: `test_chatgpt_auth.py` ×2 (prüft `0o600`), `test_cli_commands.py`
   ×1, `test_cli_updates.py` ×2. Separat klären.
+
 - Kein Push-Zugriff auf origin (nur pull) — veröffentlicht wird über den Fork (`fork` = stevexyz2003/TradingAgents, Force-Push nach Rebase nötig)
 - uv.lock: Upstream hat die Datei entfernt (0b61eff) — Operator-Kopie liegt untracked auf Disk + Scratchpad-Backup; Lockfile-Thema damit erledigt
 - CLI-Memory-Parität — **erledigt upstream (neu geprüft 2026-10-10 gegen v0.6.0):** die Lessons kommen jetzt aus dem Graph-Schritt `_memory_step`, der settelt und `past_context` zurückgibt (tradingagents/graph/trading_graph.py:330, :356, :362; verdrahtet in `__init__` über `memory_node=self._memory_step`, :128). Die CLI startet über `graph.create_run_state` (cli/run.py:237) und loggt über `graph.record_decision` (cli/run.py:371), nutzt also denselben Weg wie `propagate`. Die alte Zitatstelle `_resolve_pending_entries` existiert nicht mehr — die Methode ist in `tradingagents/memory/settlement.py` aufgegangen.
