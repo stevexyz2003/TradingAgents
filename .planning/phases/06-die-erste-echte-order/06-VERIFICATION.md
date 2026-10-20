@@ -1,31 +1,29 @@
 ---
 phase: 06-die-erste-echte-order
 verified: 2026-10-20T00:00:00Z
-status: human_needed
-score: 7/7 Roadmap-SCs verifiziert (davon SC1 und SC7 mit dokumentierter Abweichung, Zielerreichung mit Operator-Override D-03)
-overrides_applied: 1
+status: passed
+score: 7/7 Roadmap-SCs verifiziert (davon SC1 und SC7 mit dokumentierter Abweichung, Zielerreichung mit Operator-Overrides D-03 und D-15)
+overrides_applied: 2
 overrides:
   - must_have: "Die erste Order kommt aus dem, was der Paper-Log am Tag hergibt: die jüngste frische Entscheidung, die eine BUY-Order ergibt; gibt es keine, wird keine Entscheidung künstlich erzeugt (D-03, 06-09-Truth 2)"
     reason: "20 von 20 Engine-Entscheidungen für trade_date 2026-10-16 ohne BUY. Der Operator hat D-03 gelockert: die erste Order ist ein markierter Pipeline-Test (Branch fork/paper-log-pipeline-test @ 8453e76, Eintrag 'OPERATOR-APPROVED PIPELINE TEST, NOT AN ENGINE DECISION'), Executor-Code unverändert, paper-log unverändert. Bewiesen ist die Order-Pipeline, NICHT eine Engine-getriebene Order."
     accepted_by: "operator"
     accepted_at: "2026-10-19T15:27:00Z"
-human_verification:
-  - test: "Testsuite und Lint lokal ausführen: `.venv/Scripts/python.exe -m pytest tests -k ibkr` und `.venv/Scripts/python.exe -m ruff check .`"
-    expected: "ibkr-Tests grün (zuletzt 1246 passed laut Befund), ruff sauber; in der vollen Suite nur die 6 bekannten, nicht-IBKR-bezogenen Fehler"
-    why_human: "Die Bash-Shell des Verifiers hing bei jedem Aufruf (selbst `echo ok`, auch ohne Sandbox); weder pytest noch ruff noch git konnten ausgeführt werden. Die Tests wurden nur statisch gelesen."
-  - test: "Abweichung D-15 (321-Beleg im --live-Pfad endete mit Exit 3 REQUEST_TIMEOUT statt Exit 5 preview-read-only) bewusst akzeptieren oder als Gap-Closure einplanen"
-    expected: "Entweder Override-Eintrag in dieser Datei (Vorschlag unten) oder ein Todo/Plan für die Zuordnung 321 mit reqId -1 im Lesefenster -> READ_ONLY_API und für die Korrektur von test_live_read_only_ends_at_the_preview"
-    why_human: "Plan-Truth 06-09 verlangt wörtlich Exit 5; das Ergebnis ist sicher (fail-closed, kein intent), aber der Operator hat diese Abweichung nirgends ausdrücklich abgenommen."
-  - test: "Commit dieser Datei nachholen: `git add .planning/phases/06-die-erste-echte-order/06-VERIFICATION.md && git commit` mit Nachricht `docs(06): add phase verification`"
-    expected: "Commit auf main, nicht gepusht"
-    why_human: "Der Verifier konnte wegen der hängenden Shell nicht committen."
+  - must_have: "Am Tag der ersten Order ist der gesperrte Zustand im scharfen Pfad frisch belegt: mit eingeschaltetem Read-Only API endet execute <TICKER> --live an der Vorschau mit preview-read-only (321), Exit 5 (D-15, 06-09-Truth 3)"
+    reason: "Gemessen endet der Lauf früher, bei reqCompletedOrders mit 321 (reqId -1) und REQUEST_TIMEOUT Exit 3; fail-closed, kein intent, 321 im Log, Sonde READ_ONLY_API maschinell geprüft. Abweichung in Handbuch und Befund dokumentiert. Genauere Diagnose als Todo: .planning/todos/pending/06-read-only-321-in-read-window.md"
+    accepted_by: "operator"
+    accepted_at: "2026-10-20T15:00:00Z"
+human_verification_resolved:
+  - "pytest tests -k ibkr: 1357 passed; ruff check .: sauber (2026-10-20, vom Orchestrator nachgefahren)"
+  - "D-15-Abweichung vom Operator per Override akzeptiert (2026-10-20)"
+  - "Commit dieser Datei: 8a325e2"
 ---
 
 # Phase 6: Die erste echte Order — Verifikationsbericht
 
 **Phasenziel:** Eine echte Markt-Order gegen `DUQ634065` wird platziert, gefüllt und vollständig im Ledger wiedergefunden — und ein zweiter Lauf am selben Tag erzeugt keine zweite.
 **Verifiziert:** 2026-10-20
-**Status:** human_needed
+**Status:** passed (nach Operator-Entscheidung zur D-15-Abweichung am 2026-10-20; pytest/ruff nachgefahren)
 **Re-Verifikation:** Nein, Erstverifikation
 
 **Vorbemerkung zur Methode:** Die Bash-Shell war während der gesamten Verifikation unbenutzbar (jeder Aufruf lief in den Timeout, auch `echo ok`). Belegt wurde deshalb über direktes Lesen von Code, Tests, Handbuch, Befund, dem echten Live-Ledger (`%LOCALAPPDATA%\TradingEngineX\ibkr\ledger.jsonl`, nur gelesen) und `.git/logs/HEAD` (Commit-Zeitstempel). pytest, ruff und der Commit dieser Datei stehen aus (siehe „Human Verification“).
