@@ -122,3 +122,216 @@ def test_read_ledger_broken_middle_raises():
 def test_read_ledger_rejects_dryrun_ledger():
     with pytest.raises(report._ledger().LedgerError):
         report.read_ledger(_blob([_rec(1, "run_start", mode="dryrun")]))
+
+
+# --- build_rows ----------------------------------------------------------------------------
+
+BLOCKS = {"AAPL": 1, "MSFT": 1, "NVDA": 1}
+SHA = "71df89df8a078acdcea92f966c10332086f6cf43"
+
+
+def _rows(decisions, records):
+    ledger = report.read_ledger(_blob(records))
+    return report.build_rows(decisions, ledger, block_qty_of=BLOCKS.get)
+
+
+def _dec(date: str, ticker: str, rating: str) -> report.Decision:
+    return report.Decision(date, ticker, rating, True, None, None, None, None)
+
+
+def _intent(seq: int, key: str, *, rating="Overweight", side="BUY", qty=1, gap=False) -> dict:
+    date, ticker = key.split("|")
+    return _rec(
+        seq,
+        "intent",
+        decision_key=key,
+        ticker=ticker,
+        trade_date=date,
+        rating=rating,
+        paper_log_sha=SHA,
+        side=side,
+        quantity=qty,
+        con_id=265598,
+        order_ref="ref",
+        weekend_gap=gap,
+        rating_source="engine",
+    )
+
+
+def _fill(seq: int, key: str, exec_id: str | None, qty: float, price: float, side="BUY") -> dict:
+    fields = {"decision_key": key, "side": side, "filled_qty": qty, "price": price}
+    if exec_id:
+        fields["exec_id"] = exec_id
+    return _rec(seq, "filled", **fields)
+
+
+def _one(decision, records):
+    rows, extra = _rows([decision], records)
+    assert extra == []
+    return rows[0]
+
+
+def test_join_first_live_order_real_shape():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Hold"),
+        [
+            _intent(1, key),
+            _rec(2, "placed", decision_key=key),
+            _fill(3, key, "0001.01", 1, 270.5),
+            _rec(4, "alarm", decision_key=key, state="post-order-mismatch", fills_booked=True),
+            _rec(5, "run_end"),
+        ],
+    )
+    assert row.state == "filled"
+    assert row.ledger_rating == "Overweight"
+    assert (row.target, row.held_before, row.held_after) == (1, 0, 1)
+    assert (row.order_qty, row.filled_qty, row.avg_price, row.deviation) == (1, 1, 270.5, 0)
+    assert any(
+        "ledger rating Overweight != log rating Hold" in n and "71df89d" in n for n in row.notes
+    )
+    assert "alarm: post-order-mismatch" in row.notes
+
+
+def test_join_hold_without_order():
+    key = "2026-10-09|AAPL"
+    row = _one(
+        _dec("2026-10-09", "AAPL", "Hold"),
+        [
+            _rec(
+                1,
+                "skipped",
+                decision_key=key,
+                reason="hold",
+                state="skipped-hold",
+                weekend_gap=True,
+            )
+        ],
+    )
+    assert row.state == "skipped-hold"
+    assert row.target is None and row.held_before is None and row.held_after is None
+    assert row.weekend_gap is True
+    assert "no intent: target/held not recorded (D-20)" in row.notes
+
+
+def test_join_no_run():
+    row = _one(_dec("2026-10-09", "MSFT", "Buy"), [])
+    assert row.state == report.NO_RUN
+    assert row.filled_qty is None and row.order_qty is None and row.target is None
+
+
+def test_join_fill_timeout():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Overweight"),
+        [
+            _intent(1, key),
+            _rec(2, "placed", decision_key=key),
+            _rec(3, "alarm", decision_key=key, state="fill-timeout"),
+        ],
+    )
+    assert row.state == "fill-timeout"
+    assert row.filled_qty == 0
+
+
+def test_join_place_rejected():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Overweight"),
+        [_intent(1, key), _rec(2, "rejected", decision_key=key, state="place-rejected")],
+    )
+    assert row.state == "place-rejected"
+    assert row.filled_qty == 0
+
+
+def test_join_resolved():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Overweight"),
+        [_intent(1, key), _rec(2, "resolved", decision_key=key, outcome="never_sent", note="n")],
+    )
+    assert row.state == "never_sent"
+
+
+def test_join_correction_highest_wins():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Overweight"),
+        [_intent(1, key), _fill(2, key, "0001.01", 1, 10), _fill(3, key, "0001.02", 1, 11)],
+    )
+    assert row.filled_qty == 1
+    assert row.avg_price == 11
+
+
+def test_join_aggregate_row_counts_once():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Overweight"), [_intent(1, key), _fill(2, key, None, 1, 10)]
+    )
+    assert row.filled_qty == 1
+    assert row.avg_price == 10
+
+
+def test_join_partial_average_price():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Buy"),
+        [
+            _intent(1, key, rating="Buy", qty=2),
+            _fill(2, key, "0001.01", 1, 10),
+            _fill(3, key, "0002.01", 1, 12),
+        ],
+    )
+    assert row.filled_qty == 2
+    assert row.avg_price == 11
+    assert (row.target, row.held_before, row.held_after, row.deviation) == (2, 0, 2, 0)
+
+
+def test_join_sell_ladder():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Sell"),
+        [
+            _intent(1, key, rating="Sell", side="SELL", qty=1),
+            _fill(2, key, "0001.01", 1, 10, side="SELL"),
+        ],
+    )
+    assert (row.target, row.held_before, row.held_after, row.deviation) == (0, 1, 0, 0)
+
+
+def test_join_implausible_block_size():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Underweight"),
+        [_intent(1, key, rating="Underweight", side="BUY", qty=1)],
+    )
+    assert row.held_before is None and row.held_after is None and row.deviation is None
+    assert any("block size changed?" in n for n in row.notes)
+
+
+def test_join_unknown_ticker():
+    key = "2026-10-16|ZZZZ"
+    row = _one(_dec("2026-10-16", "ZZZZ", "Overweight"), [_intent(1, key)])
+    assert row.target is None and row.deviation is None
+    assert any("ZZZZ" in n for n in row.notes)
+
+
+def test_join_last_skip_wins():
+    key = "2026-10-09|AAPL"
+    row = _one(
+        _dec("2026-10-09", "AAPL", "Hold"),
+        [
+            _rec(1, "skipped", decision_key=key, reason="stale", state="stale-source"),
+            _rec(2, "skipped", decision_key=key, reason="hold", state="skipped-hold"),
+        ],
+    )
+    assert row.state == "skipped-hold"
+
+
+def test_join_ledger_only_keys_are_reported():
+    rows, extra = _rows(
+        [_dec("2026-10-09", "AAPL", "Hold")],
+        [_rec(1, "skipped", decision_key="2026-10-02|NVDA", reason="hold", state="skipped-hold")],
+    )
+    assert [r.key for r in rows] == ["2026-10-09|AAPL"]
+    assert extra == ["2026-10-02|NVDA"]
