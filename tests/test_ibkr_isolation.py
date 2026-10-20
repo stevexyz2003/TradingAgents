@@ -293,6 +293,7 @@ def test_resolver_takes_the_clock_as_a_parameter():
 DECISION = ROOT / "scripts" / "ibkr_decision.py"
 PAPERLOG = ROOT / "scripts" / "ibkr_paperlog.py"
 PUBLISH = ROOT / "scripts" / "ibkr_publish.py"
+REPORT = ROOT / "scripts" / "ibkr_report.py"
 
 
 def _load_decision():
@@ -524,7 +525,7 @@ def test_handbook_state_table_matches_decision_module():
 
 @pytest.mark.unit
 def test_decision_modules_are_library_free():
-    for path in (DECISION, PAPERLOG, PUBLISH):
+    for path in (DECISION, PAPERLOG, PUBLISH, REPORT):
         top_level = {
             name.split(".")[0]
             for node in ast.parse(path.read_text(encoding="utf-8")).body
@@ -541,7 +542,7 @@ def test_decision_modules_are_library_free():
 
 @pytest.mark.unit
 def test_decision_module_takes_the_clock_as_a_parameter():
-    for path in (DECISION, PAPERLOG, PUBLISH):
+    for path in (DECISION, PAPERLOG, PUBLISH, REPORT):
         source = path.read_text(encoding="utf-8")
         for forbidden in ("datetime.now", "time.time(", "date.today"):
             assert forbidden not in source, f"{forbidden} reads the clock in {path.name}"
@@ -643,3 +644,35 @@ def test_handbook_documents_resolve_expired_unfilled_and_the_broker_guard():
         "RESOLVE_POSITION_MISMATCH",
     ):
         assert needle in text, needle
+
+
+@pytest.mark.unit
+def test_handbook_documents_the_soll_ist_report():
+    text = _handbook_text()
+    for needle in ("ibkr_report.py", "--since", "--until", "--out", "--no-prices", "weekend_gap"):
+        assert needle in text, needle
+    assert "top of the book" in text.lower()
+
+
+@pytest.mark.unit
+def test_handbook_documents_ibkr_backup():
+    text = _handbook_text()
+    for needle in ("--dry-run", "ledger.jsonl", "contracts.json", "contracts-history.jsonl"):
+        assert needle in text, needle
+
+
+@pytest.mark.unit
+def test_handbook_documents_the_ci_portfolio_feed():
+    text = _handbook_text()
+    for needle in ("--portfolio-from-published", "portfolio_feed", "Jev", "public"):
+        assert needle in text, needle
+
+
+@pytest.mark.unit
+def test_report_module_never_writes_git():
+    tree = ast.parse(REPORT.read_text(encoding="utf-8"))
+    strings = {
+        n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    }
+    for verb in ("push", "commit", "checkout", "reset", "update-ref"):
+        assert verb not in strings, f"ibkr_report.py holds the git write verb {verb!r}"
