@@ -23,13 +23,13 @@ progress:
 
 Phase: 07 (rueckkanal-und-soll-ist-zusammenfuehrung) — EXECUTING
 Plan: 1 of 9
-**Messtag 06-09/06-10 verschoben (2026-10-19):** Read-Only-Beleg per Sonde gelungen
-(321, `READ_ONLY_API`), aber `preview` zeigt AAPL/MSFT/NVDA alle Hold (trade_date
-2026-10-16), also nach D-03 keine erste Order. Kein RELEASE, kein `--live`; Schalter
-laut Operator um 16:35 MESZ an und um 16:32 MESZ wieder aus (so gemeldet). 06-09 wird
-am ersten Handelstag mit frischer BUY-Entscheidung im paper-log wiederholt, 06-10
-folgt am selben Tag. Befund: `ibkr-konto-befund.md`, Abschnitt „Erste echte Order
-(Phase 6)“ (035af86).
+**Phase 6: erste echte Order gelaufen (2026-10-19), 10/10 Pläne, Verifikation offen.**
+BUY 1 AAPL @ 342.86 auf `DUQ634065` als Pipeline-Test: D-03 vom Operator gelockert,
+nachdem 20 von 20 Engine-Entscheidungen ohne BUY waren; markierter Eintrag auf
+`fork/paper-log-pipeline-test`. Ledger `intent → placed → filled` vollständig; zweiter
+Lauf `already-attempted`. Fehlalarm nach der Order (Gateway meldet `quantity` 0 bei
+abgeschlossenen Orders) behoben in 28ef33a/46c432b. Befund: `ibkr-konto-befund.md`,
+Abschnitt „Erste echte Order (Phase 6)“; Handbuch „First live order“.
 **Nächster Schritt: M2 Phase 5 planen — `/gsd:plan-phase 5`** (Kontext steht in
 `.planning/phases/05-leitplanken-scharf/05-CONTEXT.md`). Kill-Switch, Ledger,
 Lock, Reconciliation und neu das Sitzungsfenster aus REQ-IBKR-25, alles ohne eine
@@ -126,9 +126,11 @@ Betriebszweck statt nur Framework-Zulieferer zu sein.
 
 ### Blockers/Concerns
 
-- **Phase 6 wartet auf eine BUY-Entscheidung** (2026-10-19): 06-09/06-10 brauchen einen
-  Handelstag mit frischer BUY-Entscheidung im paper-log; am 2026-10-19 waren alle drei
-  Ticker Hold.
+- **Phase-6-Lücken für die Verifikation** (2026-10-19): 321 mit `reqId -1` in einem
+  Lesefenster endet als `REQUEST_TIMEOUT` (Exit 3) statt `READ_ONLY_API`; ein zweiter
+  Paper-Run auf dasselbe `trade_date` überschreibt `runs/<date>/summary.json`; beim
+  Pipeline-Test trägt das Ledger `rating_source: engine`. Branch
+  `fork/paper-log-pipeline-test` nie in `paper-log` mergen.
 
 - Volle Suite unter Windows: 5 rote Tests ohne Phasenbezug neben dem bekannten
   `test_yfinance_…`: `test_chatgpt_auth.py` ×2 (prüft `0o600`), `test_cli_commands.py`

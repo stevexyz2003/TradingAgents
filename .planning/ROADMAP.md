@@ -35,7 +35,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - [x] **Phase 3: Symbol-Auflösung, Handelbarkeit und Handelszeiten** — vom Roh-Ticker zu genau einem Contract, oder begründet gar nicht (completed 2026-10-12)
 - [x] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet (completed 2026-10-12)
 - [x] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order (completed 2026-10-17)
-- [ ] **Phase 6: Die erste echte Order** — umschalten, platzieren, im Ledger wiederfinden
+- [x] **Phase 6: Die erste echte Order** — umschalten, platzieren, im Ledger wiederfinden (completed 2026-10-20)
 - [ ] **Phase 7: Rückkanal und Soll-Ist-Zusammenführung** — eigener Branch, Join beim Lesen
 - [ ] **Phase 8: Unbeaufsichtigter Betrieb** — Scheduler, Heartbeat, lauter Ausfall
 
@@ -316,7 +316,7 @@ Plans:
 - Kein zweiter oder dritter Ticker zwingend — ein Durchstich genügt, die Mechanik ist tickerunabhängig.
 - Keine Ausweitung der Leiter und keine Änderung der Blockgröße „weil es gut lief".
 
-**Plans:** 8/10 plans executed
+**Plans:** 10/10 plans complete
 
 Plans:
 **Wave 1**
@@ -344,11 +344,11 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 06-09-PLAN.md — Operator-Checkpoint: 321-Beleg am Messtag und Ticker-Wahl (Welle 6)
+- [x] 06-09-PLAN.md — Operator-Checkpoint: 321-Beleg am Messtag und Ticker-Wahl (Welle 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 06-10-PLAN.md — Operator-Checkpoint: Freischaltung im Handbuch, erste echte Order, zweiter Lauf (Welle 7)
+- [x] 06-10-PLAN.md — Operator-Checkpoint: Freischaltung im Handbuch, erste echte Order, zweiter Lauf (Welle 7)
 
 ---
 
