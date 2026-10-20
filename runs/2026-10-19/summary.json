@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "started_at": "2026-10-20T06:55:08.037700+00:00",
-  "finished_at": "2026-10-20T07:03:51.840149+00:00",
+  "started_at": "2026-10-20T10:54:18.990148+00:00",
+  "finished_at": "2026-10-20T10:57:16.908951+00:00",
   "trade_date": "2026-10-19",
   "provider": "anthropic",
   "deep_think_llm": "claude-sonnet-5-5",
   "quick_think_llm": "claude-haiku-5-5",
   "max_cost_per_run_usd": 1.5,
-  "max_total_cost_usd": 4.5,
-  "commit": "23b4a4b2f964ad35561fc6b0e006c77d343fcb3a",
+  "max_total_cost_usd": 1.5,
+  "commit": "036dd7b239755c9dcc09280e216f50e94a428005",
   "status": "ok",
   "totals": {
-    "tickers": 3,
-    "cost_usd": 0.720224,
-    "tokens_in": 485343,
-    "tokens_out": 135735,
-    "ok": 3,
+    "tickers": 1,
+    "cost_usd": 0.232232,
+    "tokens_in": 150665,
+    "tokens_out": 44664,
+    "ok": 1,
     "failed": 0,
     "budget_aborted": 0,
     "skipped": 0
@@ -25,151 +25,19 @@
       "ticker": "AAPL",
       "status": "ok",
       "signal": "Hold",
-      "cost_usd": 0.24045300000000003,
-      "tokens_in": 154615,
-      "tokens_out": 46165,
-      "duration_s": 176.88848213900002,
+      "cost_usd": 0.23223249999999995,
+      "tokens_in": 150665,
+      "tokens_out": 44664,
+      "duration_s": 176.390661865,
       "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AAPL/complete_report.md",
-      "error": null,
-      "jev": {
-        "model": "jev-1.13.0",
-        "input_tokens": 4961,
-        "cost_usd": 0.00020836,
-        "latency_ms": 187,
-        "attempts": 1,
-        "min_confidence": 0.9,
-        "questions": {
-          "final_rating": {
-            "existing": "Hold",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "research_recommendation": {
-            "existing": "Hold",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "trader_action": {
-            "existing": "HOLD",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "sentiment_band": {
-            "existing": "Mixed",
-            "jev": "mixed",
-            "confidence": 0.99,
-            "agree": true,
-            "applied": false
-          }
-        }
-      },
-      "rating_source": "engine"
-    },
-    {
-      "ticker": "MSFT",
-      "status": "ok",
-      "signal": "Hold",
-      "cost_usd": 0.252398,
-      "tokens_in": 168260,
-      "tokens_out": 49249,
-      "duration_s": 189.51130722599999,
-      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/MSFT/complete_report.md",
-      "error": null,
-      "jev": {
-        "model": "jev-1.13.0",
-        "input_tokens": 4723,
-        "cost_usd": 0.00019837,
-        "latency_ms": 152,
-        "attempts": 1,
-        "min_confidence": 0.9,
-        "questions": {
-          "final_rating": {
-            "existing": "Hold",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "research_recommendation": {
-            "existing": "Hold",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "trader_action": {
-            "existing": "HOLD",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "sentiment_band": {
-            "existing": "Mildly Bullish",
-            "jev": "mildly_bullish",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          }
-        }
-      },
-      "rating_source": "engine"
-    },
-    {
-      "ticker": "NVDA",
-      "status": "ok",
-      "signal": "Hold",
-      "cost_usd": 0.2273725,
-      "tokens_in": 162468,
-      "tokens_out": 40321,
-      "duration_s": 156.07898706600008,
-      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/NVDA/complete_report.md",
-      "error": null,
-      "jev": {
-        "model": "jev-1.13.0",
-        "input_tokens": 4389,
-        "cost_usd": 0.00018434,
-        "latency_ms": 192,
-        "attempts": 1,
-        "min_confidence": 0.9,
-        "questions": {
-          "final_rating": {
-            "existing": "Hold",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "research_recommendation": {
-            "existing": "Hold",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "trader_action": {
-            "existing": "HOLD",
-            "jev": "hold",
-            "confidence": 1.0,
-            "agree": true,
-            "applied": false
-          },
-          "sentiment_band": {
-            "existing": "Mixed",
-            "jev": "mixed",
-            "confidence": 0.99,
-            "agree": true,
-            "applied": false
-          }
-        }
-      },
-      "rating_source": "engine"
+      "error": null
     }
-  ]
+  ],
+  "portfolio_feed": {
+    "status": "used",
+    "as_of": "2026-10-20T10:53:14.858280+00:00",
+    "cutoff": "2026-10-16T20:00:00+00:00",
+    "sha": "c141694523a40fff1ed94d93cd43ffe286fae832",
+    "positions": 1
+  }
 }
