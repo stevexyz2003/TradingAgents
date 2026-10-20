@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -60,10 +61,22 @@ _FETCH_SPEC = f"+refs/heads/{PUBLISH_BRANCH}:{_LOCAL_REF}"
 _PUSH_SPEC = f"HEAD:refs/heads/{PUBLISH_BRANCH}"
 
 
+_USERINFO_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@\s]+@")
+
+
+def scrub_urls(text: str) -> str:
+    """Replace ``user:token@`` in any URL inside ``text`` with ``***@``."""
+    return _USERINFO_RE.sub(r"\1***@", text)
+
+
 class PublishError(Exception):
-    """Publishing failed; ``reason`` is a stable identifier."""
+    """Publishing failed; ``reason`` is a stable identifier.
+
+    The detail is scrubbed of URL credentials on construction, whatever git echoed.
+    """
 
     def __init__(self, reason: str, detail: str = ""):
+        detail = scrub_urls(detail)
         super().__init__(f"{reason}: {detail}" if detail else reason)
         self.reason = reason
         self.detail = detail
@@ -122,6 +135,9 @@ def resolve_remote_url(repo: Path, *, run=subprocess.run, timeout: float = GIT_T
     if fork.returncode != 0:
         raise PublishError("remote-missing", f"no '{PUBLISH_REMOTE}' remote in {repo}")
     fork_url = _text(fork.stdout).strip()
+    if not fork_url or fork_url.startswith("-"):
+        # An empty URL has nothing to publish to; a leading dash would be read as an option.
+        raise PublishError("remote-missing", f"'{PUBLISH_REMOTE}' has no usable URL in {repo}")
     origin = _git(run, ["remote", "get-url", "origin"], Path(repo), timeout)
     if origin.returncode == 0 and _norm_url(_text(origin.stdout)) == _norm_url(fork_url):
         raise PublishError(
@@ -186,6 +202,14 @@ def publish(
             "git fetch",
         )
         _check(git("reset", "-q", "--hard", _LOCAL_REF), "git-failed", "git reset")
+        # The ledger is the audit trail: the local one must extend what is already published.
+        published = clone_dir / LEDGER_NAME
+        if published.exists() and not snapshot.ledger.startswith(published.read_bytes()):
+            raise PublishError(
+                "ledger-diverged",
+                f"local {LEDGER_NAME} does not extend the published one "
+                f"({PUBLISH_BRANCH}); nothing was published",
+            )
         author = _check(git("log", "-1", "--format=%ae", _LOCAL_REF), "git-failed", "git log")
         email = _text(author.stdout).strip()
         if email and email != COMMIT_EMAIL:

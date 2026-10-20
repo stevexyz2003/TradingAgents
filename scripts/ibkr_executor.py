@@ -1851,7 +1851,9 @@ def run_publish(args, logger, clock, *, repo, run) -> int:
     except pub.PublishError as exc:
         # Only the remote name goes to the log, never the URL (it may carry a token).
         extra = "; ibkr-log moved; one writer per branch" if exc.reason == "push-rejected" else ""
-        detail = exc.detail.replace(url, pub.PUBLISH_REMOTE)
+        detail = pub.scrub_urls(exc.detail)
+        if url:
+            detail = detail.replace(url, pub.PUBLISH_REMOTE)
         return _fail(
             logger,
             EXIT_PUBLISH,

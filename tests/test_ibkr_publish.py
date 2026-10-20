@@ -28,6 +28,7 @@ NOW = datetime(2026, 10, 20, 7, 0, 0, tzinfo=UTC)
 LEDGER = b'{"a":1}\r\n{"b":2}\n'
 PORTFOLIO = '{"cash": "Straße"}'.encode()
 CONTRACTS = b'{"AAPL": 1}\n'
+LEDGER2 = LEDGER + b"{}\n"  # extends LEDGER (append-only)
 
 
 def g(cwd, *args, check=True):
@@ -145,6 +146,20 @@ def test_publish_updates_on_change(tmp_path, remotes):
 
 
 @needs_git
+@pytest.mark.parametrize("local", [b'{"a":1}\r\n', b'{"x":9}\n{"b":2}\n'], ids=["shorter", "other"])
+def test_publish_refuses_a_ledger_that_does_not_extend_the_published_one(tmp_path, remotes, local):
+    fork, _ = remotes
+    clone = tmp_path / "clone"
+    do_publish(snap(), clone, fork)
+    before = tip(fork)
+    with pytest.raises(pub.PublishError) as err:
+        do_publish(snap(ledger=local), clone, fork)
+    assert err.value.reason == "ledger-diverged"
+    assert tip(fork) == before
+    assert g(fork, "cat-file", "blob", "ibkr-log:ledger.jsonl").stdout == LEDGER
+
+
+@needs_git
 def test_publish_empty_diff_makes_no_commit(tmp_path, remotes):
     fork, _ = remotes
     clone = tmp_path / "clone"
@@ -161,10 +176,10 @@ def test_publish_keeps_portfolio_when_absent(tmp_path, remotes):
     fork, _ = remotes
     clone = tmp_path / "clone"
     do_publish(snap(), clone, fork)
-    do_publish(snap(ledger=b"{}\n", portfolio=None, contracts=None), clone, fork)
+    do_publish(snap(ledger=LEDGER2, portfolio=None, contracts=None), clone, fork)
     assert g(fork, "cat-file", "blob", "ibkr-log:portfolio.json").stdout == PORTFOLIO
     assert g(fork, "cat-file", "blob", "ibkr-log:contracts.json").stdout == CONTRACTS
-    assert g(fork, "cat-file", "blob", "ibkr-log:ledger.jsonl").stdout == b"{}\n"
+    assert g(fork, "cat-file", "blob", "ibkr-log:ledger.jsonl").stdout == LEDGER2
 
 
 @needs_git
@@ -205,7 +220,7 @@ def test_publish_non_fast_forward_is_rejected_not_forced(tmp_path, remotes):
 
     recorder = Recorder(before_push=foreign_push)
     with pytest.raises(pub.PublishError) as err:
-        do_publish(snap(ledger=b"{}\n"), clone, fork, run=recorder)
+        do_publish(snap(ledger=LEDGER2), clone, fork, run=recorder)
     assert err.value.reason == "push-rejected"
     assert tip(fork) == out(other, "rev-parse", "HEAD")
 
@@ -221,7 +236,7 @@ def test_publish_flags_a_foreign_author(tmp_path, remotes):
     g(other, "add", "foreign.txt")
     g(other, "-c", "user.email=other@example.invalid", "commit", "-q", "-m", "foreign")
     g(other, "push", "-q", "origin", "HEAD:refs/heads/ibkr-log")
-    result = do_publish(snap(ledger=b"{}\n"), clone, fork)
+    result = do_publish(snap(ledger=LEDGER2), clone, fork)
     assert result.foreign_author == "other@example.invalid"
     assert result.outcome == "published"
 
@@ -232,7 +247,7 @@ def test_publish_argv_never_names_origin_or_paper_log_or_force(tmp_path, remotes
     clone = tmp_path / "clone"
     recorder = Recorder()
     do_publish(snap(), clone, fork, run=recorder)
-    do_publish(snap(ledger=b"{}\n"), clone, fork, run=recorder)
+    do_publish(snap(ledger=LEDGER2), clone, fork, run=recorder)
     assert recorder.calls
     forbidden = {"origin", "paper-log", "--force", "--force-with-lease", "-f"}
     for argv, kw in recorder.calls:
@@ -315,3 +330,28 @@ def test_resolve_remote_url_returns_fork(tmp_path):
     g(repo, "remote", "add", "origin", "https://example.invalid/a/b.git")
     g(repo, "remote", "add", "fork", "https://example.invalid/c/d.git")
     assert pub.resolve_remote_url(repo) == "https://example.invalid/c/d.git"
+
+
+def test_scrub_urls_removes_userinfo():
+    text = "fatal: unable to access 'https://user:tok3n@example.invalid/a/b/': denied"
+    scrubbed = pub.scrub_urls(text)
+    assert "tok3n" not in scrubbed
+    assert "user" not in scrubbed
+    assert "https://***@example.invalid/a/b/" in scrubbed
+    assert pub.scrub_urls("no url here") == "no url here"
+
+
+def test_publish_error_scrubs_credentials_whatever_git_echoed():
+    err = pub.PublishError("git-failed", "git fetch: fatal: 'https://u:sekret@h.invalid/x' broke")
+    assert "sekret" not in str(err)
+    assert "sekret" not in err.detail
+
+
+@pytest.mark.parametrize("url", ["", "-oProxyCommand=evil"])
+def test_resolve_remote_url_rejects_unusable_url(tmp_path, url):
+    def runner(argv, **kw):
+        return subprocess.CompletedProcess(argv, 0, stdout=url.encode() + b"\n", stderr=b"")
+
+    with pytest.raises(pub.PublishError) as err:
+        pub.resolve_remote_url(tmp_path, run=runner)
+    assert err.value.reason == "remote-missing"
