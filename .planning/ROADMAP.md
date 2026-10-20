@@ -373,7 +373,7 @@ Plans:
 - Keine Alpha-/Backtest-Auswertung aus Fills.
 - Kein Alarm — der Bericht ist eine Lesefunktion, die Alarmierung ist Phase 8.
 
-**Plans:** 4/9 plans executed
+**Plans:** 7/9 plans executed
 
 Plans:
 **Wave 1**
@@ -385,9 +385,9 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 07-05-PLAN.md — Bericht: zwei Tabellen, Paper-Fill-Hinweis, Slippage fail-soft, CLI ohne Checkout (REQ-49/-50) (Welle 2)
-- [ ] 07-06-PLAN.md — `ibkr_executor.py publish`, `EXIT_PUBLISH = 11`, Handbuch-Invariante „one writer per branch“ (REQ-52) (Welle 2)
-- [ ] 07-07-PLAN.md — CI-Rückkanal `--portfolio-from-published` fail-open, `portfolio_feed`, Workflow-Pip-Schritt + Flag (SC6) (Welle 2)
+- [x] 07-05-PLAN.md — Bericht: zwei Tabellen, Paper-Fill-Hinweis, Slippage fail-soft, CLI ohne Checkout (REQ-49/-50) (Welle 2)
+- [x] 07-06-PLAN.md — `ibkr_executor.py publish`, `EXIT_PUBLISH = 11`, Handbuch-Invariante „one writer per branch“ (REQ-52) (Welle 2)
+- [x] 07-07-PLAN.md — CI-Rückkanal `--portfolio-from-published` fail-open, `portfolio_feed`, Workflow-Pip-Schritt + Flag (SC6) (Welle 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
