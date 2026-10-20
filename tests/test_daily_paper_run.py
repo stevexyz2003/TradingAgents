@@ -610,6 +610,19 @@ class TestPublishedFeed:
         (_, note), _ = _feed(_feed_blob(cash=12345.67))
         assert "12345" not in json.dumps(note)
 
+    def test_published_schema_note_has_no_values(self):
+        (portfolio, note), _ = _feed(b'{"cash": "secret-987654"}')
+        assert portfolio is None
+        assert note["reason"] == "invalid-schema"
+        assert "secret-987654" not in json.dumps(note)
+        assert "987654" not in json.dumps(note)
+        assert "cash:" in note["detail"]
+
+    def test_published_unexpected_error_note_has_no_message(self):
+        (_, note), _ = _feed(read_error=RuntimeError("cash=987654"))
+        assert note["reason"] == "unexpected-error"
+        assert "987654" not in json.dumps(note)
+
     @pytest.mark.parametrize(
         ("kwargs", "reason"),
         [

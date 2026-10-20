@@ -254,7 +254,12 @@ def load_published_portfolio(
         try:
             portfolio = PortfolioContext.model_validate(data)
         except ValidationError as exc:
-            raise _FeedSkip("invalid-schema", str(exc)) from exc
+            # Field path and error type only: str(ValidationError) echoes input values.
+            locs = ",".join(
+                ".".join(map(str, err.get("loc", ()))) + ":" + str(err.get("type", "?"))
+                for err in exc.errors(include_input=False, include_context=False, include_url=False)
+            )
+            raise _FeedSkip("invalid-schema", locs) from exc
         raw = data.get(PORTFOLIO_AS_OF_KEY) if isinstance(data, dict) else None
         if not isinstance(raw, str):
             raise _FeedSkip("as-of-missing")
@@ -283,7 +288,8 @@ def load_published_portfolio(
     except _FeedSkip as skip:
         return None, _skipped(skip.reason, str(skip))
     except Exception as exc:  # no new failure in the production path (D-07)
-        return None, _skipped("unexpected-error", f"{type(exc).__name__}: {exc}")
+        # Type name only: arbitrary exception text could carry portfolio values.
+        return None, _skipped("unexpected-error", type(exc).__name__)
 
 
 def load_rates(path: Path) -> dict[str, dict[str, float]]:
