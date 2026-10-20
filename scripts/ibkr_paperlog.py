@@ -3,8 +3,10 @@
 ``git fetch`` plus ``git cat-file``: no working tree (D-01).
 Library-free; the runner is injected so tests need neither git nor network.
 
-The reader knows exactly two path shapes: ``decision-log.md`` and
-``runs/<YYYY-MM-DD>/summary.json``. It never reads a run report (REQ-IBKR-18).
+Read are ``decision-log.md`` and ``runs/<YYYY-MM-DD>/summary.json`` (preview/execute)
+and, since phase 7, ``ledger.jsonl`` and ``portfolio.json`` of the ``ibkr-log`` branch
+(report, CI feedback channel). Every path goes through ``validate_blob_path``. A run
+report is never read (REQ-IBKR-18).
 """
 
 from __future__ import annotations
@@ -87,13 +89,20 @@ class GitPaperLog:
         run=subprocess.run,
         fetch_timeout: float = 60.0,
         read_timeout: float = 30.0,
+        fetch_depth: int | None = None,
     ):
+        if fetch_depth is not None and (
+            isinstance(fetch_depth, bool) or not isinstance(fetch_depth, int) or fetch_depth < 1
+        ):
+            raise ValueError(f"invalid fetch_depth: {fetch_depth!r}")
         self._repo = Path(repo)
         self._remote = validate_ref_name(remote, "remote")
         self._branch = validate_ref_name(branch, "branch")
         self._run = run
         self._fetch_timeout = fetch_timeout
         self._read_timeout = read_timeout
+        # additive; the CI reader of the published branch keeps the fetch small (phase 7)
+        self._fetch_depth = fetch_depth
         self.sha: str | None = None
 
     def _git(self, args: list[str], timeout: float):
@@ -118,11 +127,13 @@ class GitPaperLog:
         # would overwrite it between the fetch and the rev-parse.
         ref = f"refs/tengx/paper-log-preview/{uuid.uuid4().hex}"
         try:
+            depth = [f"--depth={self._fetch_depth}"] if self._fetch_depth is not None else []
             proc = self._git(
                 [
                     "fetch",
                     "--no-tags",
                     "--quiet",
+                    *depth,
                     self._remote,
                     f"+refs/heads/{self._branch}:{ref}",
                 ],
