@@ -36,7 +36,7 @@ Vier Regeln haben den Zuschnitt bestimmt:
 - [x] **Phase 4: Entscheidungsübernahme und Soll-Rechnung bis zum `whatIf`-Preview** — vollständiger Trockenlauf, der nichts sendet (completed 2026-10-12)
 - [x] **Phase 5: Leitplanken scharf** — Kill-Switch, Ledger, Lock, Reconciliation, ohne eine einzige Order (completed 2026-10-17)
 - [x] **Phase 6: Die erste echte Order** — umschalten, platzieren, im Ledger wiederfinden (completed 2026-10-20)
-- [ ] **Phase 7: Rückkanal und Soll-Ist-Zusammenführung** — eigener Branch, Join beim Lesen
+- [x] **Phase 7: Rückkanal und Soll-Ist-Zusammenführung** — eigener Branch, Join beim Lesen (completed 2026-10-20)
 - [ ] **Phase 8: Unbeaufsichtigter Betrieb** — Scheduler, Heartbeat, lauter Ausfall
 
 | Phase | Anforderungen | Status |
@@ -373,7 +373,7 @@ Plans:
 - Keine Alpha-/Backtest-Auswertung aus Fills.
 - Kein Alarm — der Bericht ist eine Lesefunktion, die Alarmierung ist Phase 8.
 
-**Plans:** 8/9 plans executed
+**Plans:** 9/9 plans complete
 
 Plans:
 **Wave 1**
@@ -395,7 +395,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 07-09-PLAN.md — Operator-Checkpoint: erster echter `publish`, CI-Lauf mit Portfolio, Bericht gegen echte Branches (Welle 4)
+- [x] 07-09-PLAN.md — Operator-Checkpoint: erster echter `publish`, CI-Lauf mit Portfolio, Bericht gegen echte Branches (Welle 4)
 
 ---
 
