@@ -313,6 +313,21 @@ def test_join_implausible_block_size():
     assert any("block size changed?" in n for n in row.notes)
 
 
+def test_join_derived_target_carries_the_block_size_footnote():
+    key = "2026-10-16|AAPL"
+    row = _one(
+        _dec("2026-10-16", "AAPL", "Sell"),
+        [_intent(1, key, rating="Sell", side="SELL", qty=1)],
+    )
+    assert report.TARGET_DERIVED_NOTE in row.notes
+
+
+def test_join_no_target_has_no_block_size_footnote():
+    key = "2026-10-16|ZZZZ"
+    row = _one(_dec("2026-10-16", "ZZZZ", "Overweight"), [_intent(1, key)])
+    assert report.TARGET_DERIVED_NOTE not in row.notes
+
+
 def test_join_unknown_ticker():
     key = "2026-10-16|ZZZZ"
     row = _one(_dec("2026-10-16", "ZZZZ", "Overweight"), [_intent(1, key)])

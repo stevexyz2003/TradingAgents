@@ -29,6 +29,9 @@ KEY_SEPARATOR = "|"
 _ENTRY_SEPARATOR = "\n\n<!-- ENTRY_END -->\n\n"
 
 NO_RUN = "no-run"
+TARGET_DERIVED_NOTE = (
+    "target/held derived with today's block size, not the size on the trade date (D-20)"
+)
 
 _FILL_TIMEOUT = "fill-timeout"
 
@@ -251,6 +254,7 @@ def _build_row(
             notes.append(f"rating {ledger_rating} has no target")
         else:
             target = float(multiplier * block_qty)
+            notes.append(TARGET_DERIVED_NOTE)
             before = target - order_qty if side == "BUY" else target + order_qty
             if before < 0 or not float(before).is_integer():
                 notes.append("held before is not a whole non-negative number - block size changed?")
