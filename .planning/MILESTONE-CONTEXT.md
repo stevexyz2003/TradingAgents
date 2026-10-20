@@ -30,6 +30,25 @@ TradingEngineX bekommt für europäische Aktien eine messbare, kalibrierte Progn
    > Hinweis 2026-10-20: Eine parallele Session hat Phase 7 bereits ausgeführt (Commits `docs(phase-07)`). Beim Umschalten ist festzustellen, welcher Stand von Phase 7 übernommen wird.
 8. **Jev / Text-Labels:** Das Jev-Post-Screening läuft im Schattenmodus. Der Operator labelt monatlich etwa 50 zufällige Meldungen über eine kleine Oberfläche.
 
+## Präzisierungen nach der Recherche (Operator, 2026-10-20)
+
+Grundlage: `.planning/research/m3-vorhersage-engine/SUMMARY.md`, Konflikte K1–K7, Fragen O1–O8. Diese Antworten präzisieren bzw. ersetzen die Entscheidungen oben, wo sie sich widersprechen.
+
+| # | Thema | Entscheidung |
+|---|---|---|
+| O1 | Gate-Struktur (präzisiert E6) | **Zweistufig.** Hauptbeleg für das Statistikmodell ist ein vorab festgelegter historischer Walk-forward mit unberührtem Holdout, der nur einmal ausgewertet wird. 6 Monate Paper bestätigen: kein signifikanter Bruch, Kalibrierung stabil, Ausführung sauber. Der LLM-Beitrag wird gepaart prospektiv getestet; nicht entscheidbar heißt „unentschieden“. „Unabhängiger Fall“ = Titel × nicht überlappendes Fenster über alle Prognosen des Universums, effektiv nach Designeffekt. Berichtet wird roh, nicht überlappend und effektiv. |
+| O2 | Kosten (präzisiert E6) | **Kostenmodell je Titel, Seite und Land:** Steuer (UK, IE, FR, IT, ES …), Mindestgebühr, halber Spread, FX. 20 bp gelten als Untergrenze, der Bericht weist zusätzlich doppelte Kosten aus. Volles Universum. |
+| O3 | Universum | **Eigenes Regeluniversum je Stichtag:** Top 200–300 nach Größe und 60-Tage-Euro-Umsatz, quartalsweise, inklusive delisteter Titel, aus EODHD. STOXX Europe 600 nur als Benchmark-Serie. **Zusätzlich** eine einmalige Preisanfrage bei STOXX/Qontigo für die historische Zusammensetzung; Kauf nur unter etwa 200 € (aus dem Backtest-Topf). |
+| O4 | Betriebsort | **Privates Begleit-Repo** mit GitHub Actions für Datenabruf, Archiv, Prognose und Shortlist-LLM, abends. Orders werden lokal am Morgen ausgeführt. In der öffentlichen Fork liegen nur Code, gekürzte Test-Fixtures und nicht lizenzpflichtige Ergebnisse. |
+| O5 | Währung | **Alpha und Labels in EUR**, Universum EUR/GBP/CHF. Konvertierung über explizite FX-Orders mit Kosten im Modell. `CURRENCY_MISMATCH` wird ersetzt durch „Währung auf Whitelist und Guthaben reicht“. |
+| O6 | LLM-Modell | **Gepinnter Anthropic-Snapshot der Haiku-Klasse**, Cutoff in jedem Datensatz. **Ära-Konzept:** Ein Modell- oder Prompt-Wechsel startet eine neue Ära mit eigener Uhr; Merkmale bleiben eingefroren und werden nie neu extrahiert. LLM-Merkmale zählen nur für Meldungen nach dem Cutoff. |
+| O7 | LLM-Budget (präzisiert E3/E4) | **Extraktor je Meldung** für das ganze Universum (Batch-API, Deduplizierung, Caching). **Vollgraph nur für höchstens 5 Shortlist-Kandidaten am Tag** als Veto, das nur verkleinern darf. Mehrfachläufe zur Kalibrierung nur auf 10 % Stichprobe. Erwartet etwa 80–110 €/Monat inklusive Daten. Budget reserviert vor dem Aufruf (Codex-Befund N-05). |
+| O8 | Drawdown (präzisiert E6) | **Gegatet wird der Drawdown relativ zum Benchmark, höchstens 15 %.** Der absolute Drawdown wird berichtet. Betriebs-Stopp bei 10 % absolut oder 2 % Tagesverlust. |
+
+**Sofort zeitkritisch (unabhängig vom Umschalten):** Das News- und Meldungsarchiv soll jetzt starten (Vorlauf), weil jeder Tag ohne Archiv als prospektive LLM-Evidenz fehlt und GDELT nur 3 Monate zurückreicht.
+
+**Phasenfolge (aus der Recherche):** Vorlauf (Archiv) → P0 Präregistrierung → P1 Datenbasis → P2 Validierung, Kosten und Baselines (Freeze) → P3 Statistikmodell mit historischem Bericht (früher No-Go-Punkt) → P4 LLM-Merkmale, Veto und Labeling → P5 Entscheidung und Sizing im Schattenbetrieb → P6 EU-Ausführer (parallel ab dem `targets.json`-Schema) → P7 Betrieb und Paper-Bewährung → P8 Go/No-Go-Gate.
+
 ## Was kein Plan garantieren kann
 
 Profitabilität ist nicht planbar und wird weder zugesagt noch als Ziel gesetzt. Planbar sind die Nachweisführung (was wird gemessen, gegen was, mit welcher Schwelle) und der Abbruch bei Nichterfüllung.
