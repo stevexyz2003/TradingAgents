@@ -383,7 +383,7 @@ def test_budget_and_currency():
 
 # --- freshness / calendar_conflict (plan 04-06) -----------------------------------------
 
-from datetime import UTC, date, datetime  # noqa: E402
+from datetime import UTC, date, datetime, timedelta  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calendar_stub import WeekdayCalendar  # noqa: E402
@@ -477,3 +477,49 @@ def test_a_non_finite_budget_is_over_budget(funds):
     # every preview passed the budget. An unknown budget is no budget: fail closed.
     verdict = _judge(_Preview(init_margin_change=500.0), funds=funds)
     assert verdict.state == "over-budget"
+
+
+# --- second_last_close_utc (plan 07-03, D-06) --------------------------------------------
+
+
+def _stub(**kw):
+    return WeekdayCalendar(range_error=dec.CalendarRangeError, **kw)
+
+
+def test_second_last_close_tuesday_morning_is_friday():
+    assert dec.second_last_close_utc(_utc(2026, 10, 20, 6, 30), _stub()) == _utc(2026, 10, 16, 20)
+
+
+def test_second_last_close_monday_morning_is_thursday():
+    assert dec.second_last_close_utc(_utc(2026, 10, 19, 6, 30), _stub()) == _utc(2026, 10, 15, 20)
+
+
+def test_second_last_close_after_todays_close():
+    assert dec.second_last_close_utc(_utc(2026, 10, 20, 21), _stub()) == _utc(2026, 10, 19, 20)
+
+
+def test_second_last_close_skips_a_holiday():
+    cal = _stub(holidays={date(2026, 10, 19)})
+    assert dec.second_last_close_utc(_utc(2026, 10, 20, 6, 30), cal) == _utc(2026, 10, 15, 20)
+
+
+def test_second_last_close_too_few_sessions_raises():
+    days = {date(2026, 10, 1) + timedelta(days=i) for i in range(30)}
+    with pytest.raises(dec.CalendarRangeError):
+        dec.second_last_close_utc(_utc(2026, 10, 20, 6, 30), _stub(holidays=days))
+
+
+def test_second_last_close_calendar_range_error_propagates():
+    with pytest.raises(dec.CalendarRangeError):
+        dec.second_last_close_utc(_utc(1990, 1, 10, 12), _stub())
+
+
+def test_second_last_close_naive_clock_raises():
+    with pytest.raises(ValueError):
+        dec.second_last_close_utc(datetime(2026, 10, 20, 6, 30), _stub())
+
+
+def test_second_last_close_real_xnys():
+    pytest.importorskip("exchange_calendars")
+    got = dec.second_last_close_utc(_utc(2026, 11, 30, 6, 30), dec.load_xnys_calendar())
+    assert got == _utc(2026, 11, 25, 21)

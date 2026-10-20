@@ -272,3 +272,53 @@ def test_fixture_write_paper_log_roundtrip(tmp_path):
     assert b"schema_version" in src.read("runs/2026-10-09/summary.json")
     log = TradingMemoryLog({"memory_log_path": str(root / "decision-log.md")})
     assert log.load_entries()[0]["rating"] == "Buy"
+
+
+# --- fetch_depth (plan 07-03) ------------------------------------------------------
+
+
+def test_fetch_depth_default_keeps_argv():
+    r = FakeRunner(_ok_fetch())
+    _log(r).fetch()
+    assert not any(a.startswith("--depth") for a in r.calls[0][0])
+
+
+def test_fetch_depth_adds_depth_flag():
+    r = FakeRunner(_ok_fetch())
+    pl.GitPaperLog(Path("."), "fork", "paper-log", run=r, fetch_depth=1).fetch()
+    argv = r.calls[0][0]
+    assert argv[:6] == ["git", "fetch", "--no-tags", "--quiet", "--depth=1", "fork"]
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "1", 1.5])
+def test_fetch_depth_rejects_bad_values(bad):
+    with pytest.raises(ValueError):
+        pl.GitPaperLog(Path("."), "fork", "paper-log", fetch_depth=bad)
+
+
+def test_real_git_shallow_fetch_reads_blob(tmp_path):
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+
+    def g(cwd, *a):
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.autocrlf=false", *a],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+        )
+
+    remote, work = tmp_path / "remote", tmp_path / "work"
+    remote.mkdir()
+    work.mkdir()
+    g(remote, "init", "-q", "-b", "paper-log")
+    for i in range(3):
+        (remote / "f.txt").write_bytes(f"v{i}\n".encode())
+        g(remote, "add", "f.txt")
+        g(remote, "commit", "-q", "-m", f"c{i}")
+    g(work, "init", "-q")
+    g(work, "remote", "add", "fixture", remote.as_uri())
+    log = pl.GitPaperLog(work, "fixture", "paper-log", fetch_depth=1)
+    log.fetch()
+    assert log.read("f.txt") == b"v2\n"
+    assert g(work, "rev-list", "--count", log.sha).stdout.decode().strip() == "1"
