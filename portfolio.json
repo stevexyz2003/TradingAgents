@@ -1,0 +1,12 @@
+{
+  "cash": 1005152.72,
+  "currency": "EUR",
+  "positions": [
+    {
+      "ticker": "AAPL",
+      "quantity": 1.0,
+      "average_price": null
+    }
+  ],
+  "as_of": "2026-10-20T10:53:14.858280+00:00"
+}

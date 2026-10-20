@@ -1,0 +1,26 @@
+{
+  "contracts": {
+    "AAPL": {
+      "conId": 265598,
+      "currency": "USD",
+      "learned_at": "2026-10-12T18:09:45.941985+00:00",
+      "localSymbol": "AAPL",
+      "primaryExchange": "NASDAQ"
+    },
+    "MSFT": {
+      "conId": 272093,
+      "currency": "USD",
+      "learned_at": "2026-10-12T18:09:45.941985+00:00",
+      "localSymbol": "MSFT",
+      "primaryExchange": "NASDAQ"
+    },
+    "NVDA": {
+      "conId": 4815747,
+      "currency": "USD",
+      "learned_at": "2026-10-12T18:09:45.941985+00:00",
+      "localSymbol": "NVDA",
+      "primaryExchange": "NASDAQ"
+    }
+  },
+  "schema_version": 1
+}
