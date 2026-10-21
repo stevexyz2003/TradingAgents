@@ -231,6 +231,12 @@ HTTP läuft über `requests` mit dem CA-Bundle aus `.env` (`REQUESTS_CA_BUNDLE`)
 gesetzter, aber fehlender Bundle-Pfad bricht mit Exit 4 ab (kein stiller Fallback). Bundle
 bauen: siehe `scripts/PAPER_RUN.md` (AVG-HTTPS-Interception).
 
+Mit der AVG-HTTPS-Prüfung dauert allein der TLS-Handshake etwa 10 s. Gemessen wurde das am
+2026-10-21 gegen `api.gdeltproject.org`. Das Connect-Limit liegt deshalb bei 30 s
+(`http.get_with_retry`, `timeout=(30, 60)`). Die Session hält die Verbindung offen, der
+Handshake fällt also nur einmal je Lauf an. Erscheint `read timeout=30` bei jedem Aufruf, ist
+der Handshake noch langsamer geworden; dann AVG prüfen und das Limit nicht blind erhöhen.
+
 ## Scheduler
 
 `scripts\news_archive_task.ps1` legt die Aufgabe `\TradingEngineX\NewsArchive` an: täglich
