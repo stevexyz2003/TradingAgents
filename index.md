@@ -81,3 +81,6 @@ One row per ticker run. Written by `scripts/daily_paper_run.py`.
 | 2026-10-19 | MSFT | Hold | ok | 0.2524 | 168260/49249 | runs/2026-10-19/summary.json |
 | 2026-10-19 | NVDA | Hold | ok | 0.2274 | 162468/40321 | runs/2026-10-19/summary.json |
 | 2026-10-19 | AAPL | Hold | ok | 0.2322 | 150665/44664 | runs/2026-10-19/summary.json |
+| 2026-10-20 | AAPL | Hold | ok | 0.2301 | 152275/43207 | runs/2026-10-20/summary.json |
+| 2026-10-20 | MSFT | Hold | ok | 0.2450 | 165764/44713 | runs/2026-10-20/summary.json |
+| 2026-10-20 | NVDA | Hold | ok | 0.2360 | 153587/45329 | runs/2026-10-20/summary.json |

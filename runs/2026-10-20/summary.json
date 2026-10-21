@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-10-21T06:56:36.123384+00:00",
+  "finished_at": "2026-10-21T07:05:25.929114+00:00",
+  "trade_date": "2026-10-20",
+  "provider": "anthropic",
+  "deep_think_llm": "claude-sonnet-5-5",
+  "quick_think_llm": "claude-haiku-5-5",
+  "max_cost_per_run_usd": 1.5,
+  "max_total_cost_usd": 4.5,
+  "commit": "d4489ce6f1ab246e0870184bc2c6bbf06f06a3cf",
+  "status": "ok",
+  "totals": {
+    "tickers": 3,
+    "cost_usd": 0.711148,
+    "tokens_in": 471626,
+    "tokens_out": 133249,
+    "ok": 3,
+    "failed": 0,
+    "budget_aborted": 0,
+    "skipped": 0
+  },
+  "runs": [
+    {
+      "ticker": "AAPL",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.23014650000000003,
+      "tokens_in": 152275,
+      "tokens_out": 43207,
+      "duration_s": 165.80905728800002,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/AAPL/complete_report.md",
+      "error": null
+    },
+    {
+      "ticker": "MSFT",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.245027,
+      "tokens_in": 165764,
+      "tokens_out": 44713,
+      "duration_s": 184.97216877000002,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/MSFT/complete_report.md",
+      "error": null
+    },
+    {
+      "ticker": "NVDA",
+      "status": "ok",
+      "signal": "Hold",
+      "cost_usd": 0.235974,
+      "tokens_in": 153587,
+      "tokens_out": 45329,
+      "duration_s": 177.43511309500002,
+      "report": "/home/runner/work/TradingAgents/TradingAgents/paper-run-out/reports/NVDA/complete_report.md",
+      "error": null
+    }
+  ],
+  "portfolio_feed": {
+    "status": "used",
+    "as_of": "2026-10-20T10:53:14.858280+00:00",
+    "cutoff": "2026-10-19T20:00:00+00:00",
+    "sha": "c141694523a40fff1ed94d93cd43ffe286fae832",
+    "positions": 1
+  }
+}
