@@ -138,6 +138,7 @@ button:hover { background: var(--surface-2); }
 .kpi .lbl { font-weight: 600; }
 .kpi .sub { color: var(--muted); font-size: 0.82rem; }
 .kpi .pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.kpi .kpi-note { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border); }
 .legend-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 16px; margin: 8px 0; padding: 0; list-style: none; }
 .legend-list li { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-size: 0.86rem; }
 
@@ -311,7 +312,7 @@ footer { margin-top: 36px; padding-top: 10px; border-top: 1px solid var(--border
   <h2 id="auffaelligkeiten">Auffälligkeiten</h2>
   <ol id="findings" class="findings"></ol>
 
-  <footer>Quelle: 261019-o31 RESEARCH Teil A und B · Momentaufnahme, Phase 6 läuft parallel</footer>
+  <footer>Quelle: 261019-o31 RESEARCH Teil A und B, korrigiert nach der Codex-Gegenprüfung 261019-oxc · Momentaufnahme</footer>
 </main>
 <script>/*@@TEX_DATA@@*/</script>
 <script>
@@ -354,8 +355,8 @@ footer { margin-top: 36px; padding-top: 10px; border-top: 1px solid var(--border
     function compLabel(id) { return id + " " + compById[id].name; }
 
     /* ---------- Kopf ---------- */
-    $("stand").textContent = "Stand " + D.meta.date + " · " + D.meta.branch + " @ " + D.meta.head + " (" + D.meta.headTime + ") · Upstream-Basis " + D.meta.upstream.replace(" ", " (") + ") · Phase 6 läuft (8/10 Pläne)";
-    $("phase6").textContent = "Phase 6: " + D.meta.phase6 + ".";
+    $("stand").textContent = "Stand " + D.meta.date + " · " + D.meta.branch + " @ " + D.meta.head + " (" + D.meta.headTime + ") · Upstream-Basis " + D.meta.upstream.replace(" ", " (") + ")" + (D.meta.standNote ? " · " + D.meta.standNote : "");
+    $("phase6").textContent = D.meta.phase6 + ".";
 
     var SOURCES = [["M1", "M1 Produktionsreife"], ["M2", "M2 IBKR Paper Execution"], ["Upstream", "Upstream TradingAgents"], ["Strang", "Strang-Zusätze"]];
     var kpis = $("kpis");
@@ -374,7 +375,10 @@ footer { margin-top: 36px; padding-top: 10px; border-top: 1px solid var(--border
       if (c.o) pills.appendChild(h("span", { cls: "pill st-offen", text: "offen " + c.o }));
       if (c.v) pills.appendChild(h("span", { cls: "pill st-verworfen-override", text: "verworfen " + c.v }));
       var sub = s[0] === "M1" ? "davon 2 Zusatzpunkte (P3 #12, Betriebszweck)" : s[0] === "M2" ? "davon " + rs.filter(function (r) { return r.status === "umgesetzt-override"; }).length + " mit Override" : s[0] === "Upstream" ? "Stand v0.7.0" : "außerhalb M1/M2";
-      kpis.appendChild(h("div", { cls: "kpi" }, [h("div", { cls: "lbl", text: s[1] }), h("div", { cls: "big", text: String(rs.length) }), h("div", { cls: "sub", text: sub }), pills]));
+      var kids = [h("div", { cls: "lbl", text: s[1] }), h("div", { cls: "big", text: String(rs.length) }), h("div", { cls: "sub", text: sub }), pills];
+      var kn = D.meta.kpiNotes && D.meta.kpiNotes[s[0]];
+      if (kn) kids.push(h("div", { cls: "sub kpi-note", text: kn }));
+      kpis.appendChild(h("div", { cls: "kpi" }, kids));
     });
     var leg = $("status-legend");
     D.meta.statusLegend.forEach(function (l) {

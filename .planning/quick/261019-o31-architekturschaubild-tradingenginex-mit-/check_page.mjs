@@ -60,7 +60,7 @@ if (/#[0-9a-fA-F]{3,8}\b/.test(cssRest) || /\b(rgb|rgba|hsl|hsla|oklch)\(/.test(
 if (/["']#[0-9a-fA-F]{3,8}["']/.test(renderJs)) bad('Hex-Farbliteral im Render-Skript');
 
 // (7) Pflichtinhalte
-['2026-10-19', 'b0989aa', 'e8f5503'].forEach(s => { if (!html.includes(s)) bad('Stand-Wert fehlt: ' + s); });
+['2026-10-21', '5f1998a', 'e8f5503', 'Codex-geprüft (261019-oxc)', 'kein widerspruchsfreier Abnahmestand'].forEach(s => { if (!html.includes(s)) bad('Stand-Wert fehlt: ' + s); });
 ['f-source', 'f-status', 'f-comp', 'f-origin', 'f-search', 'f-reset', 'theme-toggle'].forEach(id => { if (!markup.includes('id="' + id + '"')) bad('ID fehlt im Markup: ' + id); });
 if (!renderJs.includes('data-node')) bad('data-node fehlt im Render-Skript');
 if (!/TEX_DATA/.test(renderJs)) bad('Render-Skript liest TEX_DATA nicht');
