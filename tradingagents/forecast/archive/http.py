@@ -79,7 +79,9 @@ def get_with_retry(
     attempts: int = 3,
     backoff: float = 5.0,
     sleep=time.sleep,
-    timeout=(10, 60),
+    # Connect 30 s: with AVG HTTPS scanning the TLS handshake alone takes ~10 s
+    # (measured 2026-10-21 against api.gdeltproject.org), so 10 s timed out every call.
+    timeout=(30, 60),
 ):
     """GET with retries on 429/5xx/timeout/connection errors and exponential backoff.
 
