@@ -28,7 +28,11 @@ log = logging.getLogger(__name__)
 
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 CANARY_QUERY = '"European Central Bank"'
-MIN_INTERVAL = 6.0
+# GDELT asks for one call every 5 s, but at 6 s it answered 429 to almost every call
+# on 2026-10-21; 15 s keeps a 62-issuer day near 16 minutes.
+MIN_INTERVAL = 15.0
+# GDELT rejects quoted phrases this short ("The specified phrase is too short"), e.g. "BASF".
+MIN_PHRASE_LEN = 5
 MAX_RECORDS = 250
 CANARY_RECORDS = 10
 MAX_ERRORS = 20
@@ -45,7 +49,8 @@ def _iso_z(ts: datetime) -> str:
 
 
 def build_query(issuer) -> str:
-    aliases = tuple(issuer.aliases) or (issuer.name,)
+    # Short aliases still serve title matching (articles_to_records), just not the query.
+    aliases = tuple(a for a in issuer.aliases if len(a) >= MIN_PHRASE_LEN) or (issuer.name,)
     quoted = [f'"{alias}"' for alias in aliases]
     query = quoted[0] if len(quoted) == 1 else "(" + " OR ".join(quoted) + ")"
     for term in issuer.negative_terms:

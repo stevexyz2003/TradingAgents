@@ -362,8 +362,37 @@ def _seq_get(responses):
 def test_get_with_retry_recovers_from_429():
     get, calls = _seq_get([FakeResponse(429), FakeResponse(429), FakeResponse(200)])
     sleeps = []
-    resp = ahttp.get_with_retry(get, "u", sleep=sleeps.append, backoff=1.0)
+    resp = ahttp.get_with_retry(get, "u", sleep=sleeps.append, rate_limit_backoff=1.0)
     assert resp.status_code == 200 and len(calls) == 3 and sleeps == [1.0, 2.0]
+
+
+def test_get_with_retry_pauses_long_after_429_by_default():
+    get, _calls = _seq_get([FakeResponse(429), FakeResponse(200)])
+    sleeps = []
+    ahttp.get_with_retry(get, "u", sleep=sleeps.append)
+    assert sleeps == [60.0]
+
+
+def test_get_with_retry_honours_numeric_retry_after():
+    get, _calls = _seq_get([FakeResponse(429, headers={"Retry-After": "120"}), FakeResponse(200)])
+    sleeps = []
+    ahttp.get_with_retry(get, "u", sleep=sleeps.append, rate_limit_backoff=1.0)
+    assert sleeps == [120.0]
+
+
+def test_get_with_retry_ignores_an_http_date_retry_after():
+    stamp = "Wed, 21 Oct 2026 07:28:00 GMT"
+    get, _calls = _seq_get([FakeResponse(429, headers={"Retry-After": stamp}), FakeResponse(200)])
+    sleeps = []
+    ahttp.get_with_retry(get, "u", sleep=sleeps.append, rate_limit_backoff=1.0)
+    assert sleeps == [1.0]
+
+
+def test_get_with_retry_keeps_the_short_backoff_for_server_errors():
+    get, _calls = _seq_get([FakeResponse(503), FakeResponse(200)])
+    sleeps = []
+    ahttp.get_with_retry(get, "u", sleep=sleeps.append, backoff=1.0)
+    assert sleeps == [1.0]
 
 
 def test_get_with_retry_server_error_after_three():

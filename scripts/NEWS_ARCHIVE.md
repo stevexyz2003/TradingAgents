@@ -173,11 +173,20 @@ Produktions-JSONL, Status, meta.json oder heartbeat.json. Exit 0 nur, wenn beide
 
 ## Laufzeitrechnung
 
-GDELT verlangt etwa 1 Request je 5 s (Annahme A1); der Collector hält 6 s Abstand.
+GDELT nennt 1 Request je 5 s. In der Praxis (2026-10-21) kam bei 6 s Abstand auf fast jeden
+Aufruf HTTP 429, auch auf die Wiederholungen nach 5 bzw. 10 s. Der Collector hält deshalb
+**15 s Abstand** (`gdelt.MIN_INTERVAL`). Nach einem 429 wartet er 60 s, beim zweiten 120 s,
+oder länger, wenn GDELT ein numerisches `Retry-After` schickt (`http.get_with_retry`,
+`rate_limit_backoff`).
 
-- Je GDELT-Tag: (Emittenten + 1 Canary) × 6 s. Bei 60 Emittenten ≈ 6,1 min/Tag; mit
-  `--max-days 3` ≈ 18 min, plus Retries und Splits.
-- Bei 400 Emittenten ≈ 40 min/Tag, also 3 Tage ≈ 2 h.
+- Je GDELT-Tag: (Emittenten + 1 Canary) × 15 s. Bei 62 Emittenten ≈ 16 min/Tag; mit
+  `--max-days 3` ≈ 48 min, plus Retries und Splits.
+- Bei 400 Emittenten ≈ 100 min/Tag, dann `--max-days 1` setzen.
+
+Zu kurze Aliasnamen: GDELT lehnt Phrasen unter 5 Zeichen ab („The specified phrase is too
+short“, z. B. „BASF“). `gdelt.build_query` lässt solche Aliasnamen in der Abfrage weg, nutzt
+sie aber weiter zur Titelzuordnung. Ein Seed-Test verlangt, dass jeder Emittent mindestens
+einen Alias mit 5 Zeichen oder mehr hat.
 - Deshalb `--max-runtime 150` (Minuten) unter dem ExecutionTimeLimit des Tasks von 3 h. Bei
   Ablauf endet der Lauf sauber: laufender Tag `partial` mit `max_runtime` (ohne
   Versuchszählung), Heartbeat geschrieben, Lock freigegeben.
@@ -191,8 +200,12 @@ durch den nächsten täglichen Lauf aufgeholt; der Task hat deshalb keinen Neust
 
 ## GDELT-Backfill
 
-- Manuell starten. Laufzeit bei 60 Emittenten ≈ 13 Wochen × 60 × 6 s ≈ 78 min, bei 400
-  Emittenten ≈ 9 h. Mit `--max-runtime`/`--max-calls` in Etappen möglich.
+- Manuell starten. Laufzeit bei 62 Emittenten ≈ 13 Wochen × 62 × 15 s ≈ 3,4 h ohne
+  429-Pausen, bei 400 Emittenten ≈ 22 h. Mit `--max-runtime`/`--max-calls` in Etappen
+  möglich. Erster Versuch 2026-10-21 mit 6 s Abstand: 70 von 806 Fenstern in 150 min,
+  fast alles 429.
+- Wichtig: Die ältesten Wochenfenster laufen aus, sobald sie älter als 3 Monate sind
+  (`expired`). Ein Backfill, der mehrere Tage liegen bleibt, verliert also vorne Daten.
 - Fortsetzbar: Der Anker (`heute − 89 Tage` beim ersten Aufruf) steht fest im Checkpoint; die
   Wochenfenster laufen von alt nach neu und enden exklusiv bei archive_start.
 - Fenster, die bis zum Weiterlauf aus dem 89-Tage-Horizont gefallen sind, werden als
@@ -257,7 +270,7 @@ schtasks /query /tn "\TradingEngineX\NewsArchive" /xml                          
 
 | # | Annahme | Folge, wenn falsch |
 |---|---|---|
-| A1 | GDELT-Limit ~1 Request/5 s | 429-Stürme; Backoff fängt ab |
+| A1 | GDELT-Limit ~1 Request/5 s | **widerlegt 2026-10-21:** bei 6 s fast nur 429; jetzt 15 s Abstand und 60/120 s Pause nach 429 |
 | A2 | `seendate` = Crawl-Zeit UTC | Fehldeutung als Publikationszeit |
 | A3 | Datei-/Feldnamen FITRS `FULECR`/FIRDS `FULINS_E` | Seed-Builder anpassen |
 | A4 | GLEIF ist CC0 | nur Sekundärquellen |

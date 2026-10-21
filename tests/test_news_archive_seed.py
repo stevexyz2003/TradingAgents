@@ -81,6 +81,14 @@ def test_provisional_seed_is_consistent():
             assert issuer.isin[:2] == aseed.isin_country(issuer.country), issuer.name
 
 
+def test_provisional_seed_gives_every_issuer_a_query_gdelt_accepts():
+    from tradingagents.forecast.archive import gdelt
+
+    for issuer in aseed.load_seed(aseed.PROVISIONAL_SEED):
+        queried = [a for a in issuer.aliases if len(a) >= gdelt.MIN_PHRASE_LEN]
+        assert queried, f"{issuer.name}: no alias of at least {gdelt.MIN_PHRASE_LEN} characters"
+
+
 def test_default_seed_path_prefers_built_seed():
     assert aseed.default_seed_path() == aseed.PROVISIONAL_SEED
     built = archive_base() / "seed_universe.csv"

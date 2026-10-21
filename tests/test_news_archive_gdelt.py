@@ -77,12 +77,20 @@ def _no_sleep(_seconds):
 
 def test_build_query_variants():
     assert gdelt.build_query(SeedIssuer("", "SAP SE", "DE", aliases=("SAP SE",))) == '"SAP SE"'
-    multi = SeedIssuer("", "A", "DE", aliases=("A", "B"))
-    assert gdelt.build_query(multi) == '("A" OR "B")'
+    multi = SeedIssuer("", "Alpha", "DE", aliases=("Alpha", "Bravo"))
+    assert gdelt.build_query(multi) == '("Alpha" OR "Bravo")'
     neg = SeedIssuer("", "Shell plc", "UK", aliases=("Shell plc",), negative_terms=("x",))
     assert gdelt.build_query(neg) == '"Shell plc" -"x"'
-    langs = SeedIssuer("", "A", "DE", aliases=("A",), gdelt_langs=("german", "english"))
-    assert gdelt.build_query(langs) == '"A" (sourcelang:german OR sourcelang:english)'
+    langs = SeedIssuer("", "Alpha", "DE", aliases=("Alpha",), gdelt_langs=("german", "english"))
+    assert gdelt.build_query(langs) == '"Alpha" (sourcelang:german OR sourcelang:english)'
+
+
+def test_build_query_skips_phrases_gdelt_rejects_as_too_short():
+    # GDELT answered "The specified phrase is too short" for "BASF", "ASML", "Enel" ...
+    basf = SeedIssuer("", "BASF SE", "DE", aliases=("BASF SE", "BASF"))
+    assert gdelt.build_query(basf) == '"BASF SE"'
+    only_short = SeedIssuer("", "ASML Holding NV", "NL", aliases=("ASML",))
+    assert gdelt.build_query(only_short) == '"ASML Holding NV"'
 
 
 # --- fetch_window ---------------------------------------------------------------------

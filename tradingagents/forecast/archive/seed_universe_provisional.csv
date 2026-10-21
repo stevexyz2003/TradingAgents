@@ -7,13 +7,13 @@ DE0007164600,SAP SE,DE,XETR,,,SAP SE,,german|english,hand-curated-provisional,20
 DE0007236101,Siemens AG,DE,XETR,,,Siemens AG|Siemens,Siemens Energy|Siemens Healthineers,german|english,hand-curated-provisional,2026-10-20
 DE0008404005,Allianz SE,DE,XETR,,,Allianz SE|Allianz,Allianz Arena,german|english,hand-curated-provisional,2026-10-20
 DE0005557508,Deutsche Telekom AG,DE,XETR,,,Deutsche Telekom,,german|english,hand-curated-provisional,2026-10-20
-DE000BASF111,BASF SE,DE,XETR,,,BASF,,german|english,hand-curated-provisional,2026-10-20
+DE000BASF111,BASF SE,DE,XETR,,,BASF SE|BASF,,german|english,hand-curated-provisional,2026-10-20
 DE000BAY0017,Bayer AG,DE,XETR,,,Bayer AG,Bayer Leverkusen|Bayern,german|english,hand-curated-provisional,2026-10-20
 DE0007100000,Mercedes-Benz Group AG,DE,XETR,,,Mercedes-Benz Group|Mercedes-Benz,,german|english,hand-curated-provisional,2026-10-20
 DE0005190003,Bayerische Motoren Werke AG,DE,XETR,,,BMW AG|BMW Group,,german|english,hand-curated-provisional,2026-10-20
 DE0005140008,Deutsche Bank AG,DE,XETR,,,Deutsche Bank,Deutsche Bank Park,german|english,hand-curated-provisional,2026-10-20
 FR0000120271,TotalEnergies SE,FR,XPAR,,,TotalEnergies,,french|english,hand-curated-provisional,2026-10-20
-FR0000121014,LVMH Moet Hennessy Louis Vuitton SE,FR,XPAR,,,LVMH,,french|english,hand-curated-provisional,2026-10-20
+FR0000121014,LVMH Moet Hennessy Louis Vuitton SE,FR,XPAR,,,LVMH Moet Hennessy|LVMH Moët Hennessy|LVMH,,french|english,hand-curated-provisional,2026-10-20
 FR0000120578,Sanofi SA,FR,XPAR,,,Sanofi,,french|english,hand-curated-provisional,2026-10-20
 FR0000120321,L'Oreal SA,FR,XPAR,,,L'Oreal|L'Oréal,,french|english,hand-curated-provisional,2026-10-20
 FR0000131104,BNP Paribas SA,FR,XPAR,,,BNP Paribas,BNP Paribas Open,french|english,hand-curated-provisional,2026-10-20
@@ -21,7 +21,7 @@ FR0000120628,AXA SA,FR,XPAR,,,AXA SA|AXA Group,,french|english,hand-curated-prov
 FR0000121972,Schneider Electric SE,FR,XPAR,,,Schneider Electric,,french|english,hand-curated-provisional,2026-10-20
 FR0000120073,Air Liquide SA,FR,XPAR,,,Air Liquide,,french|english,hand-curated-provisional,2026-10-20
 FR0000133308,Orange SA,FR,XPAR,,,Orange SA|Orange Group,Orange County|orange juice,french|english,hand-curated-provisional,2026-10-20
-NL0010273215,ASML Holding NV,NL,XAMS,,,ASML,,dutch|english,hand-curated-provisional,2026-10-20
+NL0010273215,ASML Holding NV,NL,XAMS,,,ASML Holding|ASML,,dutch|english,hand-curated-provisional,2026-10-20
 NL0000235190,Airbus SE,NL,XPAR,,,Airbus,,french|german|english,hand-curated-provisional,2026-10-20
 NL0011585146,Ferrari NV,NL,XMIL,,,Ferrari NV|Ferrari N.V.,Scuderia Ferrari|Formula 1,italian|english,hand-curated-provisional,2026-10-20
 NL00150001Q9,Stellantis NV,NL,XMIL,,,Stellantis,,italian|french|english,hand-curated-provisional,2026-10-20
@@ -39,7 +39,7 @@ IT0003856405,Leonardo SpA,IT,XMIL,,,Leonardo SpA|Leonardo S.p.A.,Leonardo da Vin
 IT0004965148,Moncler SpA,IT,XMIL,,,Moncler,,italian|english,hand-curated-provisional,2026-10-20
 IT0004176001,Prysmian SpA,IT,XMIL,,,Prysmian,,italian|english,hand-curated-provisional,2026-10-20
 ES0113900J37,Banco Santander SA,ES,XMAD,,,Banco Santander|Santander Group,,spanish|english,hand-curated-provisional,2026-10-20
-ES0113211835,Banco Bilbao Vizcaya Argentaria SA,ES,XMAD,,,BBVA,,spanish|english,hand-curated-provisional,2026-10-20
+ES0113211835,Banco Bilbao Vizcaya Argentaria SA,ES,XMAD,,,Banco Bilbao Vizcaya|BBVA,,spanish|english,hand-curated-provisional,2026-10-20
 ES0144580Y14,Iberdrola SA,ES,XMAD,,,Iberdrola,,spanish|english,hand-curated-provisional,2026-10-20
 ES0148396007,Industria de Diseno Textil SA,ES,XMAD,,,Inditex,,spanish|english,hand-curated-provisional,2026-10-20
 ES0178430E18,Telefonica SA,ES,XMAD,,,Telefonica|Telefónica,,spanish|english,hand-curated-provisional,2026-10-20
@@ -57,7 +57,7 @@ CH0012214059,Holcim AG,CH,XSWX,,,Holcim,,german|english,hand-curated-provisional
 CH0126881561,Swiss Re AG,CH,XSWX,,,Swiss Re,,german|english,hand-curated-provisional,2026-10-20
 GB00BP6MXD84,Shell plc,UK,XLON,,,Shell plc|Royal Dutch Shell,seashell|shell company|shell companies,english,hand-curated-provisional,2026-10-20
 GB0009895292,AstraZeneca plc,UK,XLON,,,AstraZeneca,,english,hand-curated-provisional,2026-10-20
-GB0005405286,HSBC Holdings plc,UK,XLON,,,HSBC,,english,hand-curated-provisional,2026-10-20
+GB0005405286,HSBC Holdings plc,UK,XLON,,,HSBC Holdings|HSBC Bank|HSBC,,english,hand-curated-provisional,2026-10-20
 GB00B10RZP78,Unilever plc,UK,XLON,,,Unilever,,english,hand-curated-provisional,2026-10-20
 GB0007980591,BP plc,UK,XLON,,,BP plc,,english,hand-curated-provisional,2026-10-20
 GB00BN7SWP63,GSK plc,UK,XLON,,,GSK plc|GlaxoSmithKline,,english,hand-curated-provisional,2026-10-20
