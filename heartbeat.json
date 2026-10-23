@@ -1,0 +1,23 @@
+{
+  "action": "error",
+  "attempt": 1,
+  "commit": "bb896ea52069e44eac5b10357b73855b2aac6fa0",
+  "decision_keys": [],
+  "duration_s": 0.75916,
+  "exit_code": 4,
+  "first_run": true,
+  "gap_dates": [],
+  "gateway": "ok",
+  "gateway_code": null,
+  "gateway_detail": null,
+  "kill": "absent",
+  "open_orders": 0,
+  "release_state": "release-missing",
+  "release_valid_until": null,
+  "started_at": "2026-10-23T14:30:02.909030+00:00",
+  "superseded": [],
+  "tag": "ops-2026-10-22",
+  "tickers": [],
+  "ts": "2026-10-23T14:30:03.668190+00:00",
+  "v": 1
+}
