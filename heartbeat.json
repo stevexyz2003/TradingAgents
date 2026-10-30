@@ -3,14 +3,18 @@
   "attempt": 1,
   "commit": "cf6700127181e59aa12c8f871ef5464c985ff659",
   "decision_keys": [
-    "2026-10-23|AAPL",
-    "2026-10-23|MSFT",
-    "2026-10-23|NVDA"
+    "2026-10-28|AAPL",
+    "2026-10-28|MSFT",
+    "2026-10-28|NVDA"
   ],
-  "duration_s": 4.487807,
+  "duration_s": 37.055798,
   "exit_code": 3,
   "first_run": false,
-  "gap_dates": [],
+  "gap_dates": [
+    "2026-10-27",
+    "2026-10-28",
+    "2026-10-29"
+  ],
   "gateway": "unreachable",
   "gateway_code": 502,
   "gateway_detail": "Gateway nicht erreichbar: 127.0.0.1:7497 (ConnectionRefusedError)",
@@ -18,32 +22,53 @@
   "open_orders": null,
   "release_state": "release-ok",
   "release_valid_until": "2027-01-21",
-  "started_at": "2026-10-26T15:30:04.223545+00:00",
-  "superseded": [],
+  "started_at": "2026-10-30T06:48:33.809214+00:00",
+  "superseded": [
+    {
+      "decision_key": "2026-10-26|AAPL",
+      "superseded_by": "2026-10-28|AAPL"
+    },
+    {
+      "decision_key": "2026-10-26|MSFT",
+      "superseded_by": "2026-10-28|MSFT"
+    },
+    {
+      "decision_key": "2026-10-27|MSFT",
+      "superseded_by": "2026-10-28|MSFT"
+    },
+    {
+      "decision_key": "2026-10-26|NVDA",
+      "superseded_by": "2026-10-28|NVDA"
+    },
+    {
+      "decision_key": "2026-10-27|NVDA",
+      "superseded_by": "2026-10-28|NVDA"
+    }
+  ],
   "tag": "ops-2026-10-25",
   "tickers": [
     {
-      "action": "nothing-to-do",
-      "decision_key": "2026-10-23|AAPL",
-      "exit": 0,
-      "state": "skipped-hold",
+      "action": "error",
+      "decision_key": "2026-10-28|AAPL",
+      "exit": 2,
+      "state": "stale-decision",
       "ticker": "AAPL"
     },
     {
-      "action": "nothing-to-do",
-      "decision_key": "2026-10-23|MSFT",
-      "exit": 0,
-      "state": "skipped-hold",
+      "action": "error",
+      "decision_key": "2026-10-28|MSFT",
+      "exit": 2,
+      "state": "stale-decision",
       "ticker": "MSFT"
     },
     {
-      "action": "nothing-to-do",
-      "decision_key": "2026-10-23|NVDA",
-      "exit": 0,
-      "state": "skipped-hold",
+      "action": "error",
+      "decision_key": "2026-10-28|NVDA",
+      "exit": 2,
+      "state": "stale-decision",
       "ticker": "NVDA"
     }
   ],
-  "ts": "2026-10-26T15:30:08.711352+00:00",
+  "ts": "2026-10-30T06:49:10.865012+00:00",
   "v": 1
 }
