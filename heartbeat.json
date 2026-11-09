@@ -3,11 +3,11 @@
   "attempt": 1,
   "commit": "202ac308f1207f1a9472511ecb7c3936cb2ab1ec",
   "decision_keys": [
-    "2026-11-05|AAPL",
-    "2026-11-05|MSFT",
-    "2026-11-05|NVDA"
+    "2026-11-06|AAPL",
+    "2026-11-06|MSFT",
+    "2026-11-06|NVDA"
   ],
-  "duration_s": 3.034688,
+  "duration_s": 3.881453,
   "exit_code": 0,
   "first_run": false,
   "gap_dates": [],
@@ -18,32 +18,32 @@
   "open_orders": 0,
   "release_state": "release-ok",
   "release_valid_until": "2027-01-21",
-  "started_at": "2026-11-06T15:30:04.535998+00:00",
+  "started_at": "2026-11-09T15:30:03.975734+00:00",
   "superseded": [],
   "tag": "ops-2026-11-03",
   "tickers": [
     {
       "action": "nothing-to-do",
-      "decision_key": "2026-11-05|AAPL",
+      "decision_key": "2026-11-06|AAPL",
       "exit": 0,
       "state": "skipped-hold",
       "ticker": "AAPL"
     },
     {
       "action": "nothing-to-do",
-      "decision_key": "2026-11-05|MSFT",
+      "decision_key": "2026-11-06|MSFT",
       "exit": 0,
       "state": "skipped-hold",
       "ticker": "MSFT"
     },
     {
       "action": "nothing-to-do",
-      "decision_key": "2026-11-05|NVDA",
+      "decision_key": "2026-11-06|NVDA",
       "exit": 0,
       "state": "skipped-hold",
       "ticker": "NVDA"
     }
   ],
-  "ts": "2026-11-06T15:30:07.570686+00:00",
+  "ts": "2026-11-09T15:30:07.857187+00:00",
   "v": 1
 }
