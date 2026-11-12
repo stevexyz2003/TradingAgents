@@ -7,7 +7,7 @@
     "2026-11-06|MSFT",
     "2026-11-06|NVDA"
   ],
-  "duration_s": 3.040211,
+  "duration_s": 3.335122,
   "exit_code": 2,
   "first_run": false,
   "gap_dates": [],
@@ -18,7 +18,7 @@
   "open_orders": 0,
   "release_state": "release-ok",
   "release_valid_until": "2027-01-21",
-  "started_at": "2026-11-11T15:30:04.242080+00:00",
+  "started_at": "2026-11-12T15:30:04.272983+00:00",
   "superseded": [],
   "tag": "ops-2026-11-03",
   "tickers": [
@@ -44,6 +44,6 @@
       "ticker": "NVDA"
     }
   ],
-  "ts": "2026-11-11T15:30:07.282291+00:00",
+  "ts": "2026-11-12T15:30:07.608105+00:00",
   "v": 1
 }
